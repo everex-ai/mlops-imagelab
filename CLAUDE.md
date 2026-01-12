@@ -10,6 +10,11 @@ CVAT (Computer Vision Annotation Tool) is an interactive video and image annotat
 - **Workers**: Background RQ workers for import, export, annotation, webhooks, quality reports, consensus, chunks, and utils (notifications/cleaning)
 - **Infrastructure**: Docker Compose deployment with Traefik reverse proxy, OPA for authorization
 
+## Git Workflow
+
+- **Main branch**: `develop` (PRs should target this branch)
+- **Upstream**: `https://github.com/cvat-ai/cvat.git` (official CVAT repo)
+
 ## Build and Development Commands
 
 ### Docker-based Development (Recommended)
@@ -205,6 +210,14 @@ Chrome >= 99, Firefox >= 110, >2% market share (no IE11)
 
 Set `CVAT_DEBUG_ENABLED=yes` environment variable to enable debugging.
 
+## Additional Docker Compose Files
+- `docker-compose.https.yml` - HTTPS configuration with Traefik
+- `docker-compose.ci.yml` - CI/CD configuration
+- `docker-compose.external_db.yml` - External database setup
+- `components/serverless/docker-compose.serverless.yml` - Serverless functions (AI models)
+- `tests/docker-compose.minio.yml` - MinIO for S3-compatible storage testing
+- `tests/docker-compose.file_share.yml` - File share testing
+
 ## Local Development without Docker
 
 VS Code launch configurations are provided in `.vscode/launch.json` for running the server and workers locally:
@@ -213,3 +226,13 @@ VS Code launch configurations are provided in `.vscode/launch.json` for running 
 - `server: debug` - Compound configuration to run all services together
 
 Prerequisites for local development: PostgreSQL, Redis instances must be accessible (can use Docker Compose services with exposed ports from `docker-compose.dev.yml`).
+
+## Package-Specific Documentation
+
+Each frontend package and SDK has its own CLAUDE.md with detailed architecture:
+- `cvat-data/CLAUDE.md` - Video/image decoding with H.264 (Broadway.js) and zip archives
+- `cvat-core/CLAUDE.md` - API client library, plugin system, session management
+- `cvat-canvas/CLAUDE.md` - 2D SVG-based annotation canvas (MVC pattern, handler classes)
+- `cvat-canvas3d/CLAUDE.md` - 3D point cloud annotation (Three.js, four-viewport system)
+- `cvat-sdk/CLAUDE.md` - Python SDK with auto-generated OpenAPI client
+- `cvat-cli/CLAUDE.md` - CLI tool command structure and authentication
