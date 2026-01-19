@@ -21,8 +21,14 @@ RUN apt-get update && \
         libxmlsec1-dev \
         libxmlsec1-openssl \
         libhdf5-dev \
-        cargo \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Rust/Cargo via rustup (latest stable version)
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable \
+    && chmod -R a+w $RUSTUP_HOME $CARGO_HOME
 
 ARG PIP_VERSION
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
