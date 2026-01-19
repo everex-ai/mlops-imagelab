@@ -113,6 +113,45 @@ def clear_rq_jobs():
             scheduler.remove_lock()
 
 
+def wait_for_rq_request(client, rq_id: str, *, timeout: int = 60, poll_interval: float = 0.5) -> dict:
+    """
+    Poll the request status until it's finished or failed, or timeout is reached.
+    Standalone function for use in class methods and other contexts.
+
+    Args:
+        client: Django test client
+        rq_id: The request ID to check
+        timeout: Maximum time to wait in seconds (default: 60)
+        poll_interval: Time between polls in seconds (default: 0.5)
+
+    Returns:
+        The final response JSON
+
+    Raises:
+        AssertionError: If request fails or times out
+    """
+    import time
+
+    start_time = time.time()
+    request_status = None
+    while time.time() - start_time < timeout:
+        response = client.get(f"/api/requests/{rq_id}")
+        assert response.status_code == status.HTTP_200_OK, response.status_code
+        response_json = response.json()
+        request_status = response_json["status"]
+
+        if request_status == "finished":
+            return response_json
+        elif request_status == "failed":
+            raise AssertionError(f"Request failed with message: {response_json.get('message', 'No message')}")
+        elif request_status in ("queued", "started"):
+            time.sleep(poll_interval)
+        else:
+            raise AssertionError(f"Unexpected request status: {request_status}")
+
+    raise AssertionError(f"Request {rq_id} did not complete within {timeout} seconds. Last status: {request_status}")
+
+
 class ApiTestBase(APITestCase):
     def _clear_temp_data(self):
         # Clear server frame/chunk cache.
@@ -198,15 +237,52 @@ class ApiTestBase(APITestCase):
         *,
         expected_4xx_status_code: int | None = None,
     ):
-        response = self._get_request(f"/api/requests/{rq_id}", user)
-        self.assertEqual(response.status_code, expected_4xx_status_code or status.HTTP_200_OK)
-        if expected_4xx_status_code is not None:
-            return
-
-        response_json = response.json()
-        request_status = response_json["status"]
-        self.assertEqual(request_status, "finished", "Message:\n" + response_json["message"])
+        response = self._wait_for_request(user, rq_id, expected_4xx_status_code=expected_4xx_status_code)
         return response
+
+    def _wait_for_request(
+        self,
+        user: User,
+        rq_id: str,
+        *,
+        expected_4xx_status_code: int | None = None,
+        timeout: int = 60,
+        poll_interval: float = 0.5,
+    ):
+        """
+        Poll the request status until it's finished or failed, or timeout is reached.
+
+        Args:
+            user: The user to make the request as
+            rq_id: The request ID to check
+            expected_4xx_status_code: If set, expect this HTTP status code
+            timeout: Maximum time to wait in seconds (default: 60)
+            poll_interval: Time between polls in seconds (default: 0.5)
+        """
+        import time
+
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            response = self._get_request(f"/api/requests/{rq_id}", user)
+
+            if expected_4xx_status_code is not None:
+                self.assertEqual(response.status_code, expected_4xx_status_code)
+                return response
+
+            self.assertEqual(response.status_code, status.HTTP_200_OK)
+            response_json = response.json()
+            request_status = response_json["status"]
+
+            if request_status == "finished":
+                return response
+            elif request_status == "failed":
+                self.fail(f"Request failed with message: {response_json.get('message', 'No message')}")
+            elif request_status in ("queued", "started"):
+                time.sleep(poll_interval)
+            else:
+                self.fail(f"Unexpected request status: {request_status}")
+
+        self.fail(f"Request {rq_id} did not complete within {timeout} seconds. Last status: {request_status}")
 
 
 class ImportApiTestBase(ApiTestBase):

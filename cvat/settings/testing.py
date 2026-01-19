@@ -98,3 +98,7 @@ class PatchedDiscoverRunner(DiscoverRunner):
 # No need to profile unit tests
 INSTALLED_APPS.remove("silk")
 MIDDLEWARE.remove("silk.middleware.SilkyMiddleware")
+
+# Override OPA host for Docker environment (use env var or Docker service name)
+IAM_OPA_HOST = os.environ.get("IAM_OPA_HOST", "http://cvat_opa_everex:8181")
+IAM_OPA_DATA_URL = f"{IAM_OPA_HOST}/v1/data"

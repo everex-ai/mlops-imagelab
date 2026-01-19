@@ -376,11 +376,13 @@ class TestImporters(ApiTestBase):
             assert response.status_code == status.HTTP_202_ACCEPTED, response.status_code
             rq_id = response.json()["rq_id"]
 
-            response = self.client.get(f"/api/requests/{rq_id}")
-            assert response.status_code == status.HTTP_200_OK, response.status_code
-            assert response.json()["status"] == "finished", response.json().get("status")
+        # Wait for the async task to complete (uses its own ForceLogin)
+        self._wait_for_request(self.user, rq_id)
 
+        # Re-login to fetch the task result
+        with ForceLogin(self.user, self.client):
             response = self.client.get("/api/tasks/%s" % tid)
+            assert response.status_code == status.HTTP_200_OK, f"Failed to get task: {response.status_code} {response.content}"
 
             if 200 <= response.status_code < 400:
                 labels_response = list(

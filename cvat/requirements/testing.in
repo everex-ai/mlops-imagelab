@@ -1,4 +1,5 @@
 -r development.in
+-r production.in
 
 coverage==7.2.3
 fakeredis[lua]~=2.10

@@ -75,6 +75,7 @@ from cvat.apps.engine.tests.utils import (
     generate_image_file,
     generate_video_file,
     get_paginated_collection,
+    wait_for_rq_request,
 )
 from cvat.apps.redis_handler.serializers import RequestStatus
 from utils.dataset_manifest import ImageManifestManager, VideoManifestManager
@@ -1465,7 +1466,7 @@ class ProjectBackupAPITestCase(ExportApiTestBase, ImportApiTestBase):
         filename = os.path.join("videos", "test_video_1.mp4")
         path = os.path.join(settings.SHARE_ROOT, filename)
         cls.media["dirs"].append(os.path.dirname(path))
-        os.makedirs(os.path.dirname(path))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         _, data = generate_video_file(filename, width=1280, height=720)
         with open(path, "wb") as video:
             video.write(data.read())
@@ -1553,11 +1554,8 @@ class ProjectBackupAPITestCase(ExportApiTestBase, ImportApiTestBase):
             assert response.status_code == status.HTTP_202_ACCEPTED, response.status_code
             rq_id = response.json()["rq_id"]
 
-            response = cls.client.get(f"/api/requests/{rq_id}")
-            assert response.status_code == status.HTTP_200_OK, response.status_code
-            response_json = response.json()
-            rqjob_status, msg = response_json["status"], response_json["message"]
-            assert rqjob_status == "finished", f"{rqjob_status=}\n{msg=}"
+            # Wait for the async task to complete
+            wait_for_rq_request(cls.client, rq_id)
 
             response = cls.client.get("/api/tasks/{}".format(tid))
             data_id = response.data["data"]
@@ -2104,11 +2102,8 @@ class ProjectImportExportAPITestCase(ExportApiTestBase, ImportApiTestBase):
             assert response.status_code == status.HTTP_202_ACCEPTED
             rq_id = response.json()["rq_id"]
 
-            response = self.client.get(f"/api/requests/{rq_id}")
-            assert response.status_code == status.HTTP_200_OK, response.status_code
-            response_json = response.json()
-            rqjob_status, msg = response_json["status"], response_json["message"]
-            assert rqjob_status == "finished", f"{rqjob_status=}\n{msg=}"
+            # Wait for the async task to complete
+            wait_for_rq_request(self.client, rq_id)
 
             response = self.client.get("/api/tasks/{}".format(tid))
             data_id = response.data["data"]
@@ -3125,7 +3120,7 @@ class TaskImportExportAPITestCase(ExportApiTestBase, ImportApiTestBase):
 
         filename = os.path.join("videos", "test_video_1.mp4")
         path = os.path.join(settings.SHARE_ROOT, filename)
-        os.makedirs(os.path.dirname(path))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         _, data = generate_video_file(filename, width=1280, height=720)
         with open(path, "wb") as video:
             video.write(data.read())
@@ -3285,11 +3280,8 @@ class TaskImportExportAPITestCase(ExportApiTestBase, ImportApiTestBase):
             assert response.status_code == status.HTTP_202_ACCEPTED, response.status_code
             rq_id = response.json()["rq_id"]
 
-            response = self.client.get(f"/api/requests/{rq_id}")
-            assert response.status_code == status.HTTP_200_OK, response.status_code
-            response_json = response.json()
-            rqjob_status, msg = response_json["status"], response_json["message"]
-            assert rqjob_status == "finished", f"{rqjob_status=}\n{msg=}"
+            # Wait for the async task to complete
+            wait_for_rq_request(self.client, rq_id)
 
             response = self.client.get("/api/tasks/{}".format(tid))
             data_id = response.data["data"]
@@ -3646,7 +3638,7 @@ class TaskDataAPITestCase(ApiTestBase):
 
         filename = os.path.join("videos", "test_video_1.mp4")
         path = os.path.join(settings.SHARE_ROOT, filename)
-        os.makedirs(os.path.dirname(path))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         img_sizes, data = generate_video_file(filename, width=1280, height=720)
         with open(path, "wb") as video:
             video.write(data.read())

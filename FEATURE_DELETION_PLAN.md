@@ -76,15 +76,9 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 | SDK | `cvat-sdk/` | Python SDK |
 | CLI | `cvat-cli/` | CLI 도구 |
 
-### 3.3 테스트
+### 3.3 불필요한 포맷 (dataset_manager 내)
 
-| 테스트 | 위치 |
-|--------|------|
-| Python 테스트 | `tests/python/` |
-| E2E 테스트 | `tests/cypress/` |
-| CI 설정 | `docker-compose.ci.yml` |
-
-### 3.4 불필요한 포맷 (dataset_manager 내)
+> **참고**: 테스트 코드 (`tests/`, `docker-compose.ci.yml`)는 삭제 대상에서 제외됨
 
 사용하지 않는 import/export 포맷을 제거하여 경량화 가능:
 
@@ -100,7 +94,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
 **포맷 파일 위치**: `cvat/apps/dataset_manager/formats/`
 
-### 3.5 3D 어노테이션
+### 3.4 3D 어노테이션
 
 3D 기능이 불필요한 경우 제거 가능:
 
@@ -109,7 +103,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 | 3D 캔버스 패키지 | `cvat-canvas3d/` |
 | 3D 포맷 | `cvat/apps/dataset_manager/formats/pointcloud.py`, `velodynepoint.py` |
 
-### 3.6 문서
+### 3.5 문서
 
 | 항목 | 위치 |
 |------|------|
