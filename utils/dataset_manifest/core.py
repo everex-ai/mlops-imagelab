@@ -704,9 +704,8 @@ class ImageManifestManager(_ManifestManager):
         setattr(self._manifest, "TYPE", "images")
 
     def link(self, **kwargs):
-        ReaderClass = (
-            DatasetImagesReader if not kwargs.get("DIM_3D", None) else Dataset3DImagesReader
-        )
+        # 3D dimension no longer supported - always use 2D reader
+        ReaderClass = DatasetImagesReader
         self._reader = ReaderClass(**kwargs)
 
     def _write_base_information(self, file):
