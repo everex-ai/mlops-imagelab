@@ -1017,10 +1017,7 @@ class TaskDumpUploadTest(_DbTestBase):
         dump_formats = dm.views.get_export_formats()
         with TestDir() as test_dir:
             for dump_format in dump_formats:
-                if (
-                    not dump_format.ENABLED
-                    or dump_format.DIMENSION == dm.bindings.DimensionType.DIM_3D
-                ):
+                if not dump_format.ENABLED:
                     continue
                 dump_format_name = dump_format.DISPLAY_NAME
 
@@ -2310,10 +2307,7 @@ class ProjectDumpUpload(_DbTestBase):
                     project["labels"] = tasks[dump_format_name]["labels"]
                 project = self._create_project(project)
                 tasks["task in project #1"]["project_id"] = project["id"]
-                if dump_format.DIMENSION == dm.bindings.DimensionType.DIM_3D:
-                    media = self._generate_task_pcd()
-                else:
-                    media = self._generate_task_images(3)
+                media = self._generate_task_images(3)
                 task = self._create_task(tasks["task in project #1"], media)
 
                 export_params = {
@@ -2418,10 +2412,7 @@ class ProjectDumpUpload(_DbTestBase):
 
         with TestDir() as test_dir:
             for dump_format in dump_formats:
-                if (
-                    not dump_format.ENABLED
-                    or dump_format.DIMENSION == dm.bindings.DimensionType.DIM_3D
-                ):
+                if not dump_format.ENABLED:
                     continue
                 dump_format_name = dump_format.DISPLAY_NAME
                 with self.subTest(format=dump_format_name):
