@@ -10,6 +10,7 @@ import multiprocessing
 import os
 import os.path as osp
 import random
+import unittest
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Callable
@@ -1261,6 +1262,7 @@ class TaskDumpUploadTest(_DbTestBase):
                 polygon_points = [float(p) for p in polygon_points.split(";")]
                 self.assertEqual(polygon_points, annotation_points)
 
+    @unittest.skip("WiderFace 1.0 format removed")
     def test_api_v2_check_widerface_with_all_attributes(self):
         test_name = self._testMethodName
         dump_format_name = "WiderFace 1.0"
@@ -1304,6 +1306,7 @@ class TaskDumpUploadTest(_DbTestBase):
                     data_from_task_after_upload = self._get_data_from_task(task_id, include_images)
                     compare_datasets(data_from_task_before_upload, data_from_task_after_upload)
 
+    @unittest.skip("MOT 1.1 format removed")
     def test_api_v2_check_mot_with_shapes_only(self):
         test_name = self._testMethodName
         format_name = "MOT 1.1"

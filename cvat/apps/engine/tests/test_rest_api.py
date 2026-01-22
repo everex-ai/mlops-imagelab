@@ -2992,6 +2992,7 @@ class TaskCreateAPITestCase(ApiTestBase):
         self._check_api_v2_tasks(None, data)
 
 
+@mock.unittest.skip("3D point cloud files no longer supported")
 class TaskImportExportAPITestCase(ExportApiTestBase, ImportApiTestBase):
     def setUp(self):
         super().setUp()
@@ -7136,7 +7137,7 @@ class TaskAnnotationAPITestCase(ExportApiTestBase, ImportApiTestBase, JobAnnotat
             )
 
         # Rare and buggy formats that are not crucial for testing
-        formats.pop("Market-1501 1.0")  # Issue: https://github.com/cvat-ai/datumaro/issues/99
+        formats.pop("Market-1501 1.0", None)  # Issue: https://github.com/cvat-ai/datumaro/issues/99
 
         for export_format, import_format in formats.items():
             with self.subTest(export_format=export_format, import_format=import_format):

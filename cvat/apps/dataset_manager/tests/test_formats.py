@@ -5,6 +5,7 @@
 
 import os.path as osp
 import tempfile
+import unittest
 import zipfile
 from io import BytesIO
 
@@ -270,8 +271,6 @@ class TaskExportTest(_DbTestBase):
                 "CVAT for images 1.1",
                 "CVAT for video 1.1",
                 "Datumaro 1.0",
-                "MOT 1.1",
-                "MOTS PNG 1.0",
                 "Segmentation mask 1.1",
                 "YOLO 1.1",
                 "Ultralytics YOLO Classification 1.0",
@@ -292,8 +291,6 @@ class TaskExportTest(_DbTestBase):
                 "COCO 1.0",
                 "COCO Keypoints 1.0",
                 "CVAT 1.1",
-                "MOT 1.1",
-                "MOTS PNG 1.0",
                 "Segmentation mask 1.1",
                 "YOLO 1.1",
                 "Datumaro 1.0",
@@ -812,6 +809,7 @@ class TaskAnnotationsImportTest(_DbTestBase):
 
                 self._test_can_import_annotations(task, format_name)
 
+    @unittest.skip("MOTS PNG 1.0 format removed")
     def test_can_import_mots_annotations_with_split_masks(self):
         # https://github.com/openvinotoolkit/cvat/issues/3360
 
