@@ -2992,7 +2992,7 @@ class TaskCreateAPITestCase(ApiTestBase):
         self._check_api_v2_tasks(None, data)
 
 
-@mock.unittest.skip("3D point cloud files no longer supported")
+@unittest.skip("3D point cloud files no longer supported")
 class TaskImportExportAPITestCase(ExportApiTestBase, ImportApiTestBase):
     def setUp(self):
         super().setUp()

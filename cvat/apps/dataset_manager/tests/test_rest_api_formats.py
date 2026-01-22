@@ -2380,6 +2380,7 @@ class ProjectDumpUpload(_DbTestBase):
                                 query_params={"format": upload_format_name},
                             )
 
+    @unittest.skip("3D point cloud files no longer supported")
     def test_api_v2_can_export_3d_annotations(self):
         dump_format_name = "Datumaro 3D 1.0"
         project = self._create_project(projects["main"])
