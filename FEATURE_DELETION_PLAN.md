@@ -8,7 +8,7 @@
 | **1. 즉시 삭제 대상 - AI/ML** | ✅ 완료 | 2026-01-22 | serverless, ai-models, lambda_manager 삭제 완료 |
 | **1. 즉시 삭제 대상 - Kubernetes** | ✅ 완료 | 2026-01-22 | helm-chart 삭제 완료 |
 | **2. 유지할 기능** | ✅ 확인됨 | - | 모든 기능 정상 동작 중 |
-| **3. 추가 삭제 검토** | ⏸️ 보류 | - | 필요 시 선택적 삭제 |
+| **3. 선택적 삭제 항목** | ✅ 완료 | 2026-01-22 | DICOM, 16개 포맷, 3D annotation 삭제 완료 |
 
 ---
 
@@ -248,83 +248,103 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 ---
 
-## 3. 추가 삭제 가능 항목 (선택적)
+## 3. 선택적 삭제 항목 (완료)
 
-향후 필요 시 삭제를 검토할 수 있는 항목들입니다.
+### 3.1 ✅ DICOM Converter (완료)
 
-### 3.1 특수 용도 유틸리티 (선택적 삭제 검토)
+**현재 상태**: ✅ 삭제 완료 (커밋 06c946918, 2026-01-22)
 
-| 도구 | 위치 | 설명 | 결정 |
-|------|------|------|------|
-| DICOM Converter | `utils/dicom_converter/` | 의료 영상 변환 도구 | 검토 보류 (특수 용도) |
+**결정**: 의료 영상 미사용 확정, 삭제 완료
+
+**삭제된 영향**: DICOM 의료 영상 변환 기능 제거
+
+**위험도**: 최소 - 특수 용도이며 다른 기능과 독립적
+
+#### 완료된 작업
+
+| 작업 | 파일/디렉토리 | 상태 |
+|------|--------------|------|
+| DICOM Converter 삭제 | `utils/dicom_converter/` (3 파일) | ✅ |
 
 **참고**:
-- **FFmpeg Compatibility** (`utils/ffmpeg_compatibility/`) - **유지 확정**, 비디오 처리에 필요
-- DICOM Converter는 의료 영상을 사용하지 않는 경우에만 삭제 고려
+- **FFmpeg Compatibility** (`utils/ffmpeg_compatibility/`) - **유지 확정**, 비디오 처리에 필수
 
-### 3.2 불필요한 포맷 (dataset_manager 내)
+---
 
-사용하지 않는 import/export 포맷을 제거하여 경량화 가능:
+### 3.2 ✅ Dataset 포맷 16개 (완료)
 
-| 카테고리 | 제거 가능 포맷 | 파일명 |
-|---------|---------------|--------|
-| 객체 탐지 | Pascal VOC | `pascal_voc.py` |
-|  | KITTI | `kitti.py` |
-|  | OpenImages | `openimages.py` |
-| 세그멘테이션 | Cityscapes | `cityscapes.py` |
-|  | CamVid | `camvid.py` |
-| 트래킹 | MOT | `mot.py` |
-|  | MOTS | `mots.py` |
-| 얼굴 인식 | VGGFace2 | `vggface2.py` |
-|  | WiderFace | `widerface.py` |
-|  | LFW | `lfw.py` |
+**현재 상태**: ✅ 삭제 완료 (커밋 06c946918, 2026-01-22)
+
+**결정**: 사용하지 않는 포맷 삭제로 코드베이스 경량화
+
+**삭제된 영향**: 특정 포맷(Pascal VOC, KITTI 등)으로 import/export 불가
+
+**위험도**: 낮음 - COCO, YOLO, CVAT, Datumaro, Mask 등 주요 포맷은 유지됨
+
+#### 삭제된 포맷 목록
+
+| 카테고리 | 삭제된 포맷 | 파일명 |
+|---------|------------|--------|
+| 객체 탐지 | Pascal VOC, KITTI, OpenImages | `pascal_voc.py`, `kitti.py`, `openimages.py` |
+| 세그멘테이션 | Cityscapes, CamVid | `cityscapes.py`, `camvid.py` |
+| 트래킹 | MOT, MOTS | `mot.py`, `mots.py` |
+| 얼굴 인식 | VGGFace2, WiderFace, LFW | `vggface2.py`, `widerface.py`, `lfw.py` |
 | 문서 분석 | ICDAR | `icdar.py` |
-| 3D | PointCloud | `pointcloud.py` |
-|  | VeloPoint | `velodynepoint.py` |
-| 범용 | LabelMe | `labelme.py` |
-|  | ImageNet | `imagenet.py` |
-|  | Market-1501 | `market1501.py` |
+| 3D | PointCloud, VelodynePoint | `pointcloud.py`, `velodynepoint.py` |
+| 범용 | LabelMe, ImageNet, Market-1501 | `labelme.py`, `imagenet.py`, `market1501.py` |
 
-**포맷 파일 위치**: `cvat/apps/dataset_manager/formats/` (총 25개 파일)
+#### 완료된 작업
 
-**주의**:
-- COCO, YOLO는 널리 사용되므로 **유지 권장**
-- CVAT, Datumaro는 자체 포맷이므로 **유지 필수**
+| 작업 | 파일/디렉토리 | 상태 |
+|------|--------------|------|
+| 포맷 파일 삭제 | `cvat/apps/dataset_manager/formats/` (16 파일) | ✅ |
+| Registry 업데이트 | `registry.py` - 16개 import 제거 | ✅ |
 
-**삭제 절차**:
-```bash
-# 예: Pascal VOC 포맷 삭제
-rm cvat/apps/dataset_manager/formats/pascal_voc.py
+#### 유지된 포맷
 
-# registry.py에서 해당 포맷 등록 제거
-# cvat/apps/dataset_manager/formats/registry.py 편집
-```
+- ✅ **COCO** - 널리 사용되는 표준 포맷
+- ✅ **YOLO** - 객체 탐지 표준 포맷
+- ✅ **CVAT for images/video** - 자체 포맷 (필수)
+- ✅ **Datumaro** - 데이터 변환 프레임워크
+- ✅ **Mask** - 세그멘테이션 마스크 포맷
 
-### 3.3 3D 어노테이션
+---
 
-3D 기능이 불필요한 경우 제거 가능:
+### 3.3 ✅ 3D 어노테이션 (완료)
 
-| 항목 | 위치 | 설명 |
-|------|------|------|
-| 3D 캔버스 패키지 | `cvat-canvas3d/` | Three.js 기반 3D UI |
-| 3D 포맷 | `cvat/apps/dataset_manager/formats/pointcloud.py` | Point Cloud 포맷 |
-|  | `cvat/apps/dataset_manager/formats/velodynepoint.py` | Velodyne 포맷 |
+**현재 상태**: ✅ 삭제 완료 (커밋 06c946918, 2026-01-22)
 
-**삭제 절차**:
-```bash
-# 1. 프론트엔드 패키지 제거
-rm -rf cvat-canvas3d/
+**결정**: 3D 기능 미사용 확정, 전체 삭제
 
-# 2. cvat-ui의 의존성에서 제거
-# cvat-ui/package.json 확인 및 수정
+**삭제된 영향**: 3D 어노테이션 기능 완전 제거 (Point Cloud, Cuboid 등)
 
-# 3. 백엔드 포맷 제거
-rm cvat/apps/dataset_manager/formats/pointcloud.py
-rm cvat/apps/dataset_manager/formats/velodynepoint.py
+**위험도**: 낮음 - 2D 어노테이션 기능과 독립적
 
-# 4. 검증
-./scripts/verify-build.sh
-```
+#### 완료된 작업
+
+| 작업 | 파일/디렉토리 | 상태 |
+|------|--------------|------|
+| **프론트엔드 삭제** | | |
+| 3D 캔버스 패키지 | `cvat-canvas3d/` (15 파일) | ✅ |
+| Standard3D Workspace | `cvat-ui/src/components/.../standard3D-workspace/` | ✅ |
+| 3D Canvas 래퍼 | `cvat-ui/src/cvat-canvas3d-wrapper.ts` | ✅ |
+| 3D UI 컴포넌트 | `cvat-ui/src/components/.../canvas3d/` | ✅ |
+| Canvas3d 타입 제거 | cvat-ui 20개 파일 수정 | ✅ |
+| Package.json 업데이트 | cvat-canvas3d 의존성 제거 | ✅ |
+| **테스트 삭제** | | |
+| 3D 기능 테스트 | `tests/cypress/e2e/canvas3d_functionality/` (11 파일) | ✅ |
+| 3D 기능 테스트 2 | `tests/cypress/e2e/canvas3d_functionality_2/` (10 파일) | ✅ |
+| 3D 테스트 지원 | `tests/cypress/support/commands_canvas3d.js` 외 2파일 | ✅ |
+| **문서 삭제** | | |
+| 3D 어노테이션 가이드 | `site/content/en/docs/.../3d-object-annotation.md` | ✅ |
+| **검증** | | |
+| TypeScript 컴파일 | Canvas3d 에러 모두 제거 | ✅ |
+| 빌드 검증 | `./scripts/verify-build-only.sh` 통과 | ✅ |
+
+**삭제 통계**:
+- 총 66개 파일 삭제 (cvat-canvas3d 15 + UI 6 + 테스트 21 + 기타)
+- 총 20개 파일 수정 (Canvas3d 타입/import 제거)
+- 약 8,700 라인 코드 삭제
 
 ---
 
@@ -382,18 +402,24 @@ docker compose down
 
 ## 5. 삭제 우선순위 요약
 
-### 즉시 삭제 (모두 완료)
+### 완료된 모든 삭제 작업
 
 | 항목 | 상태 | 완료일 | 효과 |
 |------|------|--------|------|
+| **즉시 삭제 대상** | | | |
 | dataset_repo 앱 | ✅ 완료 | 2026-01-19 | 코드 정리 |
-| AI/ML 기능 (serverless, ai-models, lambda_manager) | ✅ 완료 | 2026-01-22 | **456KB 공간 절약, AI 의존성 제거** |
+| AI/ML 기능 (serverless, ai-models, lambda_manager) | ✅ 완료 | 2026-01-22 | 456KB 공간 절약, AI 의존성 제거 |
 | Kubernetes (helm-chart) | ✅ 완료 | 2026-01-22 | 184KB 공간 절약, K8s 의존성 제거 |
+| **선택적 삭제 항목** | | | |
+| DICOM Converter | ✅ 완료 | 2026-01-22 | 3개 파일 삭제 |
+| Dataset 포맷 16개 | ✅ 완료 | 2026-01-22 | 16개 포맷 파일 삭제, COCO/YOLO/CVAT 유지 |
+| 3D 어노테이션 | ✅ 완료 | 2026-01-22 | **8,700 라인 삭제, 3D 기능 완전 제거** |
 
-**총 삭제 통계**:
-- 총 101개 파일 삭제
-- 총 17개 파일 수정 (코드 13개 + 워크플로우/설정 4개)
-- 약 640KB 공간 절약
+**최종 삭제 통계**:
+- **총 187개 파일 삭제** (즉시 삭제 101개 + 선택적 삭제 86개)
+- **총 38개 파일 수정** (즉시 삭제 17개 + 선택적 삭제 21개)
+- **약 9,400+ 라인 코드 삭제**
+- **약 1MB+ 공간 절약**
 
 ### 유지 확정
 
@@ -403,14 +429,13 @@ docker compose down
 - **Dataset Manifest** (엔진 핵심 기능)
 - **FFmpeg Compatibility** (비디오 처리 검증)
 - **모든 Docker Compose 파일** (다양한 환경 배포 지원)
+- **Dataset 포맷**: COCO, YOLO, CVAT, Datumaro, Mask (5개 유지)
 - 개발 도구 (changelog.d, dev, GitHub Actions)
 - 문서 (site, CHANGELOG.md, .github, SECURITY.md)
 
-### 선택적 삭제 가능
+### 삭제 완료 항목 (더 이상 삭제 가능한 것 없음)
 
-- 특수 유틸리티 (DICOM Converter - 의료 영상 미사용 시)
-- 불필요한 dataset 포맷 (사용하지 않는 것만)
-- 3D 어노테이션 (3D 기능 미사용 시)
+모든 계획된 삭제 작업이 완료되었습니다. 추가 삭제가 필요한 경우 별도로 검토 필요.
 
 ---
 
@@ -441,4 +466,5 @@ docker compose down
 ---
 
 *최초 생성: 2026-01-13*
-*최종 업데이트: 2026-01-22 - 모든 즉시 삭제 대상 완료, FFmpeg/Docker Compose 파일 유지 확정*
+*최종 업데이트: 2026-01-22 - 모든 삭제 작업 완료 (즉시 삭제 + 선택적 삭제)*
+*커밋 이력: 691baaa5e (dataset_repo), 3ce2d060c (AI/ML), 09567c713 (문서), 06c946918 (DICOM/포맷/3D)*
