@@ -26,6 +26,7 @@ from pathlib import Path
 from pprint import pformat
 from time import sleep
 from typing import BinaryIO
+import unittest
 from unittest import mock
 
 import av
