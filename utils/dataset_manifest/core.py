@@ -342,45 +342,7 @@ class DatasetImagesReader:
         return len(self.range_)
 
 
-class Dataset3DImagesReader(DatasetImagesReader):
-    def _get_img_properties(self, image):
-        if self._data_dir:
-            img_name = os.path.relpath(image, self._data_dir)
-        else:
-            img_name = os.path.basename(image) if isinstance(image, str) else image.filename
-
-        name, extension = os.path.splitext(img_name)
-        image_properties = {
-            "name": name.replace("\\", "/"),
-            "extension": extension,
-        }
-
-        meta = (self._meta or {}).get(img_name, {})
-
-        try:
-            if extension.lower() == ".bin":
-                pcd_image = io.BytesIO()
-                PcdReader.convert_bin_to_pcd_file(image, output_file=pcd_image)
-                pcd_image.seek(0)
-
-                meta["original_name"] = img_name
-                image_properties["extension"] = ".pcd"
-            else:
-                pcd_image = image
-
-            properties = PcdReader.parse_pcd_header(pcd_image, verify_version=True)
-            image_properties["width"] = int(properties["WIDTH"])
-            image_properties["height"] = int(properties["HEIGHT"])
-        except InvalidPcdError as e:
-            raise InvalidPcdError(f"failed to parse pcd file '{img_name}': {e}") from e
-
-        if meta:
-            image_properties["meta"] = meta
-
-        if self._use_image_hash:
-            image_properties["checksum"] = md5_hash(image)
-
-        return image_properties
+# Dataset3DImagesReader class removed - 3D dimension no longer supported
 
 
 class _Manifest:

@@ -498,43 +498,17 @@ class _HeaderFirstImageDownloader(HeaderFirstDownloader):
             raise Exception(f"Failed to read the image file '{key}'") from e
 
 
-class _HeaderFirstPcdDownloader(HeaderFirstDownloader):
-    def try_parse_header(self, header):
-        pcd_parser = PcdReader()
-        file = header
-        file_ext = os.path.splitext(file.filename)[1].lower()
-
-        if file_ext == ".bin":
-            # We need to ensure the file is a valid .bin file
-            pcd_parser.parse_bin_header(file)
-
-            # but we need the whole file for the next operations (getting frame size etc.)
-            return False
-        elif file_ext == ".pcd":
-            parameters = pcd_parser.parse_pcd_header(file, verify_version=True)
-            if not parameters.get("WIDTH") or not parameters.get("HEIGHT"):
-                raise InvalidPcdError("invalid scene size")
-        else:
-            raise InvalidPcdError(f"The '{file_ext}' file format is not supported")
-
-        return True
-
-    def download(self, key):
-        try:
-            return super().download(key)
-        except InvalidPcdError as e:
-            raise Exception(f"Failed to read point cloud file '{key}': {e}") from e
+# _HeaderFirstPcdDownloader class removed - 3D dimension no longer supported
 
 
 class HeaderFirstMediaDownloader:
     @staticmethod
     def create(dimension: DimensionType, **kwargs) -> HeaderFirstDownloader:
+        # 3D dimension no longer supported
         if dimension == DimensionType.DIM_2D:
             downloader = _HeaderFirstImageDownloader(**kwargs)
-        elif dimension == DimensionType.DIM_3D:
-            downloader = _HeaderFirstPcdDownloader(**kwargs)
         else:
-            assert False
+            raise Exception(f"Unsupported dimension: {dimension}. Only 2D is supported.")
 
         return downloader
 

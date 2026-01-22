@@ -339,10 +339,7 @@ class ImageListReader(IMediaReader):
         return (pos + 1) / (len(self.frame_range) or 1)
 
     def get_image_size(self, i):
-        if self._dimension == DimensionType.DIM_3D:
-            with open(self.get_path(i), "rb") as f:
-                properties = ValidateDimension.get_pcd_properties(f)
-                return int(properties["WIDTH"]), int(properties["HEIGHT"])
+        # 3D dimension no longer supported
         with Image.open(self._source_path[i]) as img:
             return image_size_within_orientation(img)
 
@@ -506,16 +503,12 @@ class ZipReader(ImageListReader):
         self._zip_source.close()
 
     def get_image_size(self, i):
-        if self._dimension == DimensionType.DIM_3D:
-            with open(self.get_path(i), "rb") as f:
-                properties = PcdReader.parse_pcd_header(f)
-                return int(properties["WIDTH"]), int(properties["HEIGHT"])
+        # 3D dimension no longer supported
         with Image.open(io.BytesIO(self._zip_source.read(self._source_path[i]))) as img:
             return image_size_within_orientation(img)
 
     def get_image(self, i):
-        if self._dimension == DimensionType.DIM_3D:
-            return self.get_path(i)
+        # 3D dimension no longer supported
         return io.BytesIO(self._zip_source.read(self._source_path[i]))
 
     def get_zip_filename(self):
@@ -1235,19 +1228,18 @@ class ValidateDimension:
         return PcdReader.convert_bin_to_pcd(path, delete_source=delete_source)
 
     def bin_operation(self, file_path: str, dataset_root: str) -> str:
-        try:
-            pcd_path = self.convert_bin_to_pcd(file_path)
-            self.converted_files.append(pcd_path)
-            return os.path.relpath(pcd_path, dataset_root)
-        except InvalidPcdError as e:
-            raise ValidationError(f"Could not read pcd file '{os.path.basename(file_path)}': {e}")
+        # 3D tasks are no longer supported
+        raise ValidationError(
+            f"3D point cloud files (.bin) are no longer supported. "
+            f"Found: '{os.path.basename(file_path)}'"
+        )
 
     def pcd_operation(self, file_path: str, dataset_root: str) -> str | None:
-        try:
-            self.get_pcd_properties(file_path, verify_version=True)
-            return os.path.relpath(file_path, dataset_root)
-        except InvalidPcdError as e:
-            raise ValidationError(f"Could not read pcd file '{os.path.basename(file_path)}': {e}")
+        # 3D tasks are no longer supported
+        raise ValidationError(
+            f"3D point cloud files (.pcd) are no longer supported. "
+            f"Found: '{os.path.basename(file_path)}'"
+        )
 
     def _process_files(self, current_dir: str, dataset_root: str, filenames: Sequence[str]):
         for filename in filenames:
@@ -1266,7 +1258,7 @@ class ValidateDimension:
                     self.image_files.append(file_path)
 
     def validate(self, path: str):
-        "Detect media dimension and convert all point clouds into the .pcd format"
+        "Detect media dimension - only 2D images are supported"
 
         root = path
         for dirpath, _, filenames in os.walk(root):
@@ -1275,24 +1267,25 @@ class ValidateDimension:
 
             self._process_files(dirpath, root, filenames)
 
+        # 3D tasks are no longer supported
         if self.pcd_files:
-            self.dimension = DimensionType.DIM_3D
+            raise ValidationError(
+                "3D point cloud files are no longer supported. Only 2D image annotation is available."
+            )
 
     def detect_dimension_for_paths(self, paths: Sequence[str]) -> DimensionType:
         detected_dimensions = detect_media_dimension(paths)
-        if (
-            _MediaDimension.dim_2d in detected_dimensions
-            and _MediaDimension.dim_3d in detected_dimensions
-        ):
-            # Point clouds can have related images
-            detected_dimensions.remove(_MediaDimension.dim_2d)
+
+        # 3D tasks are no longer supported
+        if _MediaDimension.dim_3d in detected_dimensions:
+            raise ValidationError(
+                "3D point cloud files are no longer supported. Only 2D image annotation is available."
+            )
 
         result = []
         for dim in detected_dimensions:
             if dim == _MediaDimension.dim_2d:
                 result.append(DimensionType.DIM_2D)
-            elif dim == _MediaDimension.dim_3d:
-                result.append(DimensionType.DIM_3D)
             else:
                 assert False, f"Unknown dimension {dim}"
 
