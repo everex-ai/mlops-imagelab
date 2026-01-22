@@ -925,20 +925,11 @@ def create_thread(
             f"same as other tasks in project ({db_task.project.tasks.first().dimension})"
         )
 
-    db_task.dimension = validate_dimension.dimension
-
+    # Reject 3D tasks - 3D annotation is no longer supported
     if validate_dimension.dimension == models.DimensionType.DIM_3D:
-        extractor.reconcile(
-            source_files=[
-                # We always work with .pcd files instead of .bin
-                (os.path.splitext(p)[0] + ".pcd") if p.endswith(".bin") else p
-                for p in extractor.absolute_source_paths
-            ],
-            step=db_data.get_frame_step(),
-            start=db_data.start_frame,
-            stop=data['stop_frame'],
-            dimension=validate_dimension.dimension,
-        )
+        raise ValidationError("3D tasks are no longer supported. Only 2D annotation is available.")
+
+    db_task.dimension = validate_dimension.dimension
 
     related_images = {}
     if isinstance(extractor, MEDIA_TYPES['image']['extractor']):

@@ -115,20 +115,11 @@ class ObjectItemDetailsContainer extends React.PureComponent<Props> {
 
     public render(): JSX.Element | null {
         const {
-            readonly, collapsed, state, workspace,
+            readonly, collapsed, state,
         } = this.props;
 
         if (state) {
-            let sizeParams = null;
-
-            if (state.shapeType === ShapeType.CUBOID && workspace === Workspace.STANDARD3D && state.points) {
-                sizeParams = {
-                    width: parseFloat(state.points[6].toFixed(2)), // X
-                    height: parseFloat(state.points[7].toFixed(2)), // Y
-                    length: parseFloat(state.points[8].toFixed(2)), // Z
-                };
-            }
-
+            // 3D workspace no longer supported, sizeParams always null
             return (
                 <ObjectItemDetails
                     readonly={readonly}
@@ -138,7 +129,7 @@ class ObjectItemDetailsContainer extends React.PureComponent<Props> {
                     values={{ ...state.attributes }}
                     attributes={[...state.label.attributes]}
                     changeSize={this.changeSize}
-                    sizeParams={sizeParams}
+                    sizeParams={null}
                 />
             );
         }

@@ -42,7 +42,6 @@ export enum JobType {
 
 export enum DimensionType {
     DIMENSION_2D = '2d',
-    DIMENSION_3D = '3d',
 }
 
 export enum RQStatus {

@@ -936,7 +936,6 @@ export interface AnnotationState {
 }
 
 export enum Workspace {
-    STANDARD3D = 'Standard 3D',
     STANDARD = 'Standard',
     ATTRIBUTES = 'Attribute annotation',
     SINGLE_SHAPE = 'Single shape',

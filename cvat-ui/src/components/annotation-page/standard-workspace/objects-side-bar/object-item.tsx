@@ -80,7 +80,6 @@ function ObjectItemComponent(props: Props): JSX.Element {
         edit,
         slice,
         jobInstance,
-        workspace,
     } = props;
 
     const type =
@@ -96,7 +95,7 @@ function ObjectItemComponent(props: Props): JSX.Element {
         activate();
     }, []);
 
-    const sizeControlsVisible = shapeType === ShapeType.CUBOID && workspace === Workspace.STANDARD3D;
+    const sizeControlsVisible = false; // 3D workspace no longer supported
 
     return (
         <div style={{ display: 'flex', marginBottom: '1px' }}>

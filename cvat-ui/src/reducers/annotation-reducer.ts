@@ -10,7 +10,7 @@ import { AuthActionTypes } from 'actions/auth-actions';
 import { BoundariesActionTypes } from 'actions/boundaries-actions';
 import { Canvas, CanvasMode } from 'cvat-canvas-wrapper';
 import {
-    DimensionType, JobStage, Label, LabelType, ObjectType, ShapeType,
+    JobStage, Label, LabelType, ObjectType, ShapeType,
 } from 'cvat-core-wrapper';
 import { clamp } from 'utils/math';
 
@@ -209,14 +209,8 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 activeObjectType = job.mode === 'interpolation' ? ObjectType.TRACK : ObjectType.SHAPE;
             }
 
-            if (job.dimension === DimensionType.DIMENSION_2D) {
-                workspaceSelected = queryParameters.initialWorkspace;
-                workspaceSelected = workspaceSelected || (isReview ? Workspace.REVIEW : Workspace.STANDARD);
-            } else {
-                // 3D jobs are no longer supported
-                activeShapeType = ShapeType.CUBOID;
-                workspaceSelected = Workspace.STANDARD;
-            }
+            workspaceSelected = queryParameters.initialWorkspace;
+            workspaceSelected = workspaceSelected || (isReview ? Workspace.REVIEW : Workspace.STANDARD);
 
             if (state.canvas.instance) {
                 state.canvas.instance.destroy();
@@ -278,8 +272,7 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                     instance: new Canvas(),
                 },
                 colors,
-                workspace: isReview && job.dimension === DimensionType.DIMENSION_2D ?
-                    Workspace.REVIEW : workspaceSelected,
+                workspace: isReview ? Workspace.REVIEW : workspaceSelected,
             };
         }
         case AnnotationActionTypes.GET_JOB_FAILED: {
