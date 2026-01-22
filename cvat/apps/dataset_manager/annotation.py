@@ -541,49 +541,6 @@ class ShapeManager(ObjectManager):
                 p1 = geometry.box(*obj1["points"])
 
                 return _calc_polygons_similarity(p0, p1)
-            elif obj0["type"] == ShapeType.CUBOID and dimension == DimensionType.DIM_3D:
-                [x_c0, y_c0, z_c0] = obj0["points"][0:3]
-                [x_c1, y_c1, z_c1] = obj1["points"][0:3]
-
-                [x_len0, y_len0, z_len0] = obj0["points"][6:9]
-                [x_len1, y_len1, z_len1] = obj1["points"][6:9]
-
-                top_view_0 = [
-                    x_c0 - x_len0 / 2,
-                    y_c0 - y_len0 / 2,
-                    x_c0 + x_len0 / 2,
-                    y_c0 + y_len0 / 2,
-                ]
-
-                top_view_1 = [
-                    x_c1 - x_len1 / 2,
-                    y_c1 - y_len1 / 2,
-                    x_c1 + x_len1 / 2,
-                    y_c1 + y_len1 / 2,
-                ]
-
-                p_top0 = geometry.box(*top_view_0)
-                p_top1 = geometry.box(*top_view_1)
-                top_similarity = _calc_polygons_similarity(p_top0, p_top1)
-
-                side_view_0 = [
-                    x_c0 - x_len0 / 2,
-                    z_c0 - z_len0 / 2,
-                    x_c0 + x_len0 / 2,
-                    z_c0 + z_len0 / 2,
-                ]
-
-                side_view_1 = [
-                    x_c1 - x_len1 / 2,
-                    z_c1 - z_len1 / 2,
-                    x_c1 + x_len1 / 2,
-                    z_c1 + z_len1 / 2,
-                ]
-                p_side0 = geometry.box(*side_view_0)
-                p_side1 = geometry.box(*side_view_1)
-                side_similarity = _calc_polygons_similarity(p_side0, p_side1)
-
-                return top_similarity * side_similarity
             elif obj0["type"] == ShapeType.POLYGON:
                 p0 = geometry.Polygon(pairwise(obj0["points"]))
                 p1 = geometry.Polygon(pairwise(obj1["points"]))
@@ -821,22 +778,6 @@ class TrackManager(ObjectManager):
 
                 if included_frames is None or frame in included_frames:
                     yield copy_shape(shape0, frame, points, rotation)
-
-        def simple_3d_interpolation(shape0, shape1):
-            angles = shape0["points"][3:6] + shape1["points"][3:6]
-            distance = shape1["frame"] - shape0["frame"]
-
-            for shape in simple_interpolation(shape0, shape1):
-                offset = (shape["frame"] - shape0["frame"]) / distance
-                for i, angle0 in enumerate(angles):
-                    if i < 3:
-                        angle1 = angles[i + 3]
-                        angle0 = (angle0 if angle0 >= 0 else angle0 + math.pi * 2) * 180 / math.pi
-                        angle1 = (angle1 if angle1 >= 0 else angle1 + math.pi * 2) * 180 / math.pi
-                        angle = angle0 + find_angle_diff(angle1, angle0) * offset * math.pi / 180
-                        shape["points"][i + 3] = angle if angle <= math.pi else angle - math.pi * 2
-
-                yield shape
 
         def points_interpolation(shape0, shape1):
             if len(shape0["points"]) == 2 and len(shape1["points"]) == 2:
@@ -1078,8 +1019,6 @@ class TrackManager(ObjectManager):
             if not is_same_type:
                 raise NotImplementedError()
 
-            if dimension == DimensionType.DIM_3D:
-                yield from simple_3d_interpolation(shape0, shape1)
             if is_rectangle or is_cuboid or is_ellipse or is_skeleton:
                 yield from simple_interpolation(shape0, shape1)
             elif is_points:

@@ -1521,147 +1521,7 @@ class MediaProvider2D(MediaProvider):
 
         self._current_source_id = None
 
-class MediaProvider3D(MediaProvider):
-    class PointCloudFromLazyChunk(datumaro.components.media.PointCloudFromBytes):
-        def __init__(
-            self,
-            path: str,
-            extra_images: list[dm.Image],
-            *args,
-            data_getter: Callable[[], bytes],
-            **kwargs
-        ):
-            super().__init__(data_getter, *args, extra_images=extra_images, **kwargs)
-            self._path = path
-
-        @property
-        def path(self) -> str:
-            return self._path.replace("\\", "/")
-
-    class ImageFromLazyChunk(datumaro.components.media.ImageFromBytes):
-        def __init__(
-            self,
-            path: str,
-            *args,
-            data_getter: Callable[[], bytes],
-            **kwargs
-        ):
-            kwargs.setdefault("ext", osp.splitext(path)[1])
-            super().__init__(
-                data_getter,
-                *args,
-                **kwargs
-            )
-            self._path = path
-
-        @property
-        def path(self) -> str:
-            return self._path.replace("\\", "/")
-
-    def __init__(self, sources: dict[int, MediaSource]) -> None:
-        super().__init__(sources)
-        self._current_source_id = None
-        self._frame_provider = None
-
-        self._ri_cache: dict[int, dict[str, bytes]] = {}
-        "{source_id -> {task path -> file data}}"
-
-        ThroughModel = models.RelatedFile.images.through
-
-        self._ri_per_source: dict[int, dict[int, list[str]]] = {}
-        "{source_id -> {frame_id -> [ri, ...]}}"
-
-        for source_id, source in sources.items():
-            source_ris = self._ri_per_source.setdefault(source_id, {})
-
-            db_related_files = (
-                ThroughModel.objects.filter(relatedfile__data=source.db_task.data)
-                .order_by("image__frame", "relatedfile__path")
-                .values_list("image__frame", "relatedfile__path")
-            )
-            for frame_idx, ri_path in db_related_files:
-                source_ris.setdefault(frame_idx, []).append(ri_path)
-
-    def unload(self) -> None:
-        self._unload_source()
-
-    def get_media_for_frame(self, source_id: int, frame_id: int, **image_kwargs) -> dm.PointCloud:
-        source = self._sources[source_id]
-
-        upload_dir = source.db_task.data.get_upload_dirname()
-        point_cloud_path = image_kwargs['path']
-
-        related_image_paths = [
-            osp.relpath(str(ri_path), upload_dir)
-            for ri_path in self._ri_per_source[source_id].get(frame_id, [])
-        ]
-
-        def get_pcd_bytes():
-            self._load_source(source_id, source)
-
-            return self._frame_provider.get_frame(
-                frame_id, quality=FrameQuality.ORIGINAL, out_type=FrameOutputType.BUFFER
-            ).data.getvalue()
-
-        def get_ri_frame(path: str) -> bytes:
-            self._load_source(source_id, source)
-
-            return self._get_ri_chunk(frame_id)[path]
-
-        dm_related_images = [
-            self.ImageFromLazyChunk(ri_path, data_getter=partial(get_ri_frame, ri_path))
-            for ri_path in related_image_paths
-        ]
-
-        return self.PointCloudFromLazyChunk(
-            point_cloud_path, extra_images=dm_related_images, data_getter=get_pcd_bytes
-        )
-
-    def _get_ri_chunk(self, frame_id: int) -> dict[str, bytes]:
-        frame_related_images = self._ri_cache.get(frame_id, None)
-
-        if frame_related_images is None:
-            self._clear_ri_chunk_cache()
-
-            # frame provider doesn't cache RIs and can return only compressed RI chunks for the UI
-            cache = MediaCache()
-
-            frame_related_images = {
-                ri_path: Path(ri_realpath).read_bytes()
-                for _, (ri_realpath, ri_path, _) in cache.read_raw_context_images(
-                    self._sources[self._current_source_id].db_task.data,
-                    frame_ids=[frame_id],
-                    truncate_common_filename_prefix=False,
-                    decode=False,
-                )
-            }
-
-            self._ri_cache[frame_id] = frame_related_images
-
-        return frame_related_images
-
-    def _clear_ri_chunk_cache(self):
-        self._ri_cache.clear()
-
-    def _load_source(self, source_id: int, source: MediaSource) -> None:
-        if self._current_source_id == source_id:
-            return
-
-        self._unload_source()
-        self._frame_provider = TaskFrameProvider(source.db_task)
-        self._current_source_id = source_id
-
-    def _unload_source(self) -> None:
-        if self._frame_provider:
-            self._frame_provider.unload()
-            self._frame_provider = None
-
-            self._clear_ri_chunk_cache()
-
-        self._current_source_id = None
-
 MEDIA_PROVIDERS_BY_DIMENSION: dict[DimensionType, MediaProvider] = {
-    DimensionType.DIM_3D: MediaProvider3D,
     DimensionType.DIM_2D: MediaProvider2D,
 }
 
@@ -1734,7 +1594,7 @@ class CvatDataExtractor(dm.DatasetBase, CVATDataExtractorMixin):
         instance_meta = instance_data.meta[instance_data.META_FIELD]
         CVATDataExtractorMixin.__init__(self, **kwargs)
 
-        self._user = self._load_user_info(instance_meta) if dimension == DimensionType.DIM_3D else {}
+        self._user = {}  # 3D dimension no longer supported
         self._dimension = dimension
         self._format_type = format_type
         self._include_images = include_images
@@ -1750,7 +1610,7 @@ class CvatDataExtractor(dm.DatasetBase, CVATDataExtractorMixin):
         else:
             assert False
 
-        if self._dimension == DimensionType.DIM_3D or include_images:
+        if include_images:
             self._media_provider = MEDIA_PROVIDERS_BY_DIMENSION[self._dimension](
                 {
                     task.id: MediaSource(task)
@@ -1776,7 +1636,7 @@ class CvatDataExtractor(dm.DatasetBase, CVATDataExtractorMixin):
             self,
             length=len(self._instance_data),
             subsets=subsets,
-            media_type=dm.Image if self._dimension == DimensionType.DIM_2D else dm.PointCloud,
+            media_type=dm.Image,  # 3D dimension no longer supported
         )
         self._categories = self.load_categories(self._instance_meta['labels'])
 
@@ -1785,48 +1645,26 @@ class CvatDataExtractor(dm.DatasetBase, CVATDataExtractorMixin):
             'path': frame_data.name + self._ext_per_task[frame_data.task_id],
             'ext': self._ext_per_task[frame_data.task_id] or frame_data.name.rsplit(osp.extsep, maxsplit=1)[1],
         }
-        if self._dimension == DimensionType.DIM_3D:
-            dm_media: dm.PointCloud = self._media_provider.get_media_for_frame(
+        # 3D dimension no longer supported - always use 2D path
+        dm_media_args['size'] = (frame_data.height, frame_data.width)
+        if self._include_images:
+            dm_media: dm.Image = self._media_provider.get_media_for_frame(
                 frame_data.task_id, frame_data.idx, **dm_media_args
             )
         else:
-            dm_media_args['size'] = (frame_data.height, frame_data.width)
-            if self._include_images:
-                dm_media: dm.Image = self._media_provider.get_media_for_frame(
-                    frame_data.task_id, frame_data.idx, **dm_media_args
-                )
-            else:
-                dm_media = dm.Image.from_file(**dm_media_args)
+            dm_media = dm.Image.from_file(**dm_media_args)
 
         dm_anno = partial(self._read_cvat_anno, frame_data, self._instance_meta['labels'])
 
         dm_attributes = {'frame': frame_data.frame}
 
-        if self._dimension == DimensionType.DIM_2D:
-            dm_item = dm.DatasetItem(
-                id=osp.splitext(frame_data.name)[0],
-                subset=frame_data.subset,
-                annotations=dm_anno,
-                media=dm_media,
-                attributes=dm_attributes,
-            )
-        elif self._dimension == DimensionType.DIM_3D:
-            if self._format_type == "sly_pointcloud":
-                dm_attributes["name"] = self._user["name"]
-                dm_attributes["createdAt"] = self._user["createdAt"]
-                dm_attributes["updatedAt"] = self._user["updatedAt"]
-                dm_attributes["labels"] = []
-                for (idx, (_, label)) in enumerate(self._instance_meta['labels']):
-                    dm_attributes["labels"].append({"label_id": idx, "name": label["name"], "color": label["color"], "type": label["type"]})
-                    dm_attributes["track_id"] = -1
-
-            dm_item = dm.DatasetItem(
-                id=osp.splitext(osp.split(frame_data.name)[-1])[0],
-                subset=frame_data.subset,
-                annotations=dm_anno,
-                media=dm_media,
-                attributes=dm_attributes,
-            )
+        dm_item = dm.DatasetItem(
+            id=osp.splitext(frame_data.name)[0],
+            subset=frame_data.subset,
+            annotations=dm_anno,
+            media=dm_media,
+            attributes=dm_attributes,
+        )
 
         return dm_item
 
@@ -2048,15 +1886,7 @@ class CvatToDmAnnotationConverter:
                 label=dm_label, attributes=dm_attr, group=dm_group,
                 z_order=shape.z_order)
         elif shape.type == ShapeType.CUBOID:
-            if self.dimension == DimensionType.DIM_3D:
-                anno_id = getattr(shape, 'track_id', None)
-                if anno_id is None:
-                    anno_id = self.num_of_tracks + index
-                position, rotation, scale = dm_points[0:3], dm_points[3:6], dm_points[6:9]
-                anno = dm.Cuboid3d(
-                    id=anno_id, position=position, rotation=rotation, scale=scale,
-                    label=dm_label, attributes=dm_attr, group=dm_group
-                )
+            pass  # 3D cuboids no longer supported
         elif shape.type == ShapeType.SKELETON:
             elements = []
             for element in shape.elements:
