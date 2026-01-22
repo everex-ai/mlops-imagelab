@@ -3284,13 +3284,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/stats.js@npm:*":
-  version: 0.17.3
-  resolution: "@types/stats.js@npm:0.17.3"
-  checksum: 10c0/ccccc992c6dfe08fb85049aa3ce44ca7e428db8da4a3edd20298f1c8b72768021fa8bacdfbe8e9735a7552ee5d57f667c6f557050ad2d9a87b699b3566a6177a
-  languageName: node
-  linkType: hard
-
 "@types/supports-color@npm:^8.0.0":
   version: 8.1.3
   resolution: "@types/supports-color@npm:8.1.3"
@@ -3302,18 +3295,6 @@ __metadata:
   version: 0.2.5
   resolution: "@types/text-table@npm:0.2.5"
   checksum: 10c0/967054ba7509bf6ba4dda8adf81d048a7773b35295edb8670c045b6e27bda556a1917c8a29d4ea6b7d7e5b494785500779a002508c4415ef2e8b2a5351ca2066
-  languageName: node
-  linkType: hard
-
-"@types/three@npm:^0.156.0":
-  version: 0.156.0
-  resolution: "@types/three@npm:0.156.0"
-  dependencies:
-    "@types/stats.js": "npm:*"
-    "@types/webxr": "npm:*"
-    fflate: "npm:~0.6.10"
-    meshoptimizer: "npm:~0.18.1"
-  checksum: 10c0/a1b3f6ede6022dd8d2599b09a1f7af6fd09704ebfbf17023e6e17c246c5f68ae972167c85f202eaa2e16da7dc3dee07e1c304476e302273b072f43cc6df322ff
   languageName: node
   linkType: hard
 
@@ -3335,13 +3316,6 @@ __metadata:
   version: 0.0.3
   resolution: "@types/use-sync-external-store@npm:0.0.3"
   checksum: 10c0/82824c1051ba40a00e3d47964cdf4546a224e95f172e15a9c62aa3f118acee1c7518b627a34f3aa87298a2039f982e8509f92bfcc18bea7c255c189c293ba547
-  languageName: node
-  linkType: hard
-
-"@types/webxr@npm:*":
-  version: 0.5.16
-  resolution: "@types/webxr@npm:0.5.16"
-  checksum: 10c0/7df4f693c58dc15a6749f37dcf0d29dc72c8e63dc8a7b8990120b2ab3492ad998e6c23a9d175b34a31ced36612b94658b1d6a25abf26d22c9ef35bdce512bcc9
   languageName: node
   linkType: hard
 
@@ -4802,15 +4776,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"camera-controls@npm:^1.25.3":
-  version: 1.38.2
-  resolution: "camera-controls@npm:1.38.2"
-  peerDependencies:
-    three: ">=0.126.1"
-  checksum: 10c0/19b707fb4edfd19ac91bf096ee5d0a361640cef97fd0687e1469d72422108bf2d0c2385062bef5698569c5b35a3ad7445472eebcfdf37d0df63a3075129ee46d
-  languageName: node
-  linkType: hard
-
 "caniuse-lite@npm:^1.0.30001587, caniuse-lite@npm:^1.0.30001599":
   version: 1.0.30001727
   resolution: "caniuse-lite@npm:1.0.30001727"
@@ -5644,23 +5609,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"cvat-canvas3d@link:./../cvat-canvas3d::locator=cvat-ui%40workspace%3Acvat-ui":
-  version: 0.0.0-use.local
-  resolution: "cvat-canvas3d@link:./../cvat-canvas3d::locator=cvat-ui%40workspace%3Acvat-ui"
-  languageName: node
-  linkType: soft
-
-"cvat-canvas3d@workspace:cvat-canvas3d":
-  version: 0.0.0-use.local
-  resolution: "cvat-canvas3d@workspace:cvat-canvas3d"
-  dependencies:
-    "@types/three": "npm:^0.156.0"
-    camera-controls: "npm:^1.25.3"
-    cvat-core: "link:./../cvat-core"
-    three: "npm:^0.156.1"
-  languageName: unknown
-  linkType: soft
-
 "cvat-canvas@link:./../cvat-canvas::locator=cvat-ui%40workspace%3Acvat-ui":
   version: 0.0.0-use.local
   resolution: "cvat-canvas@link:./../cvat-canvas::locator=cvat-ui%40workspace%3Acvat-ui"
@@ -5679,12 +5627,6 @@ __metadata:
     svg.resize.js: "npm:1.4.3"
     svg.select.js: "npm:3.0.1"
   languageName: unknown
-  linkType: soft
-
-"cvat-core@link:./../cvat-core::locator=cvat-canvas3d%40workspace%3Acvat-canvas3d":
-  version: 0.0.0-use.local
-  resolution: "cvat-core@link:./../cvat-core::locator=cvat-canvas3d%40workspace%3Acvat-canvas3d"
-  languageName: node
   linkType: soft
 
 "cvat-core@link:./../cvat-core::locator=cvat-ui%40workspace%3Acvat-ui":
@@ -5753,7 +5695,6 @@ __metadata:
     chart.js: "npm:^4.4.8"
     chartjs-plugin-datalabels: "npm:^2.2.0"
     cvat-canvas: "link:./../cvat-canvas"
-    cvat-canvas3d: "link:./../cvat-canvas3d"
     cvat-core: "link:./../cvat-core"
     dayjs: "npm:^1.11.18"
     dotenv-webpack: "npm:^8.0.1"
@@ -7281,13 +7222,6 @@ __metadata:
     picomatch:
       optional: true
   checksum: 10c0/45b559cff889934ebb8bc498351e5acba40750ada7e7d6bde197768d2fa67c149be8ae7f8ff34d03f4e1eb20f2764116e56440aaa2f6689e9a4aa7ef06acafe9
-  languageName: node
-  linkType: hard
-
-"fflate@npm:~0.6.10":
-  version: 0.6.10
-  resolution: "fflate@npm:0.6.10"
-  checksum: 10c0/c452f720e4cb404b300fceb8ef0bdf345f18fbfd3f57f7d0974dce5f5e2ac0e8dd4b6ff4bb7061ae74fd919b9c707172f9dbd44d91149b1137199b8c705768f1
   languageName: node
   linkType: hard
 
@@ -10673,13 +10607,6 @@ __metadata:
   version: 1.4.1
   resolution: "merge2@npm:1.4.1"
   checksum: 10c0/254a8a4605b58f450308fc474c82ac9a094848081bf4c06778200207820e5193726dc563a0d2c16468810516a5c97d9d3ea0ca6585d23c58ccfff2403e8dbbeb
-  languageName: node
-  linkType: hard
-
-"meshoptimizer@npm:~0.18.1":
-  version: 0.18.1
-  resolution: "meshoptimizer@npm:0.18.1"
-  checksum: 10c0/8a825c58b20b65585e8d00788843929b60c66ba4297e89afaa49f7c51ab9a0f7b9130f90cc9ad1b9b48b3d1bee3beb1bc93608acba0d73e78995c3e6e5ca436b
   languageName: node
   linkType: hard
 
@@ -17141,13 +17068,6 @@ __metadata:
   peerDependencies:
     tslib: ^2
   checksum: 10c0/52194642c129615b6af15648621be9a2784ad25526e3facca6c28aa1a36ea32245ef146ebc3fbaf64a3605b8301a5335da505d0c314f851ff293b184e0de7fb9
-  languageName: node
-  linkType: hard
-
-"three@npm:^0.156.1":
-  version: 0.156.1
-  resolution: "three@npm:0.156.1"
-  checksum: 10c0/e1f8c5e1a1f4c9b431279c3b9875cbd64b2456c2031116543583320192873042d18e7c1255edb9f9b167796ae338e08e9185cfdd29c3fc721e37bb35cfd6b118
   languageName: node
   linkType: hard
 
