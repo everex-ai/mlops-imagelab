@@ -3557,7 +3557,6 @@ def generate_manifest_file(
             "sorting_method": sorting_method,
             "use_image_hash": True,
             "data_dir": root_dir,
-            "DIM_3D": data_type == ManifestDataType.point_clouds,
         }
 
         scenes, related_images = find_related_images(sources, root_path=root_dir)
@@ -3845,14 +3844,8 @@ class TaskDataAPITestCase(ApiTestBase):
         return self._run_api_v2_task_id_data_get(tid, user, "frame", "original", number)
 
     @staticmethod
-    def _extract_zip_archive(archive, dimension=DimensionType.DIM_2D):
+    def _extract_zip_archive(archive):
         chunk = zipfile.ZipFile(archive, mode="r")
-        if dimension == DimensionType.DIM_3D:
-            return [
-                (f, BytesIO(chunk.read(f)))
-                for f in sorted(chunk.namelist())
-                if f.rsplit(".", maxsplit=1)[-1] == "pcd"
-            ]
         return [(f, Image.open(BytesIO(chunk.read(f)))) for f in sorted(chunk.namelist())]
 
     @staticmethod
@@ -3868,8 +3861,8 @@ class TaskDataAPITestCase(ApiTestBase):
             return images
 
     @classmethod
-    def _extract_zip_chunk(cls, chunk_buffer, dimension=DimensionType.DIM_2D):
-        return [f[1] for f in cls._extract_zip_archive(chunk_buffer, dimension=dimension)]
+    def _extract_zip_chunk(cls, chunk_buffer):
+        return [f[1] for f in cls._extract_zip_archive(chunk_buffer)]
 
     @staticmethod
     def _extract_video_chunk(chunk_buffer):
@@ -3887,7 +3880,6 @@ class TaskDataAPITestCase(ApiTestBase):
         expected_image_sizes,
         expected_storage_method=None,
         expected_uploaded_data_location=StorageChoice.LOCAL,
-        dimension=DimensionType.DIM_2D,
         expected_task_creation_status_state="Finished",
         expected_task_creation_status_reason=None,
         *,
@@ -3963,9 +3955,8 @@ class TaskDataAPITestCase(ApiTestBase):
         response = self._get_preview(task_id, user)
         self.assertEqual(response.status_code, expected_status_code)
         if expected_status_code == status.HTTP_200_OK:
-            if dimension == DimensionType.DIM_2D:
-                preview = Image.open(io.BytesIO(response.content))
-                self.assertLessEqual(preview.size, expected_image_sizes[0])
+            preview = Image.open(io.BytesIO(response.content))
+            self.assertLessEqual(preview.size, expected_image_sizes[0])
 
         # check compressed chunk
         response = self._get_compressed_chunk(task_id, user, 0)
@@ -3976,21 +3967,14 @@ class TaskDataAPITestCase(ApiTestBase):
             else:
                 compressed_chunk = io.BytesIO(b"".join(response.streaming_content))
             if task["data_compressed_chunk_type"] == self.ChunkType.IMAGESET:
-                images = self._extract_zip_chunk(compressed_chunk, dimension=dimension)
+                images = self._extract_zip_chunk(compressed_chunk)
             else:
                 images = self._extract_video_chunk(compressed_chunk)
 
             self.assertEqual(len(images), min(task["data_chunk_size"], len(expected_image_sizes)))
 
             for image_idx, received_image in enumerate(images):
-                if dimension == DimensionType.DIM_3D:
-                    properties = ValidateDimension.get_pcd_properties(received_image)
-                    self.assertEqual(
-                        (int(properties["WIDTH"]), int(properties["HEIGHT"])),
-                        expected_image_sizes[image_idx],
-                    )
-                else:
-                    self.assertEqual(received_image.size, expected_image_sizes[image_idx])
+                self.assertEqual(received_image.size, expected_image_sizes[image_idx])
 
         # check original chunk
         response = self._get_original_chunk(task_id, user, 0)
@@ -4001,19 +3985,12 @@ class TaskDataAPITestCase(ApiTestBase):
             else:
                 original_chunk = io.BytesIO(b"".join(response.streaming_content))
             if task["data_original_chunk_type"] == self.ChunkType.IMAGESET:
-                images = self._extract_zip_chunk(original_chunk, dimension=dimension)
+                images = self._extract_zip_chunk(original_chunk)
             else:
                 images = self._extract_video_chunk(original_chunk)
 
             for image_idx, received_image in enumerate(images):
-                if dimension == DimensionType.DIM_3D:
-                    properties = ValidateDimension.get_pcd_properties(received_image)
-                    self.assertEqual(
-                        (int(properties["WIDTH"]), int(properties["HEIGHT"])),
-                        expected_image_sizes[image_idx],
-                    )
-                else:
-                    self.assertEqual(received_image.size, expected_image_sizes[image_idx])
+                self.assertEqual(received_image.size, expected_image_sizes[image_idx])
 
             self.assertEqual(len(images), min(task["data_chunk_size"], len(expected_image_sizes)))
 
@@ -4039,7 +4016,7 @@ class TaskDataAPITestCase(ApiTestBase):
                 source_images = {}
                 for f in source_files:
                     if zipfile.is_zipfile(f):
-                        for frame_name, frame in self._extract_zip_archive(f, dimension=dimension):
+                        for frame_name, frame in self._extract_zip_archive(f):
                             source_images[frame_name] = frame
                     elif isinstance(f, str) and f.endswith(".rar"):
                         archive_frames = self._extract_rar_archive(f)
@@ -4081,14 +4058,9 @@ class TaskDataAPITestCase(ApiTestBase):
                     ]
 
                 for received_image, source_image in zip(images, source_images):
-                    if dimension == DimensionType.DIM_3D:
-                        server_image = np.array(received_image.getbuffer())
-                        source_image = np.array(source_image.getbuffer())
-                        self.assertTrue(np.array_equal(source_image, server_image))
-                    else:
-                        server_image = np.array(received_image)
-                        source_image = np.array(source_image)
-                        self.assertTrue(np.array_equal(source_image, server_image))
+                    server_image = np.array(received_image)
+                    source_image = np.array(source_image)
+                    self.assertTrue(np.array_equal(source_image, server_image))
 
     def _test_api_v2_tasks_id_data_create_can_upload_local_images(self, user):
         task_spec = {
@@ -4698,62 +4670,6 @@ class TaskDataAPITestCase(ApiTestBase):
         self._test_api_v2_tasks_id_data_spec(
             user, task_spec, task_data, self.ChunkType.VIDEO, self.ChunkType.VIDEO, image_sizes
         )
-
-    def _test_api_v2_tasks_id_data_create_can_use_local_pcd_zip(self, user):
-        task_spec = {
-            "name": "my archive task #24",
-            "overlap": 0,
-            "segment_size": 0,
-            "labels": [
-                {"name": "car"},
-                {"name": "person"},
-            ],
-        }
-
-        image_sizes = self._share_image_sizes["test_pointcloud_pcd.zip"]
-
-        with open(ASSETS_DIR / "test_pointcloud_pcd.zip", "rb") as pcd_file:
-            task_data = {
-                "client_files[0]": pcd_file,
-                "image_quality": 100,
-            }
-            self._test_api_v2_tasks_id_data_spec(
-                user,
-                task_spec,
-                task_data,
-                self.ChunkType.IMAGESET,
-                self.ChunkType.IMAGESET,
-                image_sizes,
-                dimension=DimensionType.DIM_3D,
-            )
-
-    def _test_api_v2_tasks_id_data_create_can_use_local_pcd_kitti(self, user):
-        task_spec = {
-            "name": "my archive task #25",
-            "overlap": 0,
-            "segment_size": 0,
-            "labels": [
-                {"name": "car"},
-                {"name": "person"},
-            ],
-        }
-
-        image_sizes = self._share_image_sizes["test_velodyne_points.zip"]
-
-        with open(ASSETS_DIR / "test_velodyne_points.zip", "rb") as pcd_file:
-            task_data = {
-                "client_files[0]": pcd_file,
-                "image_quality": 100,
-            }
-            self._test_api_v2_tasks_id_data_spec(
-                user,
-                task_spec,
-                task_data,
-                self.ChunkType.IMAGESET,
-                self.ChunkType.IMAGESET,
-                image_sizes,
-                dimension=DimensionType.DIM_3D,
-            )
 
     def _test_api_v2_tasks_id_data_create_can_use_server_images_and_manifest(self, user):
         task_spec_common = {
@@ -5402,7 +5318,6 @@ class JobAnnotationAPITestCase(ApiTestBase):
         create_db_users(cls)
 
     def _create_task(self, owner, assignee, annotation_format=""):
-        dimension = DimensionType.DIM_2D
         data = {
             "name": "my task #1",
             "owner_id": owner.id,
@@ -5498,29 +5413,6 @@ class JobAnnotationAPITestCase(ApiTestBase):
                     ],
                 }
             ]
-        elif annotation_format in [
-            "Datumaro 3D 1.0",
-            "Kitti Raw Format 1.0",
-            "Sly Point Cloud Format 1.0",
-        ]:
-            data["labels"] = [{"name": "car"}, {"name": "bus"}]
-        elif annotation_format in ["ICDAR Recognition 1.0", "ICDAR Localization 1.0"]:
-            data["labels"] = [
-                {
-                    "name": "icdar",
-                    "attributes": [
-                        {
-                            "name": "text",
-                            "mutable": False,
-                            "input_type": "text",
-                            "values": ["word_1", "word_2", "word_3"],
-                        },
-                    ],
-                }
-            ]
-        elif annotation_format in ["Kitti Raw Format 1.0", "Sly Point Cloud Format 1.0"]:
-            data["labels"] = [{"name": "car"}, {"name": "bus"}]
-            dimension = DimensionType.DIM_3D
         elif annotation_format == "ICDAR Segmentation 1.0":
             data["labels"] = [
                 {
@@ -5604,19 +5496,6 @@ class JobAnnotationAPITestCase(ApiTestBase):
                 "image_quality": 75,
                 "frame_filter": "step=3",
             }
-            if dimension == DimensionType.DIM_3D:
-                images = {
-                    "client_files[0]": open(
-                        ASSETS_DIR
-                        / (
-                            "test_pointcloud_pcd.zip"
-                            if annotation_format == "Sly Point Cloud Format 1.0"
-                            else "test_velodyne_points.zip"
-                        ),
-                        "rb",
-                    ),
-                    "image_quality": 100,
-                }
 
             response = self.client.post("/api/tasks/{}/data".format(tid), data=images)
             assert response.status_code == status.HTTP_202_ACCEPTED, response.status_code
