@@ -7,8 +7,7 @@ import { ActionUnion, createAction, ThunkAction } from 'utils/redux';
 import {
     ActiveInference, ModelsQuery,
 } from 'reducers';
-import { getCore, MLModel, RQStatus } from 'cvat-core-wrapper';
-import { filterNull } from 'utils/filter-null';
+import { MLModel } from 'cvat-core-wrapper';
 
 export enum ModelsActionTypes {
     GET_MODELS = 'GET_MODELS',
@@ -99,122 +98,36 @@ export const modelsActions = {
 
 export type ModelsActions = ActionUnion<typeof modelsActions>;
 
-const core = getCore();
-
 export function getModelsAsync(query?: ModelsQuery): ThunkAction {
-    return async (dispatch, getState): Promise<void> => {
+    return async (dispatch): Promise<void> => {
         dispatch(modelsActions.getModels(query));
 
-        const filteredQuery = filterNull(query || getState().models.query);
         try {
-            const result = await core.lambda.list(filteredQuery);
-            const { models, count } = result;
-            dispatch(modelsActions.getModelsSuccess(models, count));
+            // Lambda/AI functionality has been removed
+            throw new Error('AI/ML inference functionality is not available. Lambda manager has been removed.');
         } catch (error) {
             dispatch(modelsActions.getModelsFailed(error));
         }
     };
 }
 
-interface InferenceMeta {
-    taskID: number;
-    requestID: string;
-    functionID: string | number;
-}
-
-function listen(inferenceMeta: InferenceMeta, dispatch: (action: ModelsActions) => void): void {
-    const { taskID, requestID, functionID } = inferenceMeta;
-
-    core.lambda
-        .listen(requestID, functionID, (status: RQStatus, progress: number, message?: string) => {
-            if (status === RQStatus.FAILED || status === RQStatus.UNKNOWN) {
-                dispatch(
-                    modelsActions.getInferenceStatusFailed(
-                        taskID,
-                        {
-                            status,
-                            progress,
-                            functionID,
-                            error: message as string,
-                            id: requestID,
-                        },
-                        new Error(`Inference status for the task ${taskID} is ${status}. ${message}`),
-                    ),
-                );
-
-                return;
-            }
-
-            dispatch(
-                modelsActions.getInferenceStatusSuccess(taskID, {
-                    status,
-                    progress,
-                    functionID,
-                    error: message as string,
-                    id: requestID,
-                }),
-            );
-        })
-        .catch((error: Error) => {
-            dispatch(
-                modelsActions.getInferenceStatusFailed(taskID, {
-                    status: RQStatus.UNKNOWN,
-                    progress: 0,
-                    error: error.toString(),
-                    id: requestID,
-                    functionID,
-                }, error),
-            );
-        });
-}
-
 export function getInferenceStatusAsync(): ThunkAction {
-    return async (dispatch, getState): Promise<void> => {
-        const dispatchCallback = (action: ModelsActions): void => {
-            dispatch(action);
-        };
-
-        const { requestedInferenceIDs } = getState().models;
-
+    return async (dispatch): Promise<void> => {
         try {
-            const requests = await core.lambda.requests();
-            const newListenedIDs: Record<string, boolean> = {};
-            requests
-                .map((request: any): object => ({
-                    taskID: +request.function.task,
-                    requestID: request.id,
-                    functionID: request.function.id,
-                }))
-                .forEach((inferenceMeta: InferenceMeta): void => {
-                    if (!(inferenceMeta.requestID in requestedInferenceIDs)) {
-                        listen(inferenceMeta, dispatchCallback);
-                        newListenedIDs[inferenceMeta.requestID] = true;
-                    }
-                });
-            dispatch(modelsActions.getInferencesSuccess(newListenedIDs));
+            // Lambda/AI functionality has been removed
+            throw new Error('AI/ML inference functionality is not available. Lambda manager has been removed.');
         } catch (error) {
             dispatch(modelsActions.fetchMetaFailed(error));
         }
     };
 }
 
-export function startInferenceAsync(taskId: number, model: MLModel, body: object): ThunkAction {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function startInferenceAsync(taskId: number, _model: MLModel, _body: object): ThunkAction {
     return async (dispatch): Promise<void> => {
         try {
-            const requestID: string = await core.lambda.run(taskId, model, body);
-            const dispatchCallback = (action: ModelsActions): void => {
-                dispatch(action);
-            };
-
-            listen(
-                {
-                    taskID: taskId,
-                    functionID: model.id,
-                    requestID,
-                },
-                dispatchCallback,
-            );
-            dispatch(modelsActions.getInferencesSuccess({ [requestID]: true }));
+            // Lambda/AI functionality has been removed
+            throw new Error('AI/ML inference functionality is not available. Lambda manager has been removed.');
         } catch (error) {
             dispatch(modelsActions.startInferenceFailed(taskId, error));
         }
@@ -222,11 +135,10 @@ export function startInferenceAsync(taskId: number, model: MLModel, body: object
 }
 
 export function cancelInferenceAsync(taskID: number): ThunkAction {
-    return async (dispatch, getState): Promise<void> => {
+    return async (dispatch): Promise<void> => {
         try {
-            const inference = getState().models.inferences[taskID];
-            await core.lambda.cancel(inference.id, inference.functionID);
-            dispatch(modelsActions.cancelInferenceSuccess(taskID, inference));
+            // Lambda/AI functionality has been removed
+            throw new Error('AI/ML inference functionality is not available. Lambda manager has been removed.');
         } catch (error) {
             dispatch(modelsActions.cancelInferenceFailed(taskID, error));
         }

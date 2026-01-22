@@ -28,9 +28,9 @@ import { AIToolsIcon } from 'icons';
 import { Canvas, convertShapesForInteractor } from 'cvat-canvas-wrapper';
 import {
     getCore, Label, MLModel, ObjectState, ObjectType, ShapeType, Job,
-    MinimalShape, InteractorResults, TrackerResults,
 } from 'cvat-core-wrapper';
 import openCVWrapper, { MatType } from 'utils/opencv-wrapper/opencv-wrapper';
+
 import {
     CombinedState, ActiveControl, ToolsBlockerState, PluginComponent,
 } from 'reducers';
@@ -52,6 +52,28 @@ import ApproximationAccuracy, {
 import { switchToolsBlockerState } from 'actions/settings-actions';
 import withVisibilityHandling from './handle-popover-visibility';
 import ToolsTooltips from './interactor-tooltips';
+
+// Local type definitions (previously from lambda-manager)
+interface MinimalShape {
+    type: ShapeType;
+    points: number[];
+}
+
+interface InteractorResults {
+    mask: number[][];
+    points?: [number, number][];
+    bounds?: [number, number, number, number];
+}
+
+interface TrackerResults {
+    states: any[];
+    shapes: MinimalShape[];
+}
+
+interface DetectorResults {
+    version: number;
+    [key: string]: any;
+}
 
 interface StateToProps {
     canvasInstance: Canvas;
@@ -164,8 +186,6 @@ interface State {
     mode: 'detection' | 'interaction' | 'tracking';
     portals: React.ReactPortal[];
 }
-
-type DetectorResults = Extract<Awaited<ReturnType<typeof core.lambda.call>>, { version: number }>;
 
 function trackedRectangleMapper(shape: MinimalShape): MinimalShape {
     return {

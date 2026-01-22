@@ -8,7 +8,6 @@ import {
 } from './server-response-types';
 import PluginRegistry from './plugins';
 import serverProxy from './server-proxy';
-import lambdaManager from './lambda-manager';
 import { AnnotationFormats } from './annotation-formats';
 import logger from './logger';
 import * as enums from './enums';
@@ -57,14 +56,6 @@ export default interface CVATCore {
     plugins: {
         list: typeof PluginRegistry.list;
         register: typeof PluginRegistry.register;
-    };
-    lambda: {
-        list: typeof lambdaManager.list;
-        run: typeof lambdaManager.run;
-        call: typeof lambdaManager.call;
-        cancel: typeof lambdaManager.cancel;
-        listen: typeof lambdaManager.listen;
-        requests: typeof lambdaManager.requests;
     };
     server: {
         about: () => Promise<AboutData>;
