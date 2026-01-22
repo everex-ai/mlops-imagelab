@@ -9,7 +9,6 @@ import { JobsActionTypes } from 'actions/jobs-actions';
 import { AuthActionTypes } from 'actions/auth-actions';
 import { BoundariesActionTypes } from 'actions/boundaries-actions';
 import { Canvas, CanvasMode } from 'cvat-canvas-wrapper';
-import { Canvas3d } from 'cvat-canvas3d-wrapper';
 import {
     DimensionType, JobStage, Label, LabelType, ObjectType, ShapeType,
 } from 'cvat-core-wrapper';
@@ -211,13 +210,12 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
             }
 
             if (job.dimension === DimensionType.DIMENSION_2D) {
-                if (queryParameters.initialWorkspace !== Workspace.STANDARD3D) {
-                    workspaceSelected = queryParameters.initialWorkspace;
-                }
+                workspaceSelected = queryParameters.initialWorkspace;
                 workspaceSelected = workspaceSelected || (isReview ? Workspace.REVIEW : Workspace.STANDARD);
             } else {
-                workspaceSelected = Workspace.STANDARD3D;
+                // 3D jobs are no longer supported
                 activeShapeType = ShapeType.CUBOID;
+                workspaceSelected = Workspace.STANDARD;
             }
 
             if (state.canvas.instance) {
@@ -277,7 +275,7 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 },
                 canvas: {
                     ...state.canvas,
-                    instance: job.dimension === DimensionType.DIMENSION_2D ? new Canvas() : new Canvas3d(),
+                    instance: new Canvas(),
                 },
                 colors,
                 workspace: isReview && job.dimension === DimensionType.DIMENSION_2D ?
@@ -662,7 +660,7 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
 
             const objectDoesNotExist = activatedStateID !== null &&
                 !states.some((_state) => _state.clientID === activatedStateID);
-            const canvasIsNotReady = (instance as Canvas | Canvas3d)
+            const canvasIsNotReady = (instance as Canvas)
                 .mode() !== CanvasMode.IDLE || activeControl !== ActiveControl.CURSOR;
 
             if (objectDoesNotExist || canvasIsNotReady || highlightedConflict) {

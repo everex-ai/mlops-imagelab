@@ -3,9 +3,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { Canvas3d } from 'cvat-canvas3d/src/typescript/canvas3d';
 import { Canvas, RectDrawingMethod, CuboidDrawingMethod } from 'cvat-canvas-wrapper';
-import { OrientationVisibility } from 'cvat-canvas3d-wrapper';
 import {
     Webhook, MLModel, Organization, Job, Task, Project, Label, User,
     QualityConflict, FramesMetaData, RQStatus, Event, Invitation, SerializedAPISchema,
@@ -834,7 +832,7 @@ export interface AnnotationState {
             top: number;
             left: number;
         };
-        instance: Canvas | Canvas3d | null;
+        instance: Canvas | null;
         ready: boolean;
         activeControl: ActiveControl;
         activeObjectHidden: boolean;
@@ -1013,7 +1011,6 @@ export interface ShapesSettingsState {
     showBitmap: boolean;
     showProjections: boolean;
     showGroundTruth: boolean;
-    orientationVisibility: OrientationVisibility;
 }
 
 export interface SettingsState {

@@ -40,7 +40,6 @@
     "chart.js": "^4.4.8",
     "chartjs-plugin-datalabels": "^2.2.0",
     "cvat-canvas": "link:./../cvat-canvas",
-    "cvat-canvas3d": "link:./../cvat-canvas3d",
     "cvat-core": "link:./../cvat-core",
     "dayjs": "^1.11.18",
     "dotenv-webpack": "^8.0.1",

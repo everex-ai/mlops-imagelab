@@ -6,7 +6,6 @@
 import { AnyAction, Store } from 'redux';
 import { ThunkAction, ThunkDispatch } from 'utils/redux';
 import isAbleToChangeFrame from 'utils/is-able-to-change-frame';
-import { CanvasMode as Canvas3DMode } from 'cvat-canvas3d-wrapper';
 import {
     RectDrawingMethod, CuboidDrawingMethod, Canvas, CanvasMode as Canvas2DMode,
 } from 'cvat-canvas-wrapper';
@@ -1620,9 +1619,7 @@ export function deleteFrameAsync(frame: number): ThunkAction {
         try {
             dispatch({ type: AnnotationActionTypes.DELETE_FRAME });
 
-            if (canvasInstance &&
-                canvasInstance.mode() !== Canvas2DMode.IDLE &&
-                canvasInstance.mode() !== Canvas3DMode.IDLE) {
+            if (canvasInstance && canvasInstance.mode() !== Canvas2DMode.IDLE) {
                 canvasInstance.cancel();
             }
             await jobInstance.frames.delete(frame);

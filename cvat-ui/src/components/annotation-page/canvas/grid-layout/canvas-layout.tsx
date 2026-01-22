@@ -26,12 +26,6 @@ import { Canvas } from 'cvat-canvas-wrapper';
 import { DimensionType } from 'cvat-core-wrapper';
 import { CombinedState } from 'reducers';
 import CanvasWrapperComponent from 'components/annotation-page/canvas/views/canvas2d/canvas-wrapper';
-import CanvasWrapper3DComponent, {
-    PerspectiveViewComponent,
-    TopViewComponent,
-    SideViewComponent,
-    FrontViewComponent,
-} from 'components/annotation-page/canvas/views/canvas3d/canvas-wrapper3D';
 import ContextImage from 'components/annotation-page/canvas/views/context-image/context-image';
 import CVATTooltip from 'components/common/cvat-tooltip';
 import { useUpdateEffect } from 'utils/hooks';
@@ -47,20 +41,8 @@ const ViewFabric = (itemLayout: ItemLayout): JSX.Element => {
         case ViewType.CANVAS:
             component = <CanvasWrapperComponent />;
             break;
-        case ViewType.CANVAS_3D:
-            component = <PerspectiveViewComponent />;
-            break;
         case ViewType.RELATED_IMAGE:
             component = <ContextImage offset={offset} />;
-            break;
-        case ViewType.CANVAS_3D_FRONT:
-            component = <FrontViewComponent />;
-            break;
-        case ViewType.CANVAS_3D_SIDE:
-            component = <SideViewComponent />;
-            break;
-        case ViewType.CANVAS_3D_TOP:
-            component = <TopViewComponent />;
             break;
         default:
             component = <div> Undefined view </div>;
@@ -92,52 +74,16 @@ const fitLayout = (type: DimensionType, layoutConfig: ItemLayout[]): ItemLayout[
         widthAvail -= updatedLayout[0].w * relatedViewsCols;
     }
 
-    if (type === DimensionType.DIMENSION_2D) {
-        const canvas = layoutConfig
-            .find((item: ItemLayout) => item.viewType === ViewType.CANVAS) as ItemLayout;
-        updatedLayout.push({
-            ...canvas,
-            x: 0,
-            y: 0,
-            w: widthAvail,
-            h: config.CANVAS_WORKSPACE_ROWS,
-        });
-    } else {
-        const canvas = layoutConfig
-            .find((item: ItemLayout) => item.viewType === ViewType.CANVAS_3D) as ItemLayout;
-        const top = layoutConfig
-            .find((item: ItemLayout) => item.viewType === ViewType.CANVAS_3D_TOP) as ItemLayout;
-        const side = layoutConfig
-            .find((item: ItemLayout) => item.viewType === ViewType.CANVAS_3D_SIDE) as ItemLayout;
-        const front = layoutConfig
-            .find((item: ItemLayout) => item.viewType === ViewType.CANVAS_3D_FRONT) as ItemLayout;
-        const helpfulCanvasViewHeight = 3;
-        updatedLayout.push({
-            ...canvas,
-            x: 0,
-            y: 0,
-            w: widthAvail,
-            h: config.CANVAS_WORKSPACE_ROWS - helpfulCanvasViewHeight,
-        }, {
-            ...top,
-            x: 0,
-            y: config.CANVAS_WORKSPACE_ROWS,
-            w: Math.ceil(widthAvail / 3),
-            h: helpfulCanvasViewHeight,
-        }, {
-            ...side,
-            x: Math.ceil(widthAvail / 3),
-            y: config.CANVAS_WORKSPACE_ROWS,
-            w: Math.ceil(widthAvail / 3),
-            h: helpfulCanvasViewHeight,
-        }, {
-            ...front,
-            x: Math.ceil(widthAvail / 3) * 2,
-            y: config.CANVAS_WORKSPACE_ROWS,
-            w: Math.floor(widthAvail / 3),
-            h: helpfulCanvasViewHeight,
-        });
-    }
+    // Only support 2D layout
+    const canvas = layoutConfig
+        .find((item: ItemLayout) => item.viewType === ViewType.CANVAS) as ItemLayout;
+    updatedLayout.push({
+        ...canvas,
+        x: 0,
+        y: 0,
+        w: widthAvail,
+        h: config.CANVAS_WORKSPACE_ROWS,
+    });
 
     return updatedLayout;
 };
@@ -306,7 +252,6 @@ function CanvasLayout({ type }: { type?: DimensionType }): JSX.Element {
                     }) }
                 </ReactGridLayout>
             )}
-            { type === DimensionType.DIMENSION_3D && <CanvasWrapper3DComponent /> }
             <div className='cvat-grid-layout-common-setups'>
                 <CVATTooltip title='Fit views'>
                     <PicCenterOutlined

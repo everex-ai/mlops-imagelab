@@ -30,7 +30,6 @@ import {
 } from 'actions/annotation-actions';
 import AnnotationTopBarComponent from 'components/annotation-page/top-bar/top-bar';
 import { Canvas } from 'cvat-canvas-wrapper';
-import { Canvas3d } from 'cvat-canvas3d-wrapper';
 import { FramesMetaData, Job } from 'cvat-core-wrapper';
 import {
     ActiveControl, CombinedState, FrameSpeed, NavigationType, ToolsBlockerState, Workspace,
@@ -66,7 +65,7 @@ interface StateToProps {
     workspace: Workspace;
     keyMap: KeyMap;
     normalizedKeyMap: Record<string, string>;
-    canvasInstance: Canvas | Canvas3d;
+    canvasInstance: Canvas;
     forceExit: boolean;
     ranges: string;
     activeControl: ActiveControl;

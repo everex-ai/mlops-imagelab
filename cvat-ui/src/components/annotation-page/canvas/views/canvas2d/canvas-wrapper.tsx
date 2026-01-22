@@ -20,7 +20,6 @@ import {
 } from 'reducers';
 import { EventScope } from 'cvat-logger';
 import { Canvas, HighlightSeverity, CanvasHint } from 'cvat-canvas-wrapper';
-import { Canvas3d } from 'cvat-canvas3d-wrapper';
 import {
     AnnotationConflict, ObjectState, ObjectType, ShapeType, QualityConflict, getCore,
 } from 'cvat-core-wrapper';
@@ -70,7 +69,7 @@ const cvat = getCore();
 const MAX_DISTANCE_TO_OPEN_SHAPE = 50;
 
 interface StateToProps {
-    canvasInstance: Canvas | Canvas3d | null;
+    canvasInstance: Canvas | null;
     jobInstance: any;
     activatedStateID: number | null;
     activatedElementID: number | null;

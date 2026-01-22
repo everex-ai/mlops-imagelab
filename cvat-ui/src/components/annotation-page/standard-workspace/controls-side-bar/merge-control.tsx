@@ -10,20 +10,18 @@ import { MergeIcon } from 'icons';
 import { CombinedState } from 'reducers';
 import CVATTooltip from 'components/common/cvat-tooltip';
 import { useSelector } from 'react-redux';
-import { Canvas3d } from 'cvat-canvas3d-wrapper';
 import { Canvas } from 'cvat-canvas-wrapper';
 
 export interface Props {
     disabled?: boolean;
     dynamicIconProps: Record<string, any>;
-    canvasInstance: Canvas | Canvas3d;
+    canvasInstance: Canvas;
 }
 
 function MergeControl(props: Props): JSX.Element {
     const {
         disabled,
         dynamicIconProps,
-        canvasInstance,
     } = props;
 
     const { normalizedKeyMap } = useSelector((state: CombinedState) => state.shortcuts);
@@ -32,10 +30,7 @@ function MergeControl(props: Props): JSX.Element {
         <Icon className='cvat-merge-control cvat-disabled-canvas-control' component={MergeIcon} />
     ) : (
         <CVATTooltip
-            title={`Merge shapes/tracks ${
-                canvasInstance instanceof Canvas ?
-                    normalizedKeyMap.SWITCH_MERGE_MODE_STANDARD_CONTROLS :
-                    normalizedKeyMap.SWITCH_MERGE_MODE_STANDARD_3D_CONTROLS}`}
+            title={`Merge shapes/tracks ${normalizedKeyMap.SWITCH_MERGE_MODE_STANDARD_CONTROLS}`}
             placement='right'
         >
             <Icon {...dynamicIconProps} component={MergeIcon} />

@@ -22,11 +22,6 @@ const defaultState: SettingsState = {
         showBitmap: false,
         showProjections: false,
         showGroundTruth: false,
-        orientationVisibility: {
-            x: false,
-            y: false,
-            z: false,
-        },
     },
     workspace: {
         autoSave: false,
@@ -167,18 +162,6 @@ export default (state = defaultState, action: AnyAction): SettingsState => {
                 shapes: {
                     ...state.shapes,
                     showProjections: action.payload.showProjections,
-                },
-            };
-        }
-        case SettingsActionTypes.CHANGE_SHAPES_ORIENTATION_VISIBILITY: {
-            return {
-                ...state,
-                shapes: {
-                    ...state.shapes,
-                    orientationVisibility: {
-                        ...state.shapes.orientationVisibility,
-                        ...action.payload.orientationVisibility,
-                    },
                 },
             };
         }

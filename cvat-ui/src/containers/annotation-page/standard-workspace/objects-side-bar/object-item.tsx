@@ -30,7 +30,6 @@ import {
     Label, ObjectState, Attribute, Job, ShapeType,
 } from 'cvat-core-wrapper';
 import { Canvas, CanvasMode } from 'cvat-canvas-wrapper';
-import { Canvas3d } from 'cvat-canvas3d-wrapper';
 import { filterApplicableLabels } from 'utils/filter-applicable-labels';
 import { toClipboard } from 'utils/to-clipboard';
 
@@ -53,7 +52,7 @@ interface StateToProps {
     minZLayer: number;
     maxZLayer: number;
     normalizedKeyMap: Record<string, string>;
-    canvasInstance: Canvas | Canvas3d;
+    canvasInstance: Canvas;
     workspace: Workspace;
 }
 
@@ -105,7 +104,7 @@ function mapStateToProps(state: CombinedState, own: OwnProps): StateToProps {
         minZLayer,
         maxZLayer,
         normalizedKeyMap,
-        canvasInstance: canvasInstance as Canvas | Canvas3d,
+        canvasInstance: canvasInstance as Canvas,
         workspace,
     };
 }

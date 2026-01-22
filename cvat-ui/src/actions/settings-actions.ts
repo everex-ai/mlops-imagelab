@@ -10,7 +10,6 @@ import {
     GridColor, ColorBy, SettingsState, ToolsBlockerState,
     CombinedState,
 } from 'reducers';
-import { OrientationVisibility } from 'cvat-canvas3d-wrapper';
 import { ImageFilter, ImageFilterAlias, SerializedImageFilter } from 'utils/image-processing';
 import GammaCorrection, { GammaFilterOptions } from 'utils/fabric-wrapper/gamma-correction';
 import { resolveConflicts } from 'utils/conflict-detector';
@@ -125,14 +124,7 @@ export function changeShowProjections(showProjections: boolean): AnyAction {
     };
 }
 
-export function changeOrientationVisibility(orientationVisibility: Partial<OrientationVisibility>): AnyAction {
-    return {
-        type: SettingsActionTypes.CHANGE_SHAPES_ORIENTATION_VISIBILITY,
-        payload: {
-            orientationVisibility,
-        },
-    };
-}
+// Removed changeOrientationVisibility function - 3D functionality no longer supported
 
 export function switchRotateAll(rotateAll: boolean): AnyAction {
     return {
