@@ -270,27 +270,10 @@ class TaskExportTest(_DbTestBase):
                 "CVAT for images 1.1",
                 "CVAT for video 1.1",
                 "Datumaro 1.0",
-                "Datumaro 3D 1.0",
-                "LabelMe 3.0",
                 "MOT 1.1",
                 "MOTS PNG 1.0",
-                "PASCAL VOC 1.1",
                 "Segmentation mask 1.1",
                 "YOLO 1.1",
-                "ImageNet 1.0",
-                "CamVid 1.0",
-                "WiderFace 1.0",
-                "VGGFace2 1.0",
-                "Market-1501 1.0",
-                "ICDAR Recognition 1.0",
-                "ICDAR Localization 1.0",
-                "ICDAR Segmentation 1.0",
-                "Kitti Raw Format 1.0",
-                "Sly Point Cloud Format 1.0",
-                "KITTI 1.0",
-                "LFW 1.0",
-                "Cityscapes 1.0",
-                "Open Images V6 1.0",
                 "Ultralytics YOLO Classification 1.0",
                 "Ultralytics YOLO Oriented Bounding Boxes 1.0",
                 "Ultralytics YOLO Detection 1.0",
@@ -309,28 +292,11 @@ class TaskExportTest(_DbTestBase):
                 "COCO 1.0",
                 "COCO Keypoints 1.0",
                 "CVAT 1.1",
-                "LabelMe 3.0",
                 "MOT 1.1",
                 "MOTS PNG 1.0",
-                "PASCAL VOC 1.1",
                 "Segmentation mask 1.1",
                 "YOLO 1.1",
-                "ImageNet 1.0",
-                "CamVid 1.0",
-                "WiderFace 1.0",
-                "VGGFace2 1.0",
-                "Market-1501 1.0",
-                "ICDAR Recognition 1.0",
-                "ICDAR Localization 1.0",
-                "ICDAR Segmentation 1.0",
-                "Kitti Raw Format 1.0",
-                "Sly Point Cloud Format 1.0",
-                "KITTI 1.0",
-                "LFW 1.0",
-                "Cityscapes 1.0",
-                "Open Images V6 1.0",
                 "Datumaro 1.0",
-                "Datumaro 3D 1.0",
                 "Ultralytics YOLO Classification 1.0",
                 "Ultralytics YOLO Oriented Bounding Boxes 1.0",
                 "Ultralytics YOLO Detection 1.0",
@@ -354,8 +320,6 @@ class TaskExportTest(_DbTestBase):
                 with self.subTest(format=format_name, save_images=save_images):
                     if not f.ENABLED:
                         self.skipTest("Format is disabled")
-                    if format_name == "VGGFace2 1.0":
-                        self.skipTest("Format is disabled")
 
                     self._test_export(check, task, format_name, save_images=save_images)
 
@@ -368,23 +332,10 @@ class TaskExportTest(_DbTestBase):
             ("CVAT for images 1.1", "cvat"),
             # ('CVAT for video 1.1', 'cvat'), # does not support
             ("Datumaro 1.0", "datumaro"),
-            ("LabelMe 3.0", "label_me"),
             # ('MOT 1.1', 'mot_seq'), # does not support
             # ('MOTS PNG 1.0', 'mots_png'), # does not support
-            ("PASCAL VOC 1.1", "voc"),
             ("Segmentation mask 1.1", "voc"),
             ("YOLO 1.1", "yolo"),
-            ("ImageNet 1.0", "imagenet_txt"),
-            ("CamVid 1.0", "camvid"),
-            ("WiderFace 1.0", "wider_face"),
-            ("VGGFace2 1.0", "vgg_face2"),
-            ("Market-1501 1.0", "market1501"),
-            ("ICDAR Recognition 1.0", "icdar_word_recognition"),
-            ("ICDAR Localization 1.0", "icdar_text_localization"),
-            ("ICDAR Segmentation 1.0", "icdar_text_segmentation"),
-            # ('KITTI 1.0', 'kitti') format does not support empty annotations
-            ("LFW 1.0", "lfw"),
-            # ('Cityscapes 1.0', 'cityscapes'), does not support, empty annotations
             ("Ultralytics YOLO Classification 1.0", "yolo_ultralytics_classification"),
             ("Ultralytics YOLO Oriented Bounding Boxes 1.0", "yolo_ultralytics_oriented_boxes"),
             ("Ultralytics YOLO Detection 1.0", "yolo_ultralytics_detection"),
@@ -706,106 +657,32 @@ class TaskAnnotationsImportTest(_DbTestBase):
         return images
 
     def _generate_task(self, images, annotation_format, **overrides):
-        labels = []
-        if annotation_format in ["ICDAR Recognition 1.0", "ICDAR Localization 1.0"]:
-            labels = [
-                {
-                    "name": "icdar",
-                    "attributes": [
-                        {
-                            "name": "text",
-                            "mutable": False,
-                            "input_type": "text",
-                            "values": ["word1", "word2"],
-                        }
-                    ],
-                }
-            ]
-        elif annotation_format == "ICDAR Segmentation 1.0":
-            labels = [
-                {
-                    "name": "icdar",
-                    "attributes": [
-                        {
-                            "name": "text",
-                            "mutable": False,
-                            "input_type": "text",
-                            "values": ["word_1", "word_2", "word_3"],
-                        },
-                        {
-                            "name": "index",
-                            "mutable": False,
-                            "input_type": "number",
-                            "values": ["0", "1", "2"],
-                        },
-                        {
-                            "name": "color",
-                            "mutable": False,
-                            "input_type": "text",
-                            "values": ["100 110 240", "10 15 20", "120 128 64"],
-                        },
-                        {
-                            "name": "center",
-                            "mutable": False,
-                            "input_type": "text",
-                            "values": ["1 2", "2 4", "10 45"],
-                        },
-                    ],
-                }
-            ]
-        elif annotation_format == "Market-1501 1.0":
-            labels = [
-                {
-                    "name": "market-1501",
-                    "attributes": [
-                        {
-                            "name": "query",
-                            "mutable": False,
-                            "input_type": "select",
-                            "values": ["True", "False"],
-                        },
-                        {
-                            "name": "camera_id",
-                            "mutable": False,
-                            "input_type": "number",
-                            "values": ["0", "1", "2", "3"],
-                        },
-                        {
-                            "name": "person_id",
-                            "mutable": False,
-                            "input_type": "number",
-                            "values": ["1", "2", "3"],
-                        },
-                    ],
-                }
-            ]
-        else:
-            labels = [
-                {
-                    "name": "car",
-                    "attributes": [
-                        {
-                            "name": "model",
-                            "mutable": False,
-                            "input_type": "select",
-                            "default_value": "mazda",
-                            "values": ["bmw", "mazda", "renault"],
-                        },
-                        {
-                            "name": "parked",
-                            "mutable": True,
-                            "input_type": "checkbox",
-                            "default_value": "false",
-                            "values": [],
-                        },
-                    ],
-                },
-                {
-                    "name": "background",
-                    "attributes": [],
-                },
-                {"name": "person"},
-            ]
+        labels = [
+            {
+                "name": "car",
+                "attributes": [
+                    {
+                        "name": "model",
+                        "mutable": False,
+                        "input_type": "select",
+                        "default_value": "mazda",
+                        "values": ["bmw", "mazda", "renault"],
+                    },
+                    {
+                        "name": "parked",
+                        "mutable": True,
+                        "input_type": "checkbox",
+                        "default_value": "false",
+                        "values": [],
+                    },
+                ],
+            },
+            {
+                "name": "background",
+                "attributes": [],
+            },
+            {"name": "person"},
+        ]
 
         task = {"name": "my task #1", "overlap": 0, "segment_size": 100, "labels": labels}
         task.update(overrides)
@@ -816,162 +693,88 @@ class TaskAnnotationsImportTest(_DbTestBase):
         tracks = []
         tags = []
 
-        if annotation_format in ["ICDAR Recognition 1.0", "ICDAR Localization 1.0"]:
-            shapes = [
+        rectangle_shape_wo_attrs = {
+            "frame": 1,
+            "label_id": task["labels"][1]["id"],
+            "group": 0,
+            "source": "manual",
+            "attributes": [],
+            "points": [2.0, 2.1, 40, 10.7],
+            "type": "rectangle",
+            "occluded": False,
+        }
+
+        rectangle_shape_with_attrs = {
+            "frame": 0,
+            "label_id": task["labels"][0]["id"],
+            "group": 0,
+            "source": "manual",
+            "attributes": [
+                {
+                    "spec_id": task["labels"][0]["attributes"][0]["id"],
+                    "value": task["labels"][0]["attributes"][0]["values"][0],
+                },
+                {
+                    "spec_id": task["labels"][0]["attributes"][1]["id"],
+                    "value": task["labels"][0]["attributes"][1]["default_value"],
+                },
+            ],
+            "points": [1.0, 2.1, 10.6, 13.22],
+            "type": "rectangle",
+            "occluded": False,
+        }
+
+        track_wo_attrs = {
+            "frame": 0,
+            "label_id": task["labels"][1]["id"],
+            "group": 0,
+            "source": "manual",
+            "attributes": [],
+            "shapes": [
                 {
                     "frame": 0,
-                    "label_id": task["labels"][0]["id"],
-                    "group": 0,
-                    "source": "manual",
-                    "attributes": [
-                        {
-                            "spec_id": task["labels"][0]["attributes"][0]["id"],
-                            "value": task["labels"][0]["attributes"][0]["values"][0],
-                        },
-                    ],
-                    "points": [1.0, 2.1, 10.6, 53.22],
-                    "type": "rectangle",
+                    "attributes": [],
+                    "points": [1.0, 2.1, 10.6, 53.22, 30, 20.222],
+                    "type": "polygon",
                     "occluded": False,
+                    "outside": False,
                 }
-            ]
-        elif annotation_format == "Market-1501 1.0":
-            tags = [
+            ],
+        }
+
+        tag_wo_attrs = {
+            "frame": 0,
+            "label_id": task["labels"][0]["id"],
+            "group": None,
+            "attributes": [],
+        }
+
+        tag_with_attrs = {
+            "frame": 1,
+            "label_id": task["labels"][0]["id"],
+            "group": 3,
+            "source": "manual",
+            "attributes": [
                 {
-                    "frame": 1,
-                    "label_id": task["labels"][0]["id"],
-                    "group": 0,
-                    "source": "manual",
-                    "attributes": [
-                        {
-                            "spec_id": task["labels"][0]["attributes"][0]["id"],
-                            "value": task["labels"][0]["attributes"][0]["values"][1],
-                        },
-                        {
-                            "spec_id": task["labels"][0]["attributes"][1]["id"],
-                            "value": task["labels"][0]["attributes"][1]["values"][2],
-                        },
-                        {
-                            "spec_id": task["labels"][0]["attributes"][2]["id"],
-                            "value": task["labels"][0]["attributes"][2]["values"][0],
-                        },
-                    ],
-                }
-            ]
-        elif annotation_format == "ICDAR Segmentation 1.0":
-            shapes = [
+                    "spec_id": task["labels"][0]["attributes"][0]["id"],
+                    "value": task["labels"][0]["attributes"][0]["values"][1],
+                },
                 {
-                    "frame": 0,
-                    "label_id": task["labels"][0]["id"],
-                    "group": 0,
-                    "source": "manual",
-                    "attributes": [
-                        {
-                            "spec_id": task["labels"][0]["attributes"][0]["id"],
-                            "value": task["labels"][0]["attributes"][0]["values"][0],
-                        },
-                        {
-                            "spec_id": task["labels"][0]["attributes"][1]["id"],
-                            "value": task["labels"][0]["attributes"][1]["values"][0],
-                        },
-                        {
-                            "spec_id": task["labels"][0]["attributes"][2]["id"],
-                            "value": task["labels"][0]["attributes"][2]["values"][1],
-                        },
-                        {
-                            "spec_id": task["labels"][0]["attributes"][3]["id"],
-                            "value": task["labels"][0]["attributes"][3]["values"][2],
-                        },
-                    ],
-                    "points": [1.0, 2.1, 10.6, 53.22],
-                    "type": "rectangle",
-                    "occluded": False,
-                }
-            ]
+                    "spec_id": task["labels"][0]["attributes"][1]["id"],
+                    "value": task["labels"][0]["attributes"][1]["default_value"],
+                },
+            ],
+        }
+
+        if annotation_format == "CVAT 1.1":
+            shapes = [rectangle_shape_wo_attrs, rectangle_shape_with_attrs]
+            tags = [tag_with_attrs, tag_wo_attrs]
+        elif annotation_format == "MOTS PNG 1.0":
+            tracks = [track_wo_attrs]
         else:
-            rectangle_shape_wo_attrs = {
-                "frame": 1,
-                "label_id": task["labels"][1]["id"],
-                "group": 0,
-                "source": "manual",
-                "attributes": [],
-                "points": [2.0, 2.1, 40, 10.7],
-                "type": "rectangle",
-                "occluded": False,
-            }
-
-            rectangle_shape_with_attrs = {
-                "frame": 0,
-                "label_id": task["labels"][0]["id"],
-                "group": 0,
-                "source": "manual",
-                "attributes": [
-                    {
-                        "spec_id": task["labels"][0]["attributes"][0]["id"],
-                        "value": task["labels"][0]["attributes"][0]["values"][0],
-                    },
-                    {
-                        "spec_id": task["labels"][0]["attributes"][1]["id"],
-                        "value": task["labels"][0]["attributes"][1]["default_value"],
-                    },
-                ],
-                "points": [1.0, 2.1, 10.6, 13.22],
-                "type": "rectangle",
-                "occluded": False,
-            }
-
-            track_wo_attrs = {
-                "frame": 0,
-                "label_id": task["labels"][1]["id"],
-                "group": 0,
-                "source": "manual",
-                "attributes": [],
-                "shapes": [
-                    {
-                        "frame": 0,
-                        "attributes": [],
-                        "points": [1.0, 2.1, 10.6, 53.22, 30, 20.222],
-                        "type": "polygon",
-                        "occluded": False,
-                        "outside": False,
-                    }
-                ],
-            }
-
-            tag_wo_attrs = {
-                "frame": 0,
-                "label_id": task["labels"][0]["id"],
-                "group": None,
-                "attributes": [],
-            }
-
-            tag_with_attrs = {
-                "frame": 1,
-                "label_id": task["labels"][0]["id"],
-                "group": 3,
-                "source": "manual",
-                "attributes": [
-                    {
-                        "spec_id": task["labels"][0]["attributes"][0]["id"],
-                        "value": task["labels"][0]["attributes"][0]["values"][1],
-                    },
-                    {
-                        "spec_id": task["labels"][0]["attributes"][1]["id"],
-                        "value": task["labels"][0]["attributes"][1]["default_value"],
-                    },
-                ],
-            }
-
-            if annotation_format == "VGGFace2 1.0":
-                shapes = [rectangle_shape_wo_attrs]
-            elif annotation_format == "CVAT 1.1":
-                shapes = [rectangle_shape_wo_attrs, rectangle_shape_with_attrs]
-                tags = [tag_with_attrs, tag_wo_attrs]
-            elif annotation_format == "MOTS PNG 1.0":
-                tracks = [track_wo_attrs]
-            else:
-                shapes = [rectangle_shape_wo_attrs, rectangle_shape_with_attrs]
-                tags = [tag_wo_attrs]
-                tracks = [track_wo_attrs]
+            shapes = [rectangle_shape_wo_attrs, rectangle_shape_with_attrs]
+            tags = [tag_wo_attrs]
+            tracks = [track_wo_attrs]
 
         annotations = {"version": 0, "tags": tags, "shapes": shapes, "tracks": tracks}
 
@@ -999,12 +802,7 @@ class TaskAnnotationsImportTest(_DbTestBase):
         for f in dm.views.get_import_formats():
             format_name = f.DISPLAY_NAME
 
-            if format_name == "Market-1501 1.0":
-                images = self._generate_task_images_by_names(
-                    ["img0.0.0_0", "1.0_c3s1_000000_00", "img0.0.0_1"]
-                )
-            else:
-                images = self._generate_task_images(3, "img0.0.0")
+            images = self._generate_task_images(3, "img0.0.0")
             task = self._generate_task(images, format_name)
             self._generate_annotations(task, format_name)
 
