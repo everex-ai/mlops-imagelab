@@ -566,7 +566,7 @@ def _create_task_manifest_from_cloud_data(
             k: {'related_images': related_images[k] }
             for k in related_images
         },
-        DIM_3D=(dimension == models.DimensionType.DIM_3D),
+        DIM_3D=False,  # 3D dimension no longer supported
         stop=len(sorted_media) - 1,
     )
     manifest.create()
@@ -925,10 +925,7 @@ def create_thread(
             f"same as other tasks in project ({db_task.project.tasks.first().dimension})"
         )
 
-    # Reject 3D tasks - 3D annotation is no longer supported
-    if validate_dimension.dimension == models.DimensionType.DIM_3D:
-        raise ValidationError("3D tasks are no longer supported. Only 2D annotation is available.")
-
+    # 3D tasks are rejected earlier by ValidateDimension.detect_dimension_for_paths()
     db_task.dimension = validate_dimension.dimension
 
     related_images = {}
@@ -1125,7 +1122,7 @@ def create_thread(
                         for k in related_images
                     },
                     data_dir=upload_dir,
-                    DIM_3D=(db_task.dimension == models.DimensionType.DIM_3D),
+                    DIM_3D=False,  # 3D dimension no longer supported
                 )
                 manifest.create()
             else:
