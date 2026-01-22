@@ -189,8 +189,8 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 | 도구 | 위치 | 설명 | 필수 여부 |
 |------|------|------|----------|
 | **Dataset Manifest** | `utils/dataset_manifest/` | **비디오/이미지 메타데이터 관리** | **✅ 필수** |
+| **FFmpeg Compatibility** | `utils/ffmpeg_compatibility/` | **비디오 코덱 테스트 및 검증** | **✅ 유지** |
 | DICOM Converter | `utils/dicom_converter/` | 의료 영상 변환 도구 | △ 특수 용도 |
-| FFmpeg Compatibility | `utils/ffmpeg_compatibility/` | 비디오 코덱 테스트 도구 | △ 개발 시만 |
 
 **Dataset Manifest 상세 설명**:
 - **용도**: CVAT 엔진의 핵심 컴포넌트
@@ -227,20 +227,40 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 - `full.yml`, `main.yml` - CI/CD
 - 기타: `cache.yml`, `codeql-analysis.yml`, `generate-allure-report.yml` 등
 
+### 2.6 Docker Compose 설정 파일
+
+**결정**: 모든 Docker Compose 파일 **유지 확정**
+
+| 파일 | 용도 | 유지 이유 |
+|------|------|----------|
+| `docker-compose.yml` | 기본 프로덕션 구성 | ✅ 필수 |
+| `docker-compose.dev.yml` | 개발 환경 설정 | ✅ 필수 |
+| `docker-compose.test.yml` | 통합 테스트 환경 | ✅ 빌드 검증에 사용 중 |
+| `docker-compose.unit-test.yml` | 유닛 테스트 환경 | ✅ 테스트 자동화 |
+| `docker-compose.ci.yml` | CI/CD 환경 | ✅ GitHub Actions 워크플로우 사용 |
+| `docker-compose.https.yml` | HTTPS/SSL 설정 | ✅ 프로덕션 배포 옵션 |
+| `docker-compose.external_db.yml` | 외부 데이터베이스 연결 | ✅ 프로덕션 확장 옵션 |
+
+**유지 사유**:
+- 다양한 환경 (개발, 테스트, CI, 프로덕션)에서 유연한 배포 가능
+- 테스트 및 검증 스크립트에서 활발히 사용 중
+- 향후 확장성 및 배포 옵션 제공
+
 ---
 
 ## 3. 추가 삭제 가능 항목 (선택적)
 
 향후 필요 시 삭제를 검토할 수 있는 항목들입니다.
 
-### 3.1 특수 용도 유틸리티
+### 3.1 특수 용도 유틸리티 (선택적 삭제 검토)
 
-| 도구 | 위치 | 설명 | 사용 빈도 |
-|------|------|------|----------|
-| DICOM Converter | `utils/dicom_converter/` | 의료 영상 변환 도구 | 낮음 (특수 용도) |
-| FFmpeg Compatibility | `utils/ffmpeg_compatibility/` | 비디오 코덱 테스트 도구 | 낮음 (개발 시만) |
+| 도구 | 위치 | 설명 | 결정 |
+|------|------|------|------|
+| DICOM Converter | `utils/dicom_converter/` | 의료 영상 변환 도구 | 검토 보류 (특수 용도) |
 
-**삭제 가능 조건**: 의료 영상이나 특수 비디오 코덱을 사용하지 않는 경우
+**참고**:
+- **FFmpeg Compatibility** (`utils/ffmpeg_compatibility/`) - **유지 확정**, 비디오 처리에 필요
+- DICOM Converter는 의료 영상을 사용하지 않는 경우에만 삭제 고려
 
 ### 3.2 불필요한 포맷 (dataset_manager 내)
 
@@ -305,19 +325,6 @@ rm cvat/apps/dataset_manager/formats/velodynepoint.py
 # 4. 검증
 ./scripts/verify-build.sh
 ```
-
-### 3.4 Docker Compose 변형
-
-특수 환경 설정 파일들 (사용하지 않는 것만 선택적 삭제):
-
-**Docker Compose 파일들**:
-- `docker-compose.yml` - **기본** (✅ 필수)
-- `docker-compose.dev.yml` - **개발** (✅ 필수)
-- `docker-compose.test.yml` - 통합 테스트 (✅ 빌드 검증용, 유지)
-- `docker-compose.ci.yml` - CI 전용 (△ CI 미사용 시 삭제 가능)
-- `docker-compose.https.yml` - HTTPS 설정 (△ HTTPS 미사용 시 삭제 가능)
-- `docker-compose.external_db.yml` - 외부 DB (△ 외부 DB 미사용 시 삭제 가능)
-- `docker-compose.unit-test.yml` - 유닛 테스트 (△ 유닛 테스트 미사용 시 삭제 가능)
 
 ---
 
@@ -394,15 +401,16 @@ docker compose down
 - SDK 및 CLI
 - **분석 및 모니터링 (Analytics 스택, events 앱)**
 - **Dataset Manifest** (엔진 핵심 기능)
+- **FFmpeg Compatibility** (비디오 처리 검증)
+- **모든 Docker Compose 파일** (다양한 환경 배포 지원)
 - 개발 도구 (changelog.d, dev, GitHub Actions)
 - 문서 (site, CHANGELOG.md, .github, SECURITY.md)
 
 ### 선택적 삭제 가능
 
-- 특수 유틸리티 (DICOM Converter, FFmpeg Compatibility)
+- 특수 유틸리티 (DICOM Converter - 의료 영상 미사용 시)
 - 불필요한 dataset 포맷 (사용하지 않는 것만)
 - 3D 어노테이션 (3D 기능 미사용 시)
-- 특수 Docker Compose 파일 (해당 환경 미사용 시)
 
 ---
 
@@ -433,4 +441,4 @@ docker compose down
 ---
 
 *최초 생성: 2026-01-13*
-*최종 업데이트: 2026-01-22 - 모든 즉시 삭제 대상 완료 (AI/ML, Kubernetes 삭제 완료 및 검증)*
+*최종 업데이트: 2026-01-22 - 모든 즉시 삭제 대상 완료, FFmpeg/Docker Compose 파일 유지 확정*
