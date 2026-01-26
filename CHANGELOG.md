@@ -16,6 +16,118 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- scriv-insert-here -->
 
+<a id='changelog-everex-1.0.0'></a>
+## \[Everex-1.0.0\] - 2026-01-26
+
+**Everex fork**의 첫 번째 릴리스입니다. 이 fork는 3D 어노테이션 지원, 서버리스 AI 기능 등 Everex 사용 사례에 불필요한 기능들을 제거하여 CVAT를 경량화하는 데 중점을 둡니다.
+
+### 삭제됨 (Removed)
+
+#### 3D 어노테이션 지원 (완전 제거)
+- `cvat-canvas3d` 패키지 전체 삭제
+- `DimensionType.DIM_3D` enum 및 모든 3D dimension 참조 제거
+- 코어 엔진에서 포인트 클라우드 어노테이션 지원 제거
+- 데이터셋 포맷 및 컨버터에서 3D 관련 코드 제거
+- `Task.dimension` 필드 제거를 위한 데이터베이스 마이그레이션 추가
+  - 커밋: `9b82956c1`, `b090953f5`, `8cdf66c63`, `61e90c933`, `3b5f57f83`, `606d34ae2`, `541a850c4`, `d47a337f8`
+
+#### AI/ML 및 서버리스 기능
+- `lambda_manager` Django 앱 삭제 (서버리스 AI 기능)
+- Nuclio 통합 및 관련 설정 제거
+- 자동 어노테이션(AA) 서버리스 기능 지원 제거
+  - 커밋: `3ce2d060c`
+
+#### Kubernetes 지원
+- Helm 차트 및 Kubernetes 배포 설정 제거
+- Kubernetes 관련 문서 삭제
+  - 커밋: `3ce2d060c`
+
+#### 데이터셋 포맷 (17개 포맷 제거)
+- DICOM 의료 영상 컨버터 삭제
+- 다음 어노테이션 포맷들 삭제:
+  - Cityscapes
+  - COCO Keypoints
+  - Datumaro (binary)
+  - ICDAR (Localization, Recognition, Segmentation)
+  - Kitti (Raw)
+  - LFW
+  - MOTS PNG
+  - Open Images V6
+  - Supervisely Point Cloud
+  - VGGFace2
+  - WIDER Face
+  - Point Cloud (PCD, PLY, XYZ, Kitti 3D)
+  - 커밋: `06c946918`, `07cf19adf`
+
+#### 기타 삭제
+- `dataset_repo` Django 앱 삭제
+  - 커밋: `691baaa5e`
+
+### 변경됨 (Changed)
+
+- RQ (Redis Queue) 워커들에 `_everex` 접미사 적용:
+  - `cvat_worker_utils_everex`
+  - `cvat_worker_import_everex`
+  - `cvat_worker_export_everex`
+  - `cvat_worker_annotation_everex`
+  - `cvat_worker_webhooks_everex`
+  - `cvat_worker_quality_reports_everex`
+  - `cvat_worker_chunks_everex`
+  - `cvat_worker_consensus_everex`
+
+### 수정됨 (Fixed)
+
+- 포맷 삭제 후 테스트 실패 수정 (`6ad1aa5f4`)
+- unittest skip 데코레이터 문법 수정 (`20777793a`)
+- test_rest_api.py에 누락된 unittest import 추가 (`eb4160cc6`)
+
+### 문서 (Documentation)
+
+- 삭제 전략을 문서화한 `FEATURE_DELETION_PLAN.md` 추가
+- Everex fork 관련 가이드로 `CLAUDE.md` 업데이트
+- FFmpeg 및 Docker Compose 파일 유지 명시
+
+### 경량화 통계 (Optimization Statistics)
+
+#### 코드 변경 통계
+| 지표 | 값 |
+|------|-----|
+| 총 변경 파일 | 254개 |
+| 삭제된 파일 | 177개 |
+| 수정된 파일 | 65개 |
+| 추가된 파일 | 12개 |
+| 삭제된 코드 라인 | 21,309줄 |
+| 추가된 코드 라인 | 2,209줄 |
+| **순 삭제 라인** | **약 19,100줄** |
+
+#### 삭제된 파일 카테고리별 분류
+| 카테고리 | 삭제 파일 수 |
+|---------|-------------|
+| 3D 관련 (canvas3d, 테스트) | 42개 |
+| Serverless AI 함수 | 37개 |
+| Helm Chart (Kubernetes) | 37개 |
+| cvat-canvas3d 패키지 | 16개 |
+| lambda_manager 앱 | 16개 |
+| Dataset 포맷 | 16개 |
+| AI 모델 샘플 | 10개 |
+| 기타 | 3개 |
+
+#### Docker 이미지 크기 비교
+| 이미지 | 공식 CVAT | Everex Fork | 절감량 |
+|--------|-----------|-------------|--------|
+| Server | 1.75GB | 1.34GB | **410MB (23% 감소)** |
+| UI | 168MB | 165MB | 3MB (2% 감소) |
+
+#### 빌드 시간 (Everex Fork, 캐시 없음)
+| 이미지 | 빌드 시간 |
+|--------|----------|
+| Server | 12분 35초 |
+| UI | 3분 16초 |
+
+> 참고: 공식 CVAT와의 빌드 시간 비교는 빌드 환경 문제로 측정하지 못함
+
+---
+
 <a id='changelog-2.52.0'></a>
 ## \[2.52.0\] - 2025-12-15
 

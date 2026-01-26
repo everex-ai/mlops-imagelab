@@ -4,11 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-CVAT (Computer Vision Annotation Tool) is an interactive video and image annotation tool for computer vision. It's a full-stack application with:
+CVAT (Computer Vision Annotation Tool) is an interactive video and image annotation tool for computer vision. This is the **Everex fork** which has removed 3D annotation support and serverless AI functions. It's a full-stack application with:
 - **Backend**: Django REST API with PostgreSQL, Redis (inmem + ondisk), ClickHouse for analytics
 - **Frontend**: React/Redux single-page application with TypeScript
-- **Workers**: Background RQ workers for import, export, annotation, webhooks, quality reports, consensus, chunks, and utils (notifications/cleaning)
+- **Workers**: Background RQ workers for import, export, annotation, webhooks, quality reports, consensus, chunks, and utils (cleaning)
 - **Infrastructure**: Docker Compose deployment with Traefik reverse proxy, OPA for authorization
+
+### Removed Features (Everex Fork)
+- 3D annotation support (`cvat-canvas3d` package removed)
+- Serverless AI/ML functions (`lambda_manager` app removed)
+- Point cloud annotation formats
 
 ## Git Workflow
 
@@ -24,9 +29,6 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 # Rebuild and start (after code changes)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
-
-# With serverless functions (AI models)
-docker compose -f docker-compose.yml -f docker-compose.dev.yml -f components/serverless/docker-compose.serverless.yml up -d
 ```
 
 ### Frontend Development
@@ -35,11 +37,10 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml -f components/ser
 corepack enable yarn
 yarn --immutable
 
-# Build all frontend packages
+# Build all frontend packages (order matters due to dependencies)
 yarn build:cvat-data
 yarn build:cvat-core
 yarn build:cvat-canvas
-yarn build:cvat-canvas3d
 yarn build:cvat-ui
 
 # Start UI dev server (runs on localhost:3000, connects to API at localhost:7000)
@@ -105,9 +106,6 @@ yarn --immutable
 
 # Run Cypress tests
 npx cypress run --browser chrome --spec 'cypress/e2e/actions_tasks/**/*.js'
-
-# Canvas 3D tests (requires headed mode)
-npx cypress run --headed --browser chrome --config-file cypress_canvas3d.config.js
 ```
 
 ### OPA Authorization Tests
@@ -146,16 +144,15 @@ npx remark --quiet --frail -i .remarkignore .
 ## Architecture
 
 ### Frontend Package Structure (Yarn Workspaces)
-- `cvat-data/` - Data parsing utilities (video frames, point clouds)
+- `cvat-data/` - Data parsing utilities (video frames, image archives)
 - `cvat-core/` - API client library, business logic, models
 - `cvat-canvas/` - 2D annotation canvas (SVG-based, uses svg.js)
-- `cvat-canvas3d/` - 3D annotation canvas (Three.js-based)
 - `cvat-ui/` - React application with Redux state management
 
-Dependencies flow: `cvat-data` <- `cvat-core` <- `cvat-canvas/cvat-canvas3d` <- `cvat-ui`
+Dependencies flow: `cvat-data` <- `cvat-core` <- `cvat-canvas` <- `cvat-ui`
 
 ### UI Plugin System
-The cvat-ui supports plugins via the `CLIENT_PLUGINS` environment variable (colon-separated paths). The default SAM plugin is always included. Plugins must export from `src/ts/index.tsx`.
+The cvat-ui supports plugins via the `CLIENT_PLUGINS` environment variable (colon-separated paths). Plugins must export from `src/ts/index.tsx`.
 ```bash
 CLIENT_PLUGINS=/path/to/plugin1:/path/to/plugin2 yarn start:cvat-ui
 ```
@@ -172,8 +169,10 @@ Chrome >= 99, Firefox >= 110, >2% market share (no IE11)
 - `consensus/` - Multi-annotator consensus merging
 - `webhooks/` - External webhook integrations
 - `events/` - Analytics events (stored in ClickHouse)
-- `lambda_manager/` - Serverless function management for AI models
 - `redis_handler/` - Redis data caching and storage utilities
+- `access_tokens/` - Personal access token management
+- `health/` - Health check endpoints
+- `log_viewer/` - Log viewing utilities
 
 ### Key Backend Patterns
 - Authorization via OPA (Open Policy Agent) with Rego rules in `cvat/apps/*/rules/`
@@ -210,20 +209,24 @@ Chrome >= 99, Firefox >= 110, >2% market share (no IE11)
 
 Set `CVAT_DEBUG_ENABLED=yes` environment variable to enable debugging.
 
-## Additional Docker Compose Files
-- `docker-compose.https.yml` - HTTPS configuration with Traefik
-- `docker-compose.ci.yml` - CI/CD configuration
-- `docker-compose.external_db.yml` - External database setup
-- `components/serverless/docker-compose.serverless.yml` - Serverless functions (AI models)
-- `tests/docker-compose.minio.yml` - MinIO for S3-compatible storage testing
-- `tests/docker-compose.file_share.yml` - File share testing
+## RQ Workers
+This fork uses workers with `_everex` suffix:
+- `cvat_worker_utils_everex` - Notifications/cleaning
+- `cvat_worker_import_everex` - Data import
+- `cvat_worker_export_everex` - Data export
+- `cvat_worker_annotation_everex` - Annotation processing
+- `cvat_worker_webhooks_everex` - Webhook delivery
+- `cvat_worker_quality_reports_everex` - Quality report generation
+- `cvat_worker_chunks_everex` - Chunk processing
+- `cvat_worker_consensus_everex` - Consensus merging
 
 ## Local Development without Docker
 
-VS Code launch configurations are provided in `.vscode/launch.json` for running the server and workers locally:
+VS Code launch configurations are provided in `.vscode/launch.json`:
 - `server: django` - Run Django dev server on localhost:7000
-- `server: RQ - *` - Individual RQ worker configurations
+- `server: RQ - *` - Individual RQ worker configurations (import, export, annotation, webhooks, quality reports, cleaning, chunks, consensus)
 - `server: debug` - Compound configuration to run all services together
+- `server: REST API tests` / `sdk: tests` / `cli: tests` - Test runners
 
 Prerequisites for local development: PostgreSQL, Redis instances must be accessible (can use Docker Compose services with exposed ports from `docker-compose.dev.yml`).
 
@@ -233,6 +236,5 @@ Each frontend package and SDK has its own CLAUDE.md with detailed architecture:
 - `cvat-data/CLAUDE.md` - Video/image decoding with H.264 (Broadway.js) and zip archives
 - `cvat-core/CLAUDE.md` - API client library, plugin system, session management
 - `cvat-canvas/CLAUDE.md` - 2D SVG-based annotation canvas (MVC pattern, handler classes)
-- `cvat-canvas3d/CLAUDE.md` - 3D point cloud annotation (Three.js, four-viewport system)
 - `cvat-sdk/CLAUDE.md` - Python SDK with auto-generated OpenAPI client
 - `cvat-cli/CLAUDE.md` - CLI tool command structure and authentication
