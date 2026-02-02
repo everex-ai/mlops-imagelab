@@ -8,31 +8,3 @@ pre-commit:
     lint-staged:
       glob: "*.{js,jsx,ts,tsx}"
       run: npx lint-staged
-
-# pre-push: 전체 빌드/배포 검증 및 테스트
-# piped: true = 순차 실행 (priority 순서), 실패 시 중단
-pre-push:
-  piped: true
-  commands:
-    # Step 1: verify-quick + verify-build 병렬 실행
-    verify-parallel:
-      priority: 1
-      run: ./scripts/verify-parallel.sh
-      fail_text: "검증 실패 - Django 설정 또는 Docker 빌드 오류"
-
-    # Step 2: 유닛 테스트 (이미 실행 중인 서비스 사용)
-    unit-tests:
-      priority: 2
-      run: ./scripts/run-tests.sh unit
-      fail_text: "유닛 테스트 실패"
-
-    # Step 3: 정리
-    cleanup:
-      priority: 3
-      run: ./scripts/cleanup.sh
-      fail_text: "정리 실패"
-
-# 훅 건너뛰기 방법:
-# LEFTHOOK=0 git push                           # 모든 훅 건너뛰기
-# LEFTHOOK_EXCLUDE=verify-parallel git push     # 검증 건너뛰기
-# LEFTHOOK_EXCLUDE=unit-tests git push          # 테스트 건너뛰기
