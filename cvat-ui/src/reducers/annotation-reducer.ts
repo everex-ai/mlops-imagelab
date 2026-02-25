@@ -765,11 +765,16 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
         }
         case AnnotationActionTypes.TOGGLE_OBJECT_SELECTION: {
             const { stateID } = action.payload;
-            const { selectedStatesID } = state.annotations;
-            const index = selectedStatesID.indexOf(stateID);
+            const { selectedStatesID, activatedStateID } = state.annotations;
+            // On first toggle, include the currently activated object in selection
+            let currentSelected = [...selectedStatesID];
+            if (currentSelected.length === 0 && activatedStateID !== null) {
+                currentSelected = [activatedStateID];
+            }
+            const index = currentSelected.indexOf(stateID);
             const newSelected = index >= 0 ?
-                selectedStatesID.filter((id: number) => id !== stateID) :
-                [...selectedStatesID, stateID];
+                currentSelected.filter((id: number) => id !== stateID) :
+                [...currentSelected, stateID];
             return {
                 ...state,
                 annotations: {
