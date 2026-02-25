@@ -664,9 +664,9 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
             }
 
             const { selectedStatesID: currentSelectedIDs } = state.annotations;
-            // Keep selection if the newly activated object is part of the current selection
-            const keepSelection = activatedStateID !== null &&
-                currentSelectedIDs.includes(activatedStateID);
+            // Keep selection if there is an active selection
+            // Selection is only cleared when explicitly clicking empty canvas (without Shift)
+            const keepSelection = currentSelectedIDs.length > 0;
 
             return {
                 ...state,
