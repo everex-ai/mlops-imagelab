@@ -2087,6 +2087,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
                         x: x - offset,
                         y: y - offset,
                         states: this.controller.objects,
+                        shiftKey: e.shiftKey,
                     },
                 });
 

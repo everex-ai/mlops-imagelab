@@ -383,6 +383,7 @@ type Props = StateToProps & DispatchToProps;
 class CanvasWrapperComponent extends React.PureComponent<Props> {
     private debouncedUpdate = debounce(this.updateCanvas.bind(this), 250, { leading: true });
     private canvasTipsRef = React.createRef<CanvasTipsComponent>();
+    private shiftClickStart: { x: number; y: number } | null = null;
 
     public componentDidMount(): void {
         const {
@@ -627,6 +628,7 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         const { canvasInstance } = this.props as { canvasInstance: Canvas };
 
         canvasInstance.html().removeEventListener('mousedown', this.onCanvasMouseDown);
+        canvasInstance.html().removeEventListener('mouseup', this.onCanvasMouseUp as EventListener);
         canvasInstance.html().removeEventListener('click', this.onCanvasClicked);
         canvasInstance.html().removeEventListener('canvas.editstart', this.onCanvasEditStart);
         canvasInstance.html().removeEventListener('canvas.edited', this.onCanvasEditDone);
@@ -796,6 +798,52 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
                 onActivateObject(null, null);
             }
         }
+
+        // Track Shift+mousedown position for Shift+Click selection
+        if (e.shiftKey && e.button === 0) {
+            this.shiftClickStart = { x: e.clientX, y: e.clientY };
+        }
+    };
+
+    private onCanvasMouseUp = (e: MouseEvent): void => {
+        if (!this.shiftClickStart || !e.shiftKey || e.button !== 0) {
+            this.shiftClickStart = null;
+            return;
+        }
+
+        // Only handle as click if mouse didn't move much (not a drag)
+        const dx = Math.abs(e.clientX - this.shiftClickStart.x);
+        const dy = Math.abs(e.clientY - this.shiftClickStart.y);
+        this.shiftClickStart = null;
+        if (dx > 5 || dy > 5) return;
+
+        const { onToggleObjectSelection, annotations } = this.props;
+
+        // Use elementFromPoint to find the shape under cursor
+        const target = document.elementFromPoint(e.clientX, e.clientY);
+        if (!target) return;
+
+        const shapeEl = (target as Element).closest('[data-z-order]');
+        if (!shapeEl) return;
+
+        const idMatch = shapeEl.id?.match(/^cvat_canvas_shape_(\d+)$/);
+        if (!idMatch) return;
+
+        const clickedClientID = parseInt(idMatch[1], 10);
+
+        // Find the top-level state (for skeleton elements, use parentID)
+        const clickedState = annotations.find((s: any) => s.clientID === clickedClientID);
+        if (clickedState) {
+            onToggleObjectSelection(clickedClientID);
+        } else {
+            // It might be a skeleton element, find parent
+            for (const ann of annotations) {
+                if (ann.elements?.some((el: any) => el.clientID === clickedClientID)) {
+                    onToggleObjectSelection(ann.clientID);
+                    break;
+                }
+            }
+        }
     };
 
     private onCanvasClicked = (): void => {
@@ -892,6 +940,11 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         } = this.props;
 
         if (![Workspace.STANDARD, Workspace.REVIEW, Workspace.SINGLE_SHAPE].includes(workspace)) {
+            return;
+        }
+
+        // When Shift is held, don't auto-activate objects (user is selecting)
+        if (event.detail.shiftKey) {
             return;
         }
 
@@ -1124,6 +1177,7 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         );
 
         canvasInstance.html().addEventListener('mousedown', this.onCanvasMouseDown);
+        canvasInstance.html().addEventListener('mouseup', this.onCanvasMouseUp as EventListener);
         canvasInstance.html().addEventListener('click', this.onCanvasClicked);
         canvasInstance.html().addEventListener('canvas.editstart', this.onCanvasEditStart);
         canvasInstance.html().addEventListener('canvas.edited', this.onCanvasEditDone);
