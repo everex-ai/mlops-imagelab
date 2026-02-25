@@ -8,7 +8,6 @@ import _cvat from 'cvat-core/src/api';
 
 import ObjectState from 'cvat-core/src/object-state';
 import Webhook from 'cvat-core/src/webhook';
-import MLModel from 'cvat-core/src/ml-model';
 import CloudStorage from 'cvat-core/src/cloud-storage';
 import {
     Label, Attribute,
@@ -30,7 +29,7 @@ import ApiToken from 'cvat-core/src/api-token';
 import { FramesMetaData, FrameData } from 'cvat-core/src/frames';
 import { ServerError, RequestError } from 'cvat-core/src/exceptions';
 import {
-    ShapeType, ObjectType, LabelType, ModelKind, ModelProviders,
+    ShapeType, ObjectType, LabelType,
     DimensionType, JobType, Source, MembershipRole,
     JobStage, JobState, RQStatus, StorageLocation,
 } from 'cvat-core/src/enums';
@@ -87,9 +86,6 @@ export {
     Membership,
     Invitation,
     Comment,
-    MLModel,
-    ModelKind,
-    ModelProviders,
     DimensionType,
     AnnotationFormats,
     Dumper,

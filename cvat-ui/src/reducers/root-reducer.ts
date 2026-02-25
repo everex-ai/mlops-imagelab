@@ -11,7 +11,6 @@ import jobsReducer from './jobs-reducer';
 import aboutReducer from './about-reducer';
 import formatsReducer from './formats-reducer';
 import pluginsReducer from './plugins-reducer';
-import modelsReducer from './models-reducer';
 import notificationsReducer from './notifications-reducer';
 import annotationReducer from './annotation-reducer';
 import settingsReducer from './settings-reducer';
@@ -39,7 +38,6 @@ export default function createRootReducer(): Reducer {
         about: aboutReducer,
         formats: formatsReducer,
         plugins: pluginsReducer,
-        models: modelsReducer,
         notifications: notificationsReducer,
         annotation: annotationReducer,
         settings: settingsReducer,

@@ -15,7 +15,6 @@ import { implementJob, implementTask } from './session-implementation';
 import Project from './project';
 import implementProject from './project-implementation';
 import { Attribute, Label } from './labels';
-import MLModel from './ml-model';
 import { FrameData, FramesMetaData } from './frames';
 import CloudStorage from './cloud-storage';
 import Organization from './organization';
@@ -430,7 +429,6 @@ function build(): CVATCore {
             Label,
             Statistics,
             ObjectState,
-            MLModel,
             Comment,
             Issue,
             FrameData,

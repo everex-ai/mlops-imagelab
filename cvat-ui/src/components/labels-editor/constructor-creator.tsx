@@ -8,11 +8,10 @@ import React, { useCallback, useRef } from 'react';
 import LabelForm from './label-form';
 import { LabelOptColor, SkeletonConfiguration } from './common';
 import SkeletonConfigurator from './skeleton-configurator';
-import PickFromModelComponent from './pick-from-model';
 
 interface Props {
     labelNames: string[];
-    creatorType: 'basic' | 'skeleton' | 'model';
+    creatorType: 'basic' | 'skeleton';
     onCreate: (label: LabelOptColor) => void;
     onCancel: () => void;
 }
@@ -49,26 +48,16 @@ function ConstructorCreator(props: Props): JSX.Element {
 
     return (
         <div className='cvat-label-constructor-creator'>
-            { creatorType === 'model' ? (
-                <PickFromModelComponent
-                    labelNames={labelNames}
-                    onCancel={onCancel}
-                    onCreate={onCreate}
-                />
-            ) : (
-                <>
-                    <LabelForm
-                        label={null}
-                        labelNames={labelNames}
-                        onSubmit={onCreate}
-                        onSkeletonSubmit={creatorType === 'skeleton' ? onSkeletonSubmit : undefined}
-                        resetSkeleton={creatorType === 'skeleton' ? resetSkeleton : undefined}
-                        onCancel={onCancel}
-                    />
-                    {creatorType === 'skeleton' && (
-                        <SkeletonConfigurator label={null} ref={skeletonConfiguratorRef} />
-                    )}
-                </>
+            <LabelForm
+                label={null}
+                labelNames={labelNames}
+                onSubmit={onCreate}
+                onSkeletonSubmit={creatorType === 'skeleton' ? onSkeletonSubmit : undefined}
+                resetSkeleton={creatorType === 'skeleton' ? resetSkeleton : undefined}
+                onCancel={onCancel}
+            />
+            {creatorType === 'skeleton' && (
+                <SkeletonConfigurator label={null} ref={skeletonConfiguratorRef} />
             )}
         </div>
     );

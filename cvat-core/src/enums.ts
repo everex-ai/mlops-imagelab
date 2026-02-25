@@ -152,17 +152,6 @@ export enum HistoryActions {
     COMMIT_ANNOTATIONS = 'Commit annotations',
 }
 
-export enum ModelKind {
-    DETECTOR = 'detector',
-    INTERACTOR = 'interactor',
-    TRACKER = 'tracker',
-    REID = 'reid',
-}
-
-export enum ModelProviders {
-    CVAT = 'cvat',
-}
-
 export const colors = [
     '#33ddff',
     '#fa3253',

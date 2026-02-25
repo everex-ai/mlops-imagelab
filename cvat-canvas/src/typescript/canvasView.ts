@@ -1947,6 +1947,22 @@ export class CanvasViewImpl implements CanvasView, Listener {
                     return;
                 }
 
+                // Don't start canvas drag if clicking on a selected shape
+                // (the shape will be activated and become draggable instead)
+                if (this.selectedClientIDs.length > 0 && event.button === 0) {
+                    const target = event.target as Element;
+                    const shapeElement = target?.closest('[data-z-order]');
+                    if (shapeElement) {
+                        const idMatch = shapeElement.id?.match(/^cvat_canvas_shape_(\d+)$/);
+                        if (idMatch) {
+                            const clickedID = parseInt(idMatch[1], 10);
+                            if (this.selectedClientIDs.includes(clickedID)) {
+                                return;
+                            }
+                        }
+                    }
+                }
+
                 if (
                     [Mode.IDLE, Mode.DRAG_CANVAS, Mode.MERGE, Mode.SPLIT]
                         .includes(this.mode) || event.button === 1 || event.altKey

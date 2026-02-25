@@ -663,6 +663,11 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 return state;
             }
 
+            const { selectedStatesID: currentSelectedIDs } = state.annotations;
+            // Keep selection if the newly activated object is part of the current selection
+            const keepSelection = activatedStateID !== null &&
+                currentSelectedIDs.includes(activatedStateID);
+
             return {
                 ...state,
                 annotations: {
@@ -670,7 +675,7 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                     activatedStateID,
                     activatedElementID,
                     activatedAttributeID,
-                    selectedStatesID: [],
+                    selectedStatesID: keepSelection ? currentSelectedIDs : [],
                 },
             };
         }

@@ -15,19 +15,16 @@ import Progress from 'antd/lib/progress';
 import Badge from 'antd/lib/badge';
 import { Task, RQStatus, Request } from 'cvat-core-wrapper';
 import Preview from 'components/common/preview';
-import { ActiveInference, PluginComponent } from 'reducers';
+import { PluginComponent } from 'reducers';
 import StatusMessage from 'components/requests-page/request-status';
 import { dispatchContextMenuEvent } from 'utils/context-menu-helper';
-import AutomaticAnnotationProgress from './automatic-annotation-progress';
 import TaskActionsComponent from './actions-menu';
 
 export interface TaskItemProps {
     taskInstance: any;
     deleted: boolean;
-    activeInference: ActiveInference | null;
     activeRequest: Request | null;
     ribbonPlugins: PluginComponent[];
-    cancelAutoAnnotation(): void;
     updateTaskInState(task: Task): void;
     selected: boolean;
     onClick: () => void;
@@ -155,7 +152,7 @@ class TaskItemComponent extends React.PureComponent<TaskItemProps & RouteCompone
     }
 
     private renderProgress(): JSX.Element {
-        const { taskInstance, activeInference, cancelAutoAnnotation } = this.props;
+        const { taskInstance } = this.props;
         const { importingState } = this.state;
 
         if (importingState) {
@@ -226,10 +223,6 @@ class TaskItemComponent extends React.PureComponent<TaskItemProps & RouteCompone
                         />
                     </Col>
                 </Row>
-                <AutomaticAnnotationProgress
-                    activeInference={activeInference}
-                    cancelAutoAnnotation={cancelAutoAnnotation}
-                />
             </Col>
         );
     }

@@ -30,7 +30,7 @@ interface LabelsEditorProps {
 
 interface LabelsEditorState {
     constructorMode: ConstructorMode;
-    creatorType: 'basic' | 'skeleton' | 'model';
+    creatorType: 'basic' | 'skeleton';
     savedLabels: LabelOptColor[];
     unsavedLabels: LabelOptColor[];
     labelForUpdate: LabelOptColor | null;

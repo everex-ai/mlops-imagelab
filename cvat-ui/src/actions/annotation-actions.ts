@@ -10,7 +10,7 @@ import {
     RectDrawingMethod, CuboidDrawingMethod, Canvas, CanvasMode as Canvas2DMode,
 } from 'cvat-canvas-wrapper';
 import {
-    getCore, MLModel, JobType, Job, QualityConflict,
+    getCore, JobType, Job, QualityConflict,
     ObjectState, ObjectType, ShapeType, JobState, JobValidationLayout,
 } from 'cvat-core-wrapper';
 import logger, { EventScope } from 'cvat-logger';
@@ -1518,9 +1518,9 @@ export function pasteShapeAsync(): ThunkAction {
 }
 
 export function interactWithCanvas(
-    activeInteractor: MLModel | OpenCVTool,
+    activeInteractor: OpenCVTool,
     activeLabelID: number,
-    activeInteractorParameters: MLModel['params']['canvas'],
+    activeInteractorParameters: Record<string, string | number | boolean>,
 ): AnyAction {
     return {
         type: AnnotationActionTypes.INTERACT_WITH_CANVAS,

@@ -11,7 +11,6 @@ const defaultState: PluginsState = {
     initialized: false,
     list: {
         ANALYTICS: false,
-        MODELS: false,
     },
     current: {},
     callbacks: {
@@ -60,21 +59,6 @@ const defaultState: PluginsState = {
                 items: [],
             },
         },
-        modelsPage: {
-            topBar: {
-                items: [],
-            },
-            modelItem: {
-                menu: {
-                    items: [],
-                },
-                topBar: {
-                    menu: {
-                        items: [],
-                    },
-                },
-            },
-        },
         projectActions: {
             items: [],
         },
@@ -99,11 +83,6 @@ const defaultState: PluginsState = {
         about: {
             links: {
                 items: [],
-            },
-        },
-        aiTools: {
-            interactors: {
-                extras: [],
             },
         },
     },

@@ -8,7 +8,6 @@ import { useDispatch } from 'react-redux';
 
 import { PluginsActionTypes, pluginActions } from 'actions/plugins-actions';
 import { getCore, CVATCore, APIWrapperEnterOptions } from 'cvat-core-wrapper';
-import { modelsActions } from 'actions/models-actions';
 import { changeFrameAsync, updateCachedChunksAsync } from 'actions/annotation-actions';
 import { updateJobAsync } from 'actions/jobs-actions';
 import { getCVATStore } from 'cvat-store';
@@ -17,7 +16,6 @@ import { makeBulkOperationAsync } from 'actions/bulk-actions';
 const core = getCore();
 
 export type PluginActionCreators = {
-    getModelsSuccess: typeof modelsActions['getModelsSuccess'],
     changeFrameAsync: typeof changeFrameAsync,
     updateCachedChunksAsync: typeof updateCachedChunksAsync,
     addUIComponent: typeof pluginActions['addUIComponent'],
@@ -73,7 +71,6 @@ function PluginEntrypoint(): null {
                             updateCachedChunksAsync,
                             updateJobAsync,
                             makeBulkOperationAsync,
-                            getModelsSuccess: modelsActions.getModelsSuccess,
                             addUICallback: pluginActions.addUICallback,
                             removeUICallback: pluginActions.removeUICallback,
                             addUIComponent: pluginActions.addUIComponent,

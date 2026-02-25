@@ -9,14 +9,13 @@ import Modal from 'antd/lib/modal';
 import Dropdown from 'antd/lib/dropdown';
 
 import {
-    RQStatus, Task, User, Organization,
+    Task, User, Organization,
 } from 'cvat-core-wrapper';
 import { useDropdownEditField, usePlugins } from 'utils/hooks';
 
 import { CombinedState } from 'reducers';
 import { exportActions } from 'actions/export-actions';
 import { importActions } from 'actions/import-actions';
-import { modelsActions } from 'actions/models-actions';
 import { mergeConsensusJobsAsync } from 'actions/consensus-actions';
 
 import {
@@ -46,14 +45,12 @@ function TaskActionsComponent(props: Readonly<Props>): JSX.Element {
     const dispatch = useDispatch();
     const pluginActions = usePlugins((state: CombinedState) => state.plugins.components.taskActions.items, props);
     const {
-        activeInference,
         mergingConsensus,
         currentOrganization,
         selectedIds,
         currentTasks,
         tasksQuery,
     } = useSelector((state: CombinedState) => ({
-        activeInference: state.models.inferences[taskInstance.id],
         mergingConsensus: state.consensus.actions.merging,
         currentOrganization: state.organizations.current as Organization | null,
         selectedIds: state.tasks.selected,
@@ -105,10 +102,6 @@ function TaskActionsComponent(props: Readonly<Props>): JSX.Element {
 
     const onUploadAnnotations = useCallback(() => {
         dispatch(importActions.openImportDatasetModal(taskInstance));
-    }, [taskInstance]);
-
-    const onRunAutoAnnotation = useCallback(() => {
-        dispatch(modelsActions.showRunModelDialog(taskInstance));
     }, [taskInstance]);
 
     const onMoveTaskToProject = useCallback(() => {
@@ -249,10 +242,6 @@ function TaskActionsComponent(props: Readonly<Props>): JSX.Element {
             startEditField,
             taskId: taskInstance.id,
             projectId: taskInstance.projectId,
-            isAutomaticAnnotationEnabled: (
-                activeInference &&
-                ![RQStatus.FAILED, RQStatus.FINISHED].includes(activeInference.status)
-            ),
             isConsensusEnabled: taskInstance.consensusEnabled,
             isMergingConsensusEnabled: mergingConsensus[`task_${taskInstance.id}`],
             pluginActions,
@@ -261,7 +250,6 @@ function TaskActionsComponent(props: Readonly<Props>): JSX.Element {
             onUploadAnnotations,
             onExportDataset,
             onBackupTask,
-            onRunAutoAnnotation,
             onMoveTaskToProject,
             onDeleteTask,
             selectedIds,
