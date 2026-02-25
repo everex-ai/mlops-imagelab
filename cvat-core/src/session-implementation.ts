@@ -505,6 +505,27 @@ export function implementJob(Job: typeof JobClass): typeof JobClass {
         },
     });
 
+    Object.defineProperty(Job.prototype.annotations.batchRemove, 'implementation', {
+        value: function batchRemoveImplementation(
+            this: JobClass,
+            objectStates: any[],
+            force: boolean,
+            frame: number,
+        ) {
+            return Promise.resolve(getCollection(this).batchRemove(objectStates, force, frame));
+        },
+    });
+
+    Object.defineProperty(Job.prototype.annotations.batchUpdatePoints, 'implementation', {
+        value: function batchUpdatePointsImplementation(
+            this: JobClass,
+            updates: { clientID: number; points: number[]; frame: number }[],
+        ) {
+            getCollection(this).batchUpdatePoints(updates);
+            return Promise.resolve();
+        },
+    });
+
     Object.defineProperty(Job.prototype.annotations.import, 'implementation', {
         value: function importAnnotationsImplementation(
             this: JobClass,

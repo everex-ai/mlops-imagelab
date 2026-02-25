@@ -892,6 +892,7 @@ export interface AnnotationState {
         activatedStateID: number | null;
         activatedElementID: number | null;
         activatedAttributeID: number | null;
+        selectedStatesID: number[];
         highlightedConflict: QualityConflict | null;
         collapsed: Record<number, boolean>;
         collapsedAll: boolean;
@@ -915,6 +916,7 @@ export interface AnnotationState {
     };
     remove: {
         objectState: any;
+        objectStates: any[] | null;
         force: boolean;
     }
     statistics: {

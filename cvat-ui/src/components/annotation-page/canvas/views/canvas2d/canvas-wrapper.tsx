@@ -31,6 +31,7 @@ import {
     resetCanvas,
     updateActiveControl as updateActiveControlAction,
     updateAnnotationsAsync,
+    updateMultipleAnnotationsAsync,
     createAnnotationsAsync,
     mergeAnnotationsAsync,
     groupAnnotationsAsync,
@@ -38,6 +39,8 @@ import {
     sliceAnnotationsAsync,
     splitAnnotationsAsync,
     activateObject,
+    selectObjects as selectObjectsAction,
+    toggleObjectSelection as toggleObjectSelectionAction,
     updateCanvasContextMenu,
     addZLayer,
     switchZLayer,
@@ -118,6 +121,7 @@ interface StateToProps {
     showGroundTruth: boolean;
     highlightedConflict: QualityConflict | null;
     imageFilters: ImageFilter[];
+    selectedStatesID: number[];
     activeControl: ActiveControl;
     activeObjectHidden: boolean;
 }
@@ -148,6 +152,9 @@ interface DispatchToProps {
     onCanvasErrorOccurred(error: Error): void;
     onStartIssue(position: number[]): void;
     onUpdateEditedObject(editedState: ObjectState | null): void;
+    onToggleObjectSelection(stateID: number): void;
+    onSelectObjects(stateIDs: number[]): void;
+    onUpdateMultipleAnnotations(statesToUpdate: any[]): void;
 }
 
 function mapStateToProps(state: CombinedState): StateToProps {
@@ -167,6 +174,7 @@ function mapStateToProps(state: CombinedState): StateToProps {
                 activatedStateID,
                 activatedElementID,
                 activatedAttributeID,
+                selectedStatesID,
                 zLayer: { cur: curZLayer, min: minZLayer, max: maxZLayer },
                 highlightedConflict,
             },
@@ -260,6 +268,7 @@ function mapStateToProps(state: CombinedState): StateToProps {
         conflicts,
         showGroundTruth,
         highlightedConflict,
+        selectedStatesID,
         imageFilters,
         activeObjectHidden,
     };
@@ -356,6 +365,15 @@ function mapDispatchToProps(dispatch: any): DispatchToProps {
         },
         onUpdateEditedObject(editedState: ObjectState | null): void {
             dispatch(updateEditedStateAsync(editedState));
+        },
+        onToggleObjectSelection(stateID: number): void {
+            dispatch(toggleObjectSelectionAction(stateID));
+        },
+        onSelectObjects(stateIDs: number[]): void {
+            dispatch(selectObjectsAction(stateIDs));
+        },
+        onUpdateMultipleAnnotations(statesToUpdate: any[]): void {
+            dispatch(updateMultipleAnnotationsAsync(statesToUpdate));
         },
     };
 }
@@ -597,6 +615,11 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
             }
         }
 
+        const { selectedStatesID } = this.props;
+        if (prevProps.selectedStatesID !== selectedStatesID) {
+            canvasInstance.setSelection(selectedStatesID);
+        }
+
         this.activateOnCanvas();
     }
 
@@ -630,6 +653,9 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         canvasInstance.html().removeEventListener('canvas.joined', this.onCanvasObjectsJoined);
         canvasInstance.html().removeEventListener('canvas.regionselected', this.onCanvasPositionSelected);
         canvasInstance.html().removeEventListener('canvas.splitted', this.onCanvasTrackSplitted);
+
+        canvasInstance.html().removeEventListener('canvas.multiedited', this.onCanvasMultiEdited);
+        canvasInstance.html().removeEventListener('canvas.multiselected', this.onCanvasMultiSelected);
 
         canvasInstance.html().removeEventListener('canvas.error', this.onCanvasErrorOccurrence);
         canvasInstance.html().removeEventListener('canvas.message', this.onCanvasMessage as EventListener);
@@ -758,9 +784,14 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
     };
 
     private onCanvasMouseDown = (e: MouseEvent): void => {
-        const { workspace, activatedStateID, onActivateObject } = this.props;
+        const {
+            workspace, activatedStateID, onActivateObject, onSelectObjects, selectedStatesID,
+        } = this.props;
 
         if ((e.target as HTMLElement).tagName === 'svg' && e.button !== 2) {
+            if (!e.shiftKey && selectedStatesID.length > 0) {
+                onSelectObjects([]);
+            }
             if (activatedStateID !== null && workspace !== Workspace.ATTRIBUTES) {
                 onActivateObject(null, null);
             }
@@ -805,6 +836,15 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
 
     private onCanvasShapeClicked = (e: any): void => {
         const { clientID, parentID } = e.detail.state;
+        const { shiftKey } = e.detail;
+
+        if (shiftKey) {
+            const { onToggleObjectSelection } = this.props;
+            const topLevelID = Number.isInteger(parentID) ? parentID : clientID;
+            onToggleObjectSelection(topLevelID);
+            return;
+        }
+
         let sidebarItem = null;
         if (Number.isInteger(parentID)) {
             sidebarItem = window.document.getElementById(`cvat-objects-sidebar-state-item-element-${clientID}`);
@@ -815,6 +855,23 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         if (sidebarItem) {
             sidebarItem.scrollIntoView();
         }
+    };
+
+    private onCanvasMultiEdited = (event: any): void => {
+        const { onUpdateMultipleAnnotations } = this.props;
+        const { edits } = event.detail;
+        const statesToUpdate = edits.map((edit: { state: any; points: number[] }) => {
+            const updatedState = edit.state;
+            updatedState.points = edit.points;
+            return updatedState;
+        });
+        onUpdateMultipleAnnotations(statesToUpdate);
+    };
+
+    private onCanvasMultiSelected = (event: any): void => {
+        const { onSelectObjects } = this.props;
+        const { clientIDs } = event.detail;
+        onSelectObjects(clientIDs);
     };
 
     private onCanvasShapeDeactivated = (e: any): void => {
@@ -1093,6 +1150,9 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         canvasInstance.html().addEventListener('canvas.joined', this.onCanvasObjectsJoined);
         canvasInstance.html().addEventListener('canvas.regionselected', this.onCanvasPositionSelected);
         canvasInstance.html().addEventListener('canvas.splitted', this.onCanvasTrackSplitted);
+
+        canvasInstance.html().addEventListener('canvas.multiedited', this.onCanvasMultiEdited);
+        canvasInstance.html().addEventListener('canvas.multiselected', this.onCanvasMultiSelected);
 
         canvasInstance.html().addEventListener('canvas.error', this.onCanvasErrorOccurrence);
         canvasInstance.html().addEventListener('canvas.message', this.onCanvasMessage as EventListener);

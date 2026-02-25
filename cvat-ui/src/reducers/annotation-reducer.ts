@@ -118,6 +118,7 @@ const defaultState: AnnotationState = {
         activatedStateID: null,
         activatedElementID: null,
         activatedAttributeID: null,
+        selectedStatesID: [],
         highlightedConflict: null,
         saving: {
             forceExit: false,
@@ -141,6 +142,7 @@ const defaultState: AnnotationState = {
     },
     remove: {
         objectState: null,
+        objectStates: null,
         force: false,
     },
     statistics: {
@@ -366,6 +368,7 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 annotations: {
                     ...state.annotations,
                     activatedStateID: updateActivatedStateID(states, activatedStateID),
+                    selectedStatesID: [],
                     highlightedConflict: null,
                     states,
                     history,
@@ -667,6 +670,7 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                     activatedStateID,
                     activatedElementID,
                     activatedAttributeID,
+                    selectedStatesID: [],
                 },
             };
         }
@@ -712,6 +716,9 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                     ...state.annotations,
                     history,
                     activatedStateID: null,
+                    selectedStatesID: state.annotations.selectedStatesID.filter(
+                        (id: number) => id !== objectState.clientID,
+                    ),
                     states: state.annotations.states.filter(
                         (_objectState: any) => _objectState.clientID !== objectState.clientID,
                     ),
@@ -726,6 +733,7 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 },
                 remove: {
                     objectState: null,
+                    objectStates: null,
                     force: false,
                 },
             };
@@ -735,6 +743,85 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 ...state,
                 remove: {
                     objectState: null,
+                    objectStates: null,
+                    force: false,
+                },
+            };
+        }
+        case AnnotationActionTypes.SELECT_OBJECTS: {
+            const { stateIDs } = action.payload;
+            return {
+                ...state,
+                annotations: {
+                    ...state.annotations,
+                    selectedStatesID: stateIDs,
+                },
+            };
+        }
+        case AnnotationActionTypes.TOGGLE_OBJECT_SELECTION: {
+            const { stateID } = action.payload;
+            const { selectedStatesID } = state.annotations;
+            const index = selectedStatesID.indexOf(stateID);
+            const newSelected = index >= 0 ?
+                selectedStatesID.filter((id: number) => id !== stateID) :
+                [...selectedStatesID, stateID];
+            return {
+                ...state,
+                annotations: {
+                    ...state.annotations,
+                    selectedStatesID: newSelected,
+                },
+            };
+        }
+        case AnnotationActionTypes.REMOVE_OBJECTS: {
+            const { objectStates, force } = action.payload;
+            return {
+                ...state,
+                remove: {
+                    ...state.remove,
+                    objectStates,
+                    force,
+                },
+            };
+        }
+        case AnnotationActionTypes.REMOVE_OBJECTS_SUCCESS: {
+            const { objectStates, history } = action.payload;
+            const removedIDs = new Set(objectStates.map((s: any) => s.clientID));
+            const contextMenuClientID = state.canvas.contextMenu.clientID;
+            const contextMenuVisible = state.canvas.contextMenu.visible;
+
+            return {
+                ...state,
+                annotations: {
+                    ...state.annotations,
+                    history,
+                    activatedStateID: null,
+                    selectedStatesID: [],
+                    states: state.annotations.states.filter(
+                        (_objectState: any) => !removedIDs.has(_objectState.clientID),
+                    ),
+                },
+                canvas: {
+                    ...state.canvas,
+                    contextMenu: {
+                        ...state.canvas.contextMenu,
+                        clientID: removedIDs.has(contextMenuClientID) ? null : contextMenuClientID,
+                        visible: removedIDs.has(contextMenuClientID) ? false : contextMenuVisible,
+                    },
+                },
+                remove: {
+                    objectState: null,
+                    objectStates: null,
+                    force: false,
+                },
+            };
+        }
+        case AnnotationActionTypes.REMOVE_OBJECTS_FAILED: {
+            return {
+                ...state,
+                remove: {
+                    objectState: null,
+                    objectStates: null,
                     force: false,
                 },
             };
@@ -939,6 +1026,7 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 annotations: {
                     ...state.annotations,
                     activatedStateID: updateActivatedStateID(states, activatedStateID),
+                    selectedStatesID: [],
                     states,
                     history,
                     initialized: true,
@@ -1060,7 +1148,7 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                     states: state.annotations.states.filter((_state) => !_state.isGroundTruth),
                     activatedStateID: null,
                     activatedAttributeID: null,
-
+                    selectedStatesID: [],
                 },
                 canvas: {
                     ...state.canvas,

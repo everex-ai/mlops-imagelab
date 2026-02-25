@@ -18,6 +18,7 @@ import {
     copyShape as copyShapeAction,
     switchPropagateVisibility as switchPropagateVisibilityAction,
     removeObject as removeObjectAction,
+    removeObjects as removeObjectsAction,
     fetchAnnotationsAsync,
     changeHideActiveObjectAsync,
 } from 'actions/annotation-actions';
@@ -53,6 +54,7 @@ interface StateToProps {
     colorBy: ColorBy;
     activatedStateID: number | null;
     activatedElementID: number | null;
+    selectedStatesID: number[];
     minZLayer: number;
     maxZLayer: number;
     keyMap: KeyMap;
@@ -68,6 +70,7 @@ interface DispatchToProps {
     updateAnnotations(states: any[]): void;
     collapseStates(states: any[], value: boolean): void;
     removeObject: (objectState: any, force: boolean) => void;
+    removeObjects: (objectStates: any[], force: boolean) => void;
     copyShape: (objectState: any) => void;
     switchPropagateVisibility: (visible: boolean) => void;
     changeFrame(frame: number): void;
@@ -193,6 +196,7 @@ function mapStateToProps(state: CombinedState): StateToProps {
                 collapsedAll,
                 activatedStateID,
                 activatedElementID,
+                selectedStatesID,
                 zLayer: { min: minZLayer, max: maxZLayer },
             },
             job: { instance: jobInstance },
@@ -244,6 +248,7 @@ function mapStateToProps(state: CombinedState): StateToProps {
         colorBy,
         activatedStateID,
         activatedElementID,
+        selectedStatesID,
         minZLayer,
         maxZLayer,
         keyMap,
@@ -266,6 +271,9 @@ function mapDispatchToProps(dispatch: any): DispatchToProps {
         },
         removeObject(objectState: ObjectState, force: boolean): void {
             dispatch(removeObjectAction(objectState, force));
+        },
+        removeObjects(objectStatesArr: ObjectState[], force: boolean): void {
+            dispatch(removeObjectsAction(objectStatesArr, force));
         },
         copyShape(objectState: ObjectState): void {
             dispatch(copyShapeAction(objectState));
@@ -450,10 +458,12 @@ class ObjectsListContainer extends React.PureComponent<Props, State> {
             updateAnnotations,
             changeGroupColor,
             removeObject,
+            removeObjects,
             copyShape,
             switchPropagateVisibility,
             changeFrame,
             workspace,
+            selectedStatesID,
         } = this.props;
         const {
             objectStates, sortedStatesID, statesOrdering, filteredStates,
@@ -551,9 +561,20 @@ class ObjectsListContainer extends React.PureComponent<Props, State> {
             },
             DELETE_OBJECT_STANDARD_WORKSPACE: (event: KeyboardEvent | undefined) => {
                 preventDefault(event);
-                const state = activatedState(true);
-                if (state && !readonly) {
-                    removeObject(state, event ? event.shiftKey : false);
+                if (selectedStatesID.length > 0 && !readonly) {
+                    const allIDs = new Set<number>([...selectedStatesID]);
+                    if (activatedStateID !== null) allIDs.add(activatedStateID);
+                    const statesToRemove = objectStates.filter(
+                        (s: ObjectState) => s.clientID !== null && allIDs.has(s.clientID),
+                    );
+                    if (statesToRemove.length > 0) {
+                        removeObjects(statesToRemove, event ? event.shiftKey : false);
+                    }
+                } else {
+                    const state = activatedState(true);
+                    if (state && !readonly) {
+                        removeObject(state, event ? event.shiftKey : false);
+                    }
                 }
             },
             CHANGE_OBJECT_COLOR: (event: KeyboardEvent | undefined) => {

@@ -77,10 +77,26 @@ image.cvat_canvas_shape_selection {
     visibility: hidden;
 }
 
+.cvat_canvas_shape_multiselected {
+    @extend .cvat_shape_action_dasharray;
+
+    stroke: #40a9ff !important;
+    stroke-width: 2 !important;
+    stroke-dasharray: 6 3 !important;
+}
+
 .cvat_canvas_selection_box {
     fill: white;
     fill-opacity: 0.1;
     stroke: white;
+}
+
+.cvat_canvas_multiselect_box {
+    fill: #40a9ff;
+    fill-opacity: 0.1;
+    stroke: #40a9ff;
+    stroke-width: 1;
+    stroke-dasharray: 5 3;
 }
 
 .cvat_canvas_shape_region_selection {

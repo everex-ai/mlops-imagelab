@@ -130,6 +130,11 @@ export enum AnnotationActionTypes {
     REMOVE_OBJECT = 'REMOVE_OBJECT',
     REMOVE_OBJECT_SUCCESS = 'REMOVE_OBJECT_SUCCESS',
     REMOVE_OBJECT_FAILED = 'REMOVE_OBJECT_FAILED',
+    REMOVE_OBJECTS = 'REMOVE_OBJECTS',
+    REMOVE_OBJECTS_SUCCESS = 'REMOVE_OBJECTS_SUCCESS',
+    REMOVE_OBJECTS_FAILED = 'REMOVE_OBJECTS_FAILED',
+    SELECT_OBJECTS = 'SELECT_OBJECTS',
+    TOGGLE_OBJECT_SELECTION = 'TOGGLE_OBJECT_SELECTION',
     PROPAGATE_OBJECT_SUCCESS = 'PROPAGATE_OBJECT_SUCCESS',
     PROPAGATE_OBJECT_FAILED = 'PROPAGATE_OBJECT_FAILED',
     SWITCH_PROPAGATE_VISIBILITY = 'SWITCH_PROPAGATE_VISIBILITY',
@@ -539,6 +544,55 @@ export function removeObject(objectState: any, force: boolean): AnyAction {
             objectState,
             force,
         },
+    };
+}
+
+export function selectObjects(stateIDs: number[]): AnyAction {
+    return {
+        type: AnnotationActionTypes.SELECT_OBJECTS,
+        payload: { stateIDs },
+    };
+}
+
+export function toggleObjectSelection(stateID: number): AnyAction {
+    return {
+        type: AnnotationActionTypes.TOGGLE_OBJECT_SELECTION,
+        payload: { stateID },
+    };
+}
+
+export function removeObjects(objectStates: any[], force: boolean): AnyAction {
+    return {
+        type: AnnotationActionTypes.REMOVE_OBJECTS,
+        payload: {
+            objectStates,
+            force,
+        },
+    };
+}
+
+export function removeObjectsAsync(objectStates: ObjectState[], force: boolean): ThunkAction {
+    return async (dispatch: ThunkDispatch): Promise<void> => {
+        try {
+            const { frame, jobInstance } = receiveAnnotationsParameters();
+            await jobInstance.logger.log(EventScope.deleteObject, { count: objectStates.length });
+
+            await jobInstance.annotations.batchRemove(objectStates, force, frame);
+            const history = await jobInstance.actions.get();
+
+            dispatch({
+                type: AnnotationActionTypes.REMOVE_OBJECTS_SUCCESS,
+                payload: {
+                    objectStates,
+                    history,
+                },
+            });
+        } catch (error) {
+            dispatch({
+                type: AnnotationActionTypes.REMOVE_OBJECTS_FAILED,
+                payload: { error },
+            });
+        }
     };
 }
 
@@ -1160,6 +1214,30 @@ export function updateAnnotationsAsync(statesToUpdate: any[]): ThunkAction {
                     maxZ,
                 },
             });
+        } catch (error) {
+            dispatch({
+                type: AnnotationActionTypes.UPDATE_ANNOTATIONS_FAILED,
+                payload: { error },
+            });
+            dispatch(fetchAnnotationsAsync());
+        }
+    };
+}
+
+export function updateMultipleAnnotationsAsync(statesToUpdate: any[]): ThunkAction {
+    return async (dispatch: ThunkDispatch): Promise<void> => {
+        const { jobInstance, frame } = receiveAnnotationsParameters();
+
+        try {
+            await jobInstance.annotations.batchUpdatePoints(
+                statesToUpdate.map((s: any) => ({
+                    clientID: s.clientID,
+                    points: s.points,
+                    frame,
+                })),
+            );
+
+            dispatch(fetchAnnotationsAsync());
         } catch (error) {
             dispatch({
                 type: AnnotationActionTypes.UPDATE_ANNOTATIONS_FAILED,

@@ -10,7 +10,12 @@ import Text from 'antd/lib/typography/Text';
 import Modal from 'antd/lib/modal';
 
 import config from 'config';
-import { removeObjectAsync, removeObject as removeObjectAction } from 'actions/annotation-actions';
+import {
+    removeObjectAsync,
+    removeObject as removeObjectAction,
+    removeObjectsAsync,
+    removeObjects as removeObjectsAction,
+} from 'actions/annotation-actions';
 import { ObjectType } from 'cvat-core-wrapper';
 
 export default function RemoveConfirmComponent(): JSX.Element | null {
@@ -18,20 +23,63 @@ export default function RemoveConfirmComponent(): JSX.Element | null {
     const [visible, setVisible] = useState(false);
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState<string | JSX.Element>('');
-    const { objectState, force } = useSelector((state: CombinedState) => ({
+    const { objectState, objectStates, force } = useSelector((state: CombinedState) => ({
         objectState: state.annotation.remove.objectState,
+        objectStates: state.annotation.remove.objectStates,
         force: state.annotation.remove.force,
     }), shallowEqual);
 
     const onOk = useCallback(() => {
-        dispatch(removeObjectAsync(objectState, true));
-    }, [objectState]);
+        if (objectStates && objectStates.length > 0) {
+            dispatch(removeObjectsAsync(objectStates, true));
+        } else if (objectState) {
+            dispatch(removeObjectAsync(objectState, true));
+        }
+    }, [objectState, objectStates]);
 
     const onCancel = useCallback(() => {
-        dispatch(removeObjectAction(null, false));
-    }, []);
+        if (objectStates) {
+            dispatch(removeObjectsAction([], false));
+        } else {
+            dispatch(removeObjectAction(null, false));
+        }
+    }, [objectStates]);
 
     useEffect(() => {
+        // Multi-delete path
+        if (objectStates && objectStates.length > 0) {
+            const hasLocked = objectStates.some((s: any) => s.lock);
+            const hasTracks = objectStates.some((s: any) => s.objectType === ObjectType.TRACK);
+            const needsConfirm = (hasLocked && !force) || (hasTracks && !force);
+
+            if (needsConfirm) {
+                setTitle(hasLocked ? 'Some objects are locked' : 'Remove objects');
+                let msg: string | JSX.Element = `Are you sure you want to remove ${objectStates.length} objects?`;
+                if (hasTracks) {
+                    msg = (
+                        <>
+                            <Text>
+                                {`You are about to remove ${objectStates.length} objects, including tracks. `}
+                                {'Tracks remove many drawn objects on different frames. '}
+                                {msg}
+                            </Text>
+                            <div className='cvat-remove-object-confirm-wrapper'>
+                                {/* eslint-disable-next-line */}
+                                <img src={config.OUTSIDE_PIC_URL} />
+                            </div>
+                        </>
+                    );
+                }
+                setDescription(msg);
+                setVisible(true);
+            } else {
+                setVisible(false);
+                dispatch(removeObjectsAsync(objectStates, true));
+            }
+            return;
+        }
+
+        // Single-delete path (original)
         const newVisible = (!!objectState && !force && objectState.lock) ||
             (objectState?.objectType === ObjectType.TRACK && !force);
         setTitle(objectState?.lock ? 'Object is locked' : 'Remove object');
@@ -61,7 +109,7 @@ export default function RemoveConfirmComponent(): JSX.Element | null {
         if (!newVisible && objectState) {
             dispatch(removeObjectAsync(objectState, true));
         }
-    }, [objectState, force]);
+    }, [objectState, objectStates, force]);
 
     return (
         <Modal
