@@ -3821,6 +3821,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
                             cancelable: true,
                             detail: {
                                 state: element,
+                                shiftKey: e.shiftKey,
                             },
                         }),
                     );
