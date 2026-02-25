@@ -886,10 +886,8 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         const { clientID, parentID } = e.detail.state;
         const { shiftKey } = e.detail;
 
+        // Shift+Click selection is handled by onCanvasMouseUp to avoid double-toggle
         if (shiftKey) {
-            const { onToggleObjectSelection } = this.props;
-            const topLevelID = Number.isInteger(parentID) ? parentID : clientID;
-            onToggleObjectSelection(topLevelID);
             return;
         }
 
