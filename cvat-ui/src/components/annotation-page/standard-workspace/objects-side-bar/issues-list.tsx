@@ -23,6 +23,27 @@ import Paragraph from 'antd/lib/typography/Paragraph';
 import { ConflictSeverity, QualityConflict, Issue } from 'cvat-core-wrapper';
 import { changeShowGroundTruth } from 'actions/settings-actions';
 import { ShowGroundTruthIcon } from 'icons';
+import GlobalHotKeys from 'utils/mousetrap-react';
+import { registerComponentShortcuts } from 'actions/shortcuts-actions';
+import { ShortcutScope } from 'utils/enums';
+import { subKeyMap } from 'utils/component-subkeymap';
+
+const componentShortcuts = {
+    TOGGLE_ISSUES_HIDDEN: {
+        name: 'Toggle issues visibility',
+        description: 'Show or hide all issues on the canvas',
+        sequences: ['t i'],
+        scope: ShortcutScope.OBJECTS_SIDEBAR,
+    },
+    TOGGLE_RESOLVED_ISSUES_HIDDEN: {
+        name: 'Toggle resolved issues visibility',
+        description: 'Show or hide resolved issues on the canvas',
+        sequences: ['t r'],
+        scope: ShortcutScope.OBJECTS_SIDEBAR,
+    },
+};
+
+registerComponentShortcuts(componentShortcuts);
 
 export default function LabelsListComponent(): JSX.Element {
     const dispatch = useDispatch();
@@ -53,6 +74,21 @@ export default function LabelsListComponent(): JSX.Element {
         ready: state.annotation.canvas.ready,
         activeControl: state.annotation.canvas.activeControl,
     }), shallowEqual);
+
+    const { keyMap, normalizedKeyMap } = useSelector(
+        (state: CombinedState) => state.shortcuts,
+    );
+
+    const handlers: Record<keyof typeof componentShortcuts, (event?: KeyboardEvent) => void> = {
+        TOGGLE_ISSUES_HIDDEN: (event?: KeyboardEvent) => {
+            if (event) event.preventDefault();
+            dispatch(reviewActions.switchIssuesHiddenFlag(!issuesHidden));
+        },
+        TOGGLE_RESOLVED_ISSUES_HIDDEN: (event?: KeyboardEvent) => {
+            if (event) event.preventDefault();
+            dispatch(reviewActions.switchIssuesHiddenResolvedFlag(!issuesResolvedHidden));
+        },
+    };
 
     let frames = issues
         .filter((issue: Issue) => !issuesResolvedHidden || !issue.resolved)
@@ -90,6 +126,7 @@ export default function LabelsListComponent(): JSX.Element {
 
     return (
         <>
+            <GlobalHotKeys keyMap={subKeyMap(componentShortcuts, keyMap)} handlers={handlers} />
             <div className='cvat-objects-sidebar-issues-list-header'>
                 <Row justify='start' align='middle'>
                     <Col>
@@ -106,7 +143,7 @@ export default function LabelsListComponent(): JSX.Element {
                         </CVATTooltip>
                     </Col>
                     <Col offset={2}>
-                        <CVATTooltip title='Show/hide all issues'>
+                        <CVATTooltip title={`Show/hide all issues ${normalizedKeyMap.TOGGLE_ISSUES_HIDDEN}`}>
                             {issuesHidden ? (
                                 <EyeInvisibleFilled
                                     className='cvat-issues-sidebar-hidden-issues'
@@ -121,7 +158,9 @@ export default function LabelsListComponent(): JSX.Element {
                         </CVATTooltip>
                     </Col>
                     <Col offset={2}>
-                        <CVATTooltip title='Show/hide resolved issues'>
+                        <CVATTooltip
+                            title={`Show/hide resolved issues ${normalizedKeyMap.TOGGLE_RESOLVED_ISSUES_HIDDEN}`}
+                        >
                             { issuesResolvedHidden ? (
                                 <CheckCircleFilled
                                     className='cvat-issues-sidebar-hidden-resolved-status'
