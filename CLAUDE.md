@@ -19,6 +19,7 @@ CVAT (Computer Vision Annotation Tool) is an interactive video and image annotat
 
 - **Main branch**: `develop` (PRs should target this branch)
 - **Upstream**: `https://github.com/cvat-ai/cvat.git` (official CVAT repo)
+- **Git hooks**: Lefthook runs `lint-staged` on pre-commit for `*.{js,jsx,ts,tsx}` files
 
 ## Build and Development Commands
 
@@ -31,9 +32,14 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
+Production web UI is at `localhost:8081`, Traefik dashboard at `localhost:8091`.
+
+### Container Naming Convention
+All Everex containers use `_everex` suffix: `cvat_server_everex`, `cvat_ui_everex`, `cvat_db_everex`, `cvat_redis_inmem_everex`, `cvat_redis_ondisk_everex`, etc. Network: `cvat_everex`. Use these names when running `docker exec` or `docker logs` commands.
+
 ### Frontend Development
 ```bash
-# Install dependencies (uses yarn workspaces)
+# Install dependencies (uses yarn workspaces, requires Yarn 4.9.2 via corepack)
 corepack enable yarn
 yarn --immutable
 

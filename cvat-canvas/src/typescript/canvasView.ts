@@ -1936,9 +1936,8 @@ export class CanvasViewImpl implements CanvasView, Listener {
                     this.mode === Mode.IDLE &&
                     (event.target === this.content || (event.target as Element)?.classList?.contains('cvat_canvas_image'))
                 ) {
-                    const { offset } = this.controller.geometry;
                     const [x, y] = translateToSVG(this.content, [event.clientX, event.clientY]);
-                    multiSelectStart = { x: x - offset, y: y - offset };
+                    multiSelectStart = { x, y };
                     multiSelectBox = this.adoptedContent.rect(0, 0).attr({
                         x: multiSelectStart.x,
                         y: multiSelectStart.y,
@@ -1974,10 +1973,9 @@ export class CanvasViewImpl implements CanvasView, Listener {
 
         this.canvas.addEventListener('mousemove', (e): void => {
             if (multiSelectBox && multiSelectStart) {
-                const { offset } = this.controller.geometry;
                 const [x, y] = translateToSVG(this.content, [e.clientX, e.clientY]);
-                const curX = x - offset;
-                const curY = y - offset;
+                const curX = x;
+                const curY = y;
                 const boxX = Math.min(multiSelectStart.x, curX);
                 const boxY = Math.min(multiSelectStart.y, curY);
                 const boxW = Math.abs(curX - multiSelectStart.x);
