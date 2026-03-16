@@ -1226,16 +1226,9 @@ export function updateAnnotationsAsync(statesToUpdate: any[]): ThunkAction {
 
 export function updateMultipleAnnotationsAsync(statesToUpdate: any[]): ThunkAction {
     return async (dispatch: ThunkDispatch): Promise<void> => {
-        const { jobInstance, frame } = receiveAnnotationsParameters();
-
         try {
-            await jobInstance.annotations.batchUpdatePoints(
-                statesToUpdate.map((s: any) => ({
-                    clientID: s.clientID,
-                    points: s.points,
-                    frame,
-                })),
-            );
+            const promises = statesToUpdate.map((objectState: any): Promise<any> => objectState.save());
+            await Promise.all(promises);
 
             dispatch(fetchAnnotationsAsync());
         } catch (error) {
