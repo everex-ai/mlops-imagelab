@@ -1039,17 +1039,22 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
             };
         }
         case AnnotationActionTypes.FETCH_ANNOTATIONS_SUCCESS: {
-            const { activatedStateID } = state.annotations;
+            const { activatedStateID, selectedStatesID: prevSelectedIDs } = state.annotations;
             const {
                 states, history, minZ, maxZ,
             } = action.payload;
+
+            const newClientIDs = new Set(states.map((s: any) => s.clientID));
+            const preservedSelectedIDs = prevSelectedIDs.filter(
+                (id: number) => newClientIDs.has(id),
+            );
 
             return {
                 ...state,
                 annotations: {
                     ...state.annotations,
                     activatedStateID: updateActivatedStateID(states, activatedStateID),
-                    selectedStatesID: [],
+                    selectedStatesID: preservedSelectedIDs,
                     states,
                     history,
                     initialized: true,

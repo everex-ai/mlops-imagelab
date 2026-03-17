@@ -117,6 +117,8 @@ export interface DrawData {
     skeletonSVG?: string;
     numberOfPoints?: number;
     initialState?: any;
+    initialStates?: any[];
+    skeletonSVGMap?: Record<number, string>;
     crosshair?: boolean;
     brushTool?: BrushTool;
     redraw?: number;
@@ -755,7 +757,7 @@ export class CanvasModelImpl extends MasterImpl implements CanvasModel {
             throw Error(`Canvas is busy. Action: ${this.data.mode}`);
         }
 
-        if (drawData.enabled) {
+        if (drawData.enabled && !drawData.initialStates?.length) {
             if (drawData.shapeType === 'skeleton' && !drawData.skeletonSVG) {
                 throw new Error('Skeleton template must be specified when drawing a skeleton');
             }
@@ -794,7 +796,9 @@ export class CanvasModelImpl extends MasterImpl implements CanvasModel {
             }
 
             this.data.drawData = { ...drawData };
-            if (this.data.drawData.initialState) {
+            if (this.data.drawData.initialStates?.length) {
+                this.data.drawData.shapeType = 'multi';
+            } else if (this.data.drawData.initialState) {
                 this.data.drawData.shapeType = this.data.drawData.initialState.shapeType;
             }
         }

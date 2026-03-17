@@ -340,32 +340,50 @@ export class CanvasViewImpl implements CanvasView, Listener {
         }
 
         if (data) {
-            const { clientID, elements } = data as any;
-            const points = data.points || elements.map((el: any) => el.points).flat();
-            if (typeof clientID === 'number') {
-                const [state] = this.controller.objects
-                    .filter((_state: any): boolean => _state.clientID === clientID);
-                this.onEditDone(state, points);
-                this.dispatchCanceledEvent();
-                return;
-            }
-
-            const { zLayer } = this.controller;
-            const event: CustomEvent = new CustomEvent('canvas.drawn', {
-                bubbles: false,
-                cancelable: true,
-                detail: {
-                    // eslint-disable-next-line new-cap
-                    state: {
-                        ...data,
-                        zOrder: zLayer || 0,
+            if (data.multiStates) {
+                // Multi-paste result
+                const { zLayer } = this.controller;
+                const event: CustomEvent = new CustomEvent('canvas.drawn', {
+                    bubbles: false,
+                    cancelable: true,
+                    detail: {
+                        states: data.multiStates.map((s: any) => ({
+                            ...s,
+                            zOrder: zLayer || 0,
+                        })),
+                        continue: continueDraw,
+                        duration,
                     },
-                    continue: continueDraw,
-                    duration,
-                },
-            });
+                });
+                this.canvas.dispatchEvent(event);
+            } else {
+                const { clientID, elements } = data as any;
+                const points = data.points || elements.map((el: any) => el.points).flat();
+                if (typeof clientID === 'number') {
+                    const [state] = this.controller.objects
+                        .filter((_state: any): boolean => _state.clientID === clientID);
+                    this.onEditDone(state, points);
+                    this.dispatchCanceledEvent();
+                    return;
+                }
 
-            this.canvas.dispatchEvent(event);
+                const { zLayer } = this.controller;
+                const event: CustomEvent = new CustomEvent('canvas.drawn', {
+                    bubbles: false,
+                    cancelable: true,
+                    detail: {
+                        // eslint-disable-next-line new-cap
+                        state: {
+                            ...data,
+                            zOrder: zLayer || 0,
+                        },
+                        continue: continueDraw,
+                        duration,
+                    },
+                });
+
+                this.canvas.dispatchEvent(event);
+            }
         } else if (!continueDraw) {
             this.dispatchCanceledEvent();
         }

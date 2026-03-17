@@ -689,7 +689,41 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
             updateActiveControl(ActiveControl.CURSOR);
         }
 
-        const { state, duration } = event.detail;
+        const { duration } = event.detail;
+
+        // Multi-paste: event.detail.states is an array
+        if (event.detail.states) {
+            const objectStates = event.detail.states.map((s: any) => {
+                s.frame = frame;
+                s.objectType = s.objectType ?? activeObjectType;
+                s.label = s.label || jobInstance.labels
+                    .filter((label: any) => label.id === activeLabelID)[0];
+                s.rotation = s.rotation || 0;
+                s.occluded = s.occluded || false;
+                s.outside = s.outside || false;
+                s.hidden = s.hidden || (activeObjectHidden && workspace !== Workspace.SINGLE_SHAPE);
+                if (s.shapeType === ShapeType.SKELETON && Array.isArray(s.elements)) {
+                    s.elements.forEach((element: Record<string, any>) => {
+                        element.objectType = s.objectType;
+                        element.label = element.label || s.label.structure
+                            .sublabels.find((label: any) => label.id === element.labelID);
+                        element.frame = frame;
+                        element.rotation = 0;
+                        element.occluded = element.occluded || false;
+                        element.outside = element.outside || false;
+                    });
+                }
+                return new cvat.classes.ObjectState(s);
+            });
+
+            jobInstance.logger.log(EventScope.pasteObject, { count: objectStates.length, duration });
+            onCreateAnnotations(objectStates);
+            onUpdateEditedObject(null);
+            return;
+        }
+
+        // Single shape draw/paste
+        const { state } = event.detail;
         const isDrawnFromScratch = !state.label;
 
         state.objectType = state.shapeType === ShapeType.MASK ?

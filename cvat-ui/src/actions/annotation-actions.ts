@@ -621,82 +621,42 @@ export function copyShapes(objectStates: any[]): AnyAction {
     };
 }
 
-function offsetPoints(points: number[], offset: number, shapeType: string): number[] {
-    if (shapeType === 'mask') {
-        // mask points: [...rle_data, left, top, right, bottom]
-        const result = [...points];
-        const len = result.length;
-        if (len >= 4) {
-            result[len - 4] += offset; // left
-            result[len - 3] += offset; // top
-            result[len - 2] += offset; // right
-            result[len - 1] += offset; // bottom
-        }
-        return result;
-    }
-    // Regular shapes: [x1, y1, x2, y2, ...]
-    return points.map((val) => val + offset);
-}
-
 export function pasteShapesAsync(): ThunkAction {
     return async (dispatch: ThunkDispatch): Promise<void> => {
         const {
-            player: { frame: { number: frameNumber } },
+            canvas: { instance: canvasInstance },
             drawing: { copiedStates },
-            job: { instance: jobInstance },
         } = getStore().getState().annotation;
 
-        if (!copiedStates?.length || !jobInstance) return;
+        if (!copiedStates?.length || !canvasInstance) return;
 
-        const PASTE_OFFSET = 10;
+        // Filter out masks and tags (not supported in draw mode)
+        const drawableStates = copiedStates.filter(
+            (s: any) => s.shapeType !== ShapeType.MASK && s.objectType !== ObjectType.TAG,
+        );
+        if (!drawableStates.length) return;
 
-        const newStates = copiedStates.map((state: any) => {
-            const data: Record<string, any> = {
-                objectType: state.objectType,
-                shapeType: state.shapeType,
-                frame: frameNumber,
-                label: state.label,
-                attributes: { ...state.attributes },
-                points: state.points ? offsetPoints(state.points, PASTE_OFFSET, state.shapeType) : undefined,
-                occluded: state.occluded,
-                zOrder: state.zOrder,
-                rotation: state.rotation || 0,
-                source: state.source,
-            };
-
-            if (state.shapeType === 'skeleton' && state.elements?.length) {
-                data.elements = state.elements.map((el: any) => ({
-                    objectType: el.objectType,
-                    shapeType: el.shapeType,
-                    frame: frameNumber,
-                    label: el.label,
-                    attributes: { ...el.attributes },
-                    points: el.points ? offsetPoints(el.points, PASTE_OFFSET, el.shapeType) : undefined,
-                    occluded: el.occluded,
-                    outside: el.outside,
-                }));
+        // Build skeleton SVG mapping for skeleton shapes
+        const skeletonSVGMap: Record<number, string> = {};
+        for (const state of drawableStates) {
+            if (state.shapeType === 'skeleton' && state.label?.structure?.svg) {
+                skeletonSVGMap[state.label.id] = state.label.structure.svg;
             }
+        }
 
-            return new cvat.classes.ObjectState(data as any);
+        canvasInstance.cancel();
+        dispatch({
+            type: AnnotationActionTypes.PASTE_SHAPE,
+            payload: {
+                activeControl: ActiveControl.CURSOR,
+            },
         });
 
-        try {
-            await jobInstance.annotations.put(newStates);
-            const {
-                states, history, minZ, maxZ,
-            } = await fetchAnnotations();
-            dispatch({
-                type: AnnotationActionTypes.FETCH_ANNOTATIONS_SUCCESS,
-                payload: {
-                    states, history, minZ, maxZ,
-                },
-            });
-        } catch (error) {
-            dispatch({
-                type: AnnotationActionTypes.CREATE_ANNOTATIONS_FAILED,
-                payload: { error },
-            });
-        }
+        canvasInstance.draw({
+            enabled: true,
+            initialStates: drawableStates,
+            skeletonSVGMap,
+        });
     };
 }
 
