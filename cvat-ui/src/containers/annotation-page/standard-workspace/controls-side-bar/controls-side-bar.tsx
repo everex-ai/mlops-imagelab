@@ -12,6 +12,7 @@ import {
     rotateCurrentFrame,
     repeatDrawShapeAsync,
     pasteShapeAsync,
+    pasteShapesAsync,
     resetAnnotationsGroup,
 } from 'actions/annotation-actions';
 import ControlsSideBarComponent from 'components/annotation-page/standard-workspace/controls-side-bar/controls-side-bar';
@@ -26,6 +27,7 @@ interface StateToProps {
     normalizedKeyMap: Record<string, string>;
     labels: CombinedState['annotation']['job']['labels'];
     frameData: any;
+    hasCopiedShapes: boolean;
 }
 
 interface DispatchToProps {
@@ -34,6 +36,7 @@ interface DispatchToProps {
     resetGroup(): void;
     repeatDrawShape(): void;
     pasteShape(): void;
+    pasteShapes(): void;
     redrawShape(): void;
 }
 
@@ -42,6 +45,7 @@ function mapStateToProps(state: CombinedState): StateToProps {
         annotation: {
             canvas: { instance: canvasInstance, activeControl },
             job: { labels },
+            drawing: { copiedStates },
             player: {
                 frame: { data: frameData },
             },
@@ -60,6 +64,7 @@ function mapStateToProps(state: CombinedState): StateToProps {
         normalizedKeyMap,
         keyMap,
         frameData,
+        hasCopiedShapes: !!copiedStates?.length,
     };
 }
 
@@ -76,6 +81,9 @@ function dispatchToProps(dispatch: any): DispatchToProps {
         },
         pasteShape(): void {
             dispatch(pasteShapeAsync());
+        },
+        pasteShapes(): void {
+            dispatch(pasteShapesAsync());
         },
         resetGroup(): void {
             dispatch(resetAnnotationsGroup());

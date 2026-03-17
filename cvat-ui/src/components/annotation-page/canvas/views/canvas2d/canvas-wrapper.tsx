@@ -812,10 +812,11 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         }
 
         // Only handle as click if mouse didn't move much (not a drag)
-        const dx = Math.abs(e.clientX - this.shiftClickStart.x);
-        const dy = Math.abs(e.clientY - this.shiftClickStart.y);
+        const dist = Math.sqrt(
+            (e.clientX - this.shiftClickStart.x) ** 2 + (e.clientY - this.shiftClickStart.y) ** 2,
+        );
         this.shiftClickStart = null;
-        if (dx > 5 || dy > 5) return;
+        if (dist > 5) return;
 
         const { onToggleObjectSelection, annotations } = this.props;
 

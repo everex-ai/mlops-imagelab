@@ -90,6 +90,8 @@ export class CanvasViewImpl implements CanvasView, Listener {
     private draggableShape: SVG.Shape | null;
     private resizableShape: SVG.Shape | null;
     private selectedClientIDs: number[];
+    private multiSelectBox: SVG.Rect | null = null;
+    private multiSelectStart: { x: number; y: number } | null = null;
     private ctrlPressed: boolean;
     private innerObjectsFlags: {
         drawHidden: Record<number, boolean>;
@@ -1680,6 +1682,10 @@ export class CanvasViewImpl implements CanvasView, Listener {
 
         const code = (e.code ?? '').toLowerCase();
 
+        if (code === 'escape') {
+            this.cancelMultiSelect();
+        }
+
         if (code.includes('shift')) {
             this.snapToAngleResize = consts.SNAP_TO_ANGLE_RESIZE_SHIFT;
             if (this.activeElement) {
@@ -1704,6 +1710,10 @@ export class CanvasViewImpl implements CanvasView, Listener {
 
     private onKeyUp = (e: KeyboardEvent): void => {
         const code = (e.code ?? '').toLowerCase();
+
+        if (code.includes('shift')) {
+            this.cancelMultiSelect();
+        }
 
         if (code.includes('shift') && this.activeElement) {
             this.snapToAngleResize = consts.SNAP_TO_ANGLE_RESIZE_DEFAULT;
@@ -1731,6 +1741,120 @@ export class CanvasViewImpl implements CanvasView, Listener {
         if (event.button === 0 || event.button === 1) {
             this.controller.disableDrag();
         }
+    };
+
+    private cancelMultiSelect(): void {
+        if (this.multiSelectBox) {
+            this.multiSelectBox.remove();
+            this.multiSelectBox = null;
+            this.multiSelectStart = null;
+        }
+    }
+
+    private finishMultiSelect(): void {
+        if (this.multiSelectBox && this.multiSelectStart) {
+            const box = this.multiSelectBox.bbox();
+            this.multiSelectBox.remove();
+            this.multiSelectBox = null;
+            this.multiSelectStart = null;
+
+            if (Math.sqrt(box.width ** 2 + box.height ** 2) < 5) return;
+
+            const selectedIDs: number[] = [];
+            const { objects } = this.controller;
+            for (const obj of objects) {
+                const id = obj.clientID;
+                if (obj.hidden || obj.outside) continue;
+                const shape = this.svgShapes[id];
+                if (!shape) continue;
+                const shapeBbox = shape.bbox();
+                if (
+                    shapeBbox.x < box.x + box.width &&
+                    shapeBbox.x + shapeBbox.width > box.x &&
+                    shapeBbox.y < box.y + box.height &&
+                    shapeBbox.y + shapeBbox.height > box.y
+                ) {
+                    const topLevelID = Number.isInteger(obj.parentID) ? obj.parentID : id;
+                    if (!selectedIDs.includes(topLevelID)) {
+                        selectedIDs.push(topLevelID);
+                    }
+                }
+            }
+
+            const mergedIDs = [...new Set([...this.selectedClientIDs, ...selectedIDs])];
+
+            this.canvas.dispatchEvent(
+                new CustomEvent('canvas.multiselected', {
+                    bubbles: false,
+                    cancelable: true,
+                    detail: { clientIDs: mergedIDs },
+                }),
+            );
+        }
+    }
+
+    private onCanvasMouseDown = (event: MouseEvent): void => {
+        if ([0, 1].includes(event.button)) {
+            if (
+                event.button === 0 &&
+                event.shiftKey &&
+                this.mode === Mode.IDLE &&
+                (event.target === this.content || (event.target as Element)?.classList?.contains('cvat_canvas_image'))
+            ) {
+                const [x, y] = translateToSVG(this.content, [event.clientX, event.clientY]);
+                this.multiSelectStart = { x, y };
+                this.multiSelectBox = this.adoptedContent.rect(0, 0).attr({
+                    x: this.multiSelectStart.x,
+                    y: this.multiSelectStart.y,
+                }).addClass('cvat_canvas_multiselect_box');
+                event.preventDefault();
+                return;
+            }
+
+            if (this.selectedClientIDs.length > 0 && event.button === 0) {
+                const target = event.target as Element;
+                const shapeElement = target?.closest('[data-z-order]');
+                if (shapeElement) {
+                    const idMatch = shapeElement.id?.match(/^cvat_canvas_shape_(\d+)$/);
+                    if (idMatch) {
+                        const clickedID = parseInt(idMatch[1], 10);
+                        if (this.selectedClientIDs.includes(clickedID)) {
+                            return;
+                        }
+                    }
+                }
+            }
+
+            if (
+                [Mode.IDLE, Mode.DRAG_CANVAS, Mode.MERGE, Mode.SPLIT]
+                    .includes(this.mode) || event.button === 1 || event.altKey
+            ) {
+                this.controller.enableDrag(event.clientX, event.clientY);
+            }
+        }
+    };
+
+    private onCanvasMouseMove = (e: MouseEvent): void => {
+        if (this.multiSelectBox && this.multiSelectStart) {
+            const [x, y] = translateToSVG(this.content, [e.clientX, e.clientY]);
+            const curX = x;
+            const curY = y;
+            const boxX = Math.min(this.multiSelectStart.x, curX);
+            const boxY = Math.min(this.multiSelectStart.y, curY);
+            const boxW = Math.abs(curX - this.multiSelectStart.x);
+            const boxH = Math.abs(curY - this.multiSelectStart.y);
+            this.multiSelectBox.attr({
+                x: boxX, y: boxY, width: boxW, height: boxH,
+            });
+        }
+    };
+
+    private onCanvasMouseUpHandler = (): void => {
+        this.finishMultiSelect();
+    };
+
+    private onWindowBlur = (): void => {
+        this.cancelMultiSelect();
     };
 
     public constructor(model: CanvasModel & Master, controller: CanvasController) {
@@ -1924,115 +2048,12 @@ export class CanvasViewImpl implements CanvasView, Listener {
             e.preventDefault();
         });
 
-        let multiSelectBox: SVG.Rect | null = null;
-        let multiSelectStart: { x: number; y: number } | null = null;
-
-        this.canvas.addEventListener('mousedown', (event): void => {
-            if ([0, 1].includes(event.button)) {
-                // Shift+left-click on empty canvas background starts area selection
-                if (
-                    event.button === 0 &&
-                    event.shiftKey &&
-                    this.mode === Mode.IDLE &&
-                    (event.target === this.content || (event.target as Element)?.classList?.contains('cvat_canvas_image'))
-                ) {
-                    const [x, y] = translateToSVG(this.content, [event.clientX, event.clientY]);
-                    multiSelectStart = { x, y };
-                    multiSelectBox = this.adoptedContent.rect(0, 0).attr({
-                        x: multiSelectStart.x,
-                        y: multiSelectStart.y,
-                    }).addClass('cvat_canvas_multiselect_box');
-                    event.preventDefault();
-                    return;
-                }
-
-                // Don't start canvas drag if clicking on a selected shape
-                // (the shape will be activated and become draggable instead)
-                if (this.selectedClientIDs.length > 0 && event.button === 0) {
-                    const target = event.target as Element;
-                    const shapeElement = target?.closest('[data-z-order]');
-                    if (shapeElement) {
-                        const idMatch = shapeElement.id?.match(/^cvat_canvas_shape_(\d+)$/);
-                        if (idMatch) {
-                            const clickedID = parseInt(idMatch[1], 10);
-                            if (this.selectedClientIDs.includes(clickedID)) {
-                                return;
-                            }
-                        }
-                    }
-                }
-
-                if (
-                    [Mode.IDLE, Mode.DRAG_CANVAS, Mode.MERGE, Mode.SPLIT]
-                        .includes(this.mode) || event.button === 1 || event.altKey
-                ) {
-                    this.controller.enableDrag(event.clientX, event.clientY);
-                }
-            }
-        });
-
-        this.canvas.addEventListener('mousemove', (e): void => {
-            if (multiSelectBox && multiSelectStart) {
-                const [x, y] = translateToSVG(this.content, [e.clientX, e.clientY]);
-                const curX = x;
-                const curY = y;
-                const boxX = Math.min(multiSelectStart.x, curX);
-                const boxY = Math.min(multiSelectStart.y, curY);
-                const boxW = Math.abs(curX - multiSelectStart.x);
-                const boxH = Math.abs(curY - multiSelectStart.y);
-                multiSelectBox.attr({
-                    x: boxX, y: boxY, width: boxW, height: boxH,
-                });
-            }
-        });
-
-        const finishMultiSelect = (): void => {
-            if (multiSelectBox && multiSelectStart) {
-                const box = multiSelectBox.bbox();
-                multiSelectBox.remove();
-                multiSelectBox = null;
-                multiSelectStart = null;
-
-                if (box.width < 5 && box.height < 5) return;
-
-                const selectedIDs: number[] = [];
-                const { objects } = this.controller;
-                for (const obj of objects) {
-                    const id = obj.clientID;
-                    if (obj.hidden || obj.outside) continue;
-                    const shape = this.svgShapes[id];
-                    if (!shape) continue;
-                    const shapeBbox = shape.bbox();
-                    // Check if shape bbox intersects with selection box
-                    if (
-                        shapeBbox.x < box.x + box.width &&
-                        shapeBbox.x + shapeBbox.width > box.x &&
-                        shapeBbox.y < box.y + box.height &&
-                        shapeBbox.y + shapeBbox.height > box.y
-                    ) {
-                        // Use parentID if it exists (for skeleton elements)
-                        const topLevelID = Number.isInteger(obj.parentID) ? obj.parentID : id;
-                        if (!selectedIDs.includes(topLevelID)) {
-                            selectedIDs.push(topLevelID);
-                        }
-                    }
-                }
-
-                this.canvas.dispatchEvent(
-                    new CustomEvent('canvas.multiselected', {
-                        bubbles: false,
-                        cancelable: true,
-                        detail: { clientIDs: selectedIDs },
-                    }),
-                );
-            }
-        };
-
-        this.canvas.addEventListener('mouseup', (): void => {
-            finishMultiSelect();
-        });
+        this.canvas.addEventListener('mousedown', this.onCanvasMouseDown);
+        this.canvas.addEventListener('mousemove', this.onCanvasMouseMove);
+        this.canvas.addEventListener('mouseup', this.onCanvasMouseUpHandler);
 
         window.document.addEventListener('mouseup', this.onMouseUp);
+        window.addEventListener('blur', this.onWindowBlur);
         window.document.addEventListener('keydown', this.onKeyDown);
         window.document.addEventListener('keyup', this.onKeyUp);
 
@@ -2540,6 +2561,11 @@ export class CanvasViewImpl implements CanvasView, Listener {
             window.document.removeEventListener('keydown', this.onKeyDown);
             window.document.removeEventListener('keyup', this.onKeyUp);
             window.document.removeEventListener('mouseup', this.onMouseUp);
+            this.canvas.removeEventListener('mousedown', this.onCanvasMouseDown);
+            this.canvas.removeEventListener('mousemove', this.onCanvasMouseMove);
+            this.canvas.removeEventListener('mouseup', this.onCanvasMouseUpHandler);
+            window.removeEventListener('blur', this.onWindowBlur);
+            this.cancelMultiSelect();
             this.interactionHandler.destroy();
         }
 

@@ -16,6 +16,7 @@ import {
     collapseObjectItems,
     changeGroupColorAsync,
     copyShape as copyShapeAction,
+    copyShapes as copyShapesAction,
     switchPropagateVisibility as switchPropagateVisibilityAction,
     removeObject as removeObjectAction,
     removeObjects as removeObjectsAction,
@@ -72,6 +73,7 @@ interface DispatchToProps {
     removeObject: (objectState: any, force: boolean) => void;
     removeObjects: (objectStates: any[], force: boolean) => void;
     copyShape: (objectState: any) => void;
+    copyShapes: (objectStates: any[]) => void;
     switchPropagateVisibility: (visible: boolean) => void;
     changeFrame(frame: number): void;
     changeGroupColor(group: number, color: string): void;
@@ -278,6 +280,9 @@ function mapDispatchToProps(dispatch: any): DispatchToProps {
         copyShape(objectState: ObjectState): void {
             dispatch(copyShapeAction(objectState));
         },
+        copyShapes(objectStates: ObjectState[]): void {
+            dispatch(copyShapesAction(objectStates));
+        },
         switchPropagateVisibility(visible: boolean): void {
             dispatch(switchPropagateVisibilityAction(visible));
         },
@@ -460,6 +465,7 @@ class ObjectsListContainer extends React.PureComponent<Props, State> {
             removeObject,
             removeObjects,
             copyShape,
+            copyShapes,
             switchPropagateVisibility,
             changeFrame,
             workspace,
@@ -611,9 +617,21 @@ class ObjectsListContainer extends React.PureComponent<Props, State> {
                 }
             },
             COPY_SHAPE: () => {
-                const state = activatedState(true);
-                if (state && !readonly) {
-                    copyShape(state);
+                if (readonly) return;
+                if (selectedStatesID.length > 0) {
+                    const statesToCopy = objectStates.filter(
+                        (s: ObjectState) => (
+                            s.clientID !== null && selectedStatesID.includes(s.clientID)
+                        ),
+                    );
+                    if (statesToCopy.length > 0) {
+                        copyShapes(statesToCopy);
+                    }
+                } else {
+                    const state = activatedState(true);
+                    if (state) {
+                        copyShape(state);
+                    }
                 }
             },
             RUN_ANNOTATIONS_ACTION: () => {

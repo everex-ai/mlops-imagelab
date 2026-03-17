@@ -862,6 +862,19 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 drawing: {
                     ...state.drawing,
                     activeInitialState: objectState,
+                    copiedStates: undefined,
+                },
+            };
+        }
+        case AnnotationActionTypes.COPY_SHAPES: {
+            const { objectStates } = action.payload;
+
+            return {
+                ...state,
+                drawing: {
+                    ...state.drawing,
+                    copiedStates: objectStates,
+                    activeInitialState: undefined,
                 },
             };
         }
@@ -1239,13 +1252,14 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
             };
         }
         case AnnotationActionTypes.CLOSE_JOB: {
-            // Preserve activeInitialState to maintain copy/paste state between jobs
-            const { activeInitialState } = state.drawing;
+            // Preserve copy/paste state between jobs
+            const { activeInitialState, copiedStates } = state.drawing;
             return {
                 ...defaultState,
                 drawing: {
                     ...defaultState.drawing,
                     activeInitialState,
+                    copiedStates,
                 },
             };
         }

@@ -48,10 +48,12 @@ interface Props {
     labels: Label[];
     frameData: any;
 
+    hasCopiedShapes: boolean;
     updateActiveControl(activeControl: ActiveControl): void;
     rotateFrame(rotation: Rotation): void;
     repeatDrawShape(): void;
     pasteShape(): void;
+    pasteShapes(): void;
     resetGroup(): void;
     redrawShape(): void;
 }
@@ -146,10 +148,12 @@ export default function ControlsSideBarComponent(props: Props): JSX.Element {
         normalizedKeyMap,
         keyMap,
         labels,
+        hasCopiedShapes,
         updateActiveControl,
         rotateFrame,
         repeatDrawShape,
         pasteShape,
+        pasteShapes,
         resetGroup,
         redrawShape,
         frameData,
@@ -318,7 +322,11 @@ export default function ControlsSideBarComponent(props: Props): JSX.Element {
             PASTE_SHAPE: (event: KeyboardEvent | undefined) => {
                 preventDefault(event);
                 canvasInstance.cancel();
-                pasteShape();
+                if (hasCopiedShapes) {
+                    pasteShapes();
+                } else {
+                    pasteShape();
+                }
             },
             SWITCH_DRAW_MODE_STANDARD_CONTROLS: (event: KeyboardEvent | undefined) => {
                 handleDrawMode(event, 'draw');

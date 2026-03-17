@@ -805,6 +805,7 @@ export interface AnnotationState {
         activeLabelID: number | null;
         activeObjectType: ObjectType;
         activeInitialState?: any;
+        copiedStates?: any[];
     };
     editing: EditingState;
     annotations: {
