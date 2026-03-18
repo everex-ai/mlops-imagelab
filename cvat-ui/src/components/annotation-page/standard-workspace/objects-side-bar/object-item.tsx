@@ -99,7 +99,7 @@ function ObjectItemComponent(props: Props): JSX.Element {
 
     return (
         <div style={{ display: 'flex', marginBottom: '1px' }}>
-            <div className='cvat-objects-sidebar-state-item-color' style={{ background: `${color}` }} />
+            <div className='cvat-objects-sidebar-state-item-color' style={{ background: `rgb(${color})` }} />
             <div
                 onMouseEnter={activateState}
                 id={`cvat-objects-sidebar-state-item-${clientID}`}

@@ -5,13 +5,15 @@
 
 import React from 'react';
 import ReactDOM from 'react-dom';
+import { useSelector } from 'react-redux';
 import Menu from 'antd/lib/menu';
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { MenuInfo } from 'rc-menu/lib/interface';
 
 import ObjectItemElementComponent from 'components/annotation-page/standard-workspace/objects-side-bar/object-item-element';
 import ObjectItemContainer from 'containers/annotation-page/standard-workspace/objects-side-bar/object-item';
-import { Workspace } from 'reducers';
+import { getObjectStateColor } from 'components/annotation-page/standard-workspace/objects-side-bar/shared';
+import { CombinedState, Workspace } from 'reducers';
 import { rotatePoint } from 'utils/math';
 import config from 'config';
 import {
@@ -121,6 +123,8 @@ export default function CanvasContextMenu(props: Props): JSX.Element | null {
         onCopyObject,
     } = props;
 
+    const colorBy = useSelector((combinedState: CombinedState) => combinedState.settings.shapes.colorBy);
+
     if (!visible || contextMenuClientID === null) {
         return null;
     }
@@ -131,6 +135,7 @@ export default function CanvasContextMenu(props: Props): JSX.Element | null {
         state = state.elements.find((_state: ObjectState) => _state.clientID === contextMenuClientID);
     }
 
+    const stateColor = state ? getObjectStateColor(state, colorBy).hex : undefined;
     const copyObject = state?.isGroundTruth ? state : null;
     if (workspace === Workspace.REVIEW) {
         const conflict = frameConflicts
@@ -206,7 +211,7 @@ export default function CanvasContextMenu(props: Props): JSX.Element | null {
 
     if (Number.isInteger(contextMenuParentID)) {
         return ReactDOM.createPortal(
-            <div className='cvat-canvas-context-menu' style={{ top, left }}>
+            <div className='cvat-canvas-context-menu' style={{ top, left, backgroundColor: stateColor }}>
                 <ObjectItemElementComponent
                     readonly={readonly}
                     key={contextMenuClientID}
@@ -219,7 +224,7 @@ export default function CanvasContextMenu(props: Props): JSX.Element | null {
     }
 
     return ReactDOM.createPortal(
-        <div className='cvat-canvas-context-menu' style={{ top, left }}>
+        <div className='cvat-canvas-context-menu' style={{ top, left, backgroundColor: stateColor }}>
             <ObjectItemContainer
                 readonly={readonly}
                 key={contextMenuClientID}
