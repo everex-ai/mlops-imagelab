@@ -218,6 +218,16 @@
     text-align: center;
 }
 
+.cvat-objects-sidebar-state-item-color {
+    border: 1px solid $object-item-border-color;
+    width: 7px;
+    opacity: 1;
+
+    &:hover {
+        opacity: 0.7;
+    }
+}
+
 .cvat-objects-sidebar-state-item.cvat-objects-sidebar-state-active-item {
     box-shadow: $box-shadow-base;
     border: 1px solid $object-item-border-color;
