@@ -42,7 +42,7 @@ function ObjectItemElementComponent(props: OwnProps): JSX.Element {
 
     const state = states.find((_state: ObjectState) => _state.clientID === parentID);
     const element = state.elements.find((_element: ObjectState) => _element.clientID === clientID);
-    const elementColor = getObjectStateColor(element, colorBy).rgbComponents();
+    const elementColor = getObjectStateColor(element, colorBy).hex;
     const elementClassName = element.clientID === activatedElementId ?
         'cvat-objects-sidebar-state-item-elements cvat-objects-sidebar-state-active-element' :
         'cvat-objects-sidebar-state-item-elements';
@@ -54,7 +54,7 @@ function ObjectItemElementComponent(props: OwnProps): JSX.Element {
             onMouseLeave={onMouseLeave}
             key={clientID}
             className={elementClassName}
-            style={{ '--state-item-background': `${elementColor}` } as React.CSSProperties}
+            style={{ background: elementColor }}
         >
             <Text
                 type='secondary'
