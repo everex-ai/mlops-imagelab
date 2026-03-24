@@ -32,7 +32,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
-Production web UI is at `localhost:8081`, Traefik dashboard at `localhost:8091`.
+Production web UI is at `localhost:8081`, Traefik dashboard at `localhost:8091`. Production volumes bind-mount to `/mnt/ssd/cvat_latest/`.
 
 ### Container Naming Convention
 All Everex containers use `_everex` suffix: `cvat_server_everex`, `cvat_ui_everex`, `cvat_db_everex`, `cvat_redis_inmem_everex`, `cvat_redis_ondisk_everex`, etc. Network: `cvat_everex`. Use these names when running `docker exec` or `docker logs` commands.
@@ -157,8 +157,11 @@ npx remark --quiet --frail -i .remarkignore .
 
 Dependencies flow: `cvat-data` <- `cvat-core` <- `cvat-canvas` <- `cvat-ui`
 
+### UI State Management
+Redux store slices (in `cvat-ui/src/reducers/`): auth, projects, tasks, jobs, about, formats, plugins, notifications, annotation, settings, shortcuts, userAgreements, review, export, import, consensus, cloudStorages, organizations, webhooks, invitations, requests, serverAPI, navigation, bulkActions. Uses Redux Thunk middleware.
+
 ### UI Plugin System
-The cvat-ui supports plugins via the `CLIENT_PLUGINS` environment variable (colon-separated paths). Plugins must export from `src/ts/index.tsx`.
+The cvat-ui includes `plugins/sam` by default. Additional plugins via the `CLIENT_PLUGINS` environment variable (colon-separated paths). Plugins must export from `src/ts/index.tsx`.
 ```bash
 CLIENT_PLUGINS=/path/to/plugin1:/path/to/plugin2 yarn start:cvat-ui
 ```
@@ -185,6 +188,7 @@ Chrome >= 99, Firefox >= 110, >2% market share (no IE11)
 - Background jobs via django-rq with specialized workers (import, export, annotation, etc.)
 - Two Redis instances: inmem (cache/queue) and ondisk (kvrocks for persistent data)
 - File uploads via TUS protocol for resumable uploads
+- Server runs nginx + uvicorn (ASGI) via supervisord (`supervisord/server.conf`), workers run RQ via supervisord (`supervisord/worker.conf`) with custom worker class `cvat.rqworker.DefaultWorker`
 
 ### Settings
 - `cvat/settings/base.py` - Base Django settings

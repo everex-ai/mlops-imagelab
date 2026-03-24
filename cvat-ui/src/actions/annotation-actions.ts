@@ -11,7 +11,7 @@ import {
 } from 'cvat-canvas-wrapper';
 import {
     getCore, JobType, Job, QualityConflict,
-    ObjectState, ObjectType, ShapeType, JobState, JobValidationLayout,
+    ObjectState, ObjectType, ShapeType, JobState, JobStage, JobValidationLayout,
 } from 'cvat-core-wrapper';
 import logger, { EventScope } from 'cvat-logger';
 import { getCVATStore } from 'cvat-store';
@@ -1198,9 +1198,10 @@ export function finishCurrentJobAsync(onSuccess: () => void): ThunkAction {
             }
         }
 
-        if (jobInstance.state !== JobState.COMPLETED) {
-            await dispatch(updateJobAsync(jobInstance, { state: JobState.COMPLETED }));
-        }
+        await dispatch(updateJobAsync(jobInstance, {
+            state: JobState.COMPLETED,
+            stage: JobStage.ACCEPTANCE,
+        }));
 
         onSuccess();
     };
