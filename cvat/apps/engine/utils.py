@@ -342,7 +342,16 @@ def sendfile(
     if attachment_filename:
         attachment_filename = make_attachment_file_name(attachment_filename)
 
-    return _sendfile(request, filename, attachment, attachment_filename, mimetype, encoding)
+    response = _sendfile(request, filename, attachment, attachment_filename, mimetype, encoding)
+
+    # When using the nginx backend, django-sendfile2 sets Content-Length to the actual
+    # file size, but the response body is empty (nginx serves the file via X-Accel-Redirect).
+    # This mismatch causes uvicorn to raise "Response content shorter than Content-Length".
+    # Remove Content-Length so nginx can set the correct value when serving the file.
+    if settings.SENDFILE_BACKEND == "django_sendfile.backends.nginx":
+        del response["Content-Length"]
+
+    return response
 
 
 def build_backup_file_name(
