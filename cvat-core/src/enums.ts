@@ -206,6 +206,7 @@ export enum CloudStorageStatus {
 
 export enum MembershipRole {
     WORKER = 'worker',
+    REVIEWER = 'reviewer',
     SUPERVISOR = 'supervisor',
     MAINTAINER = 'maintainer',
     OWNER = 'owner',
