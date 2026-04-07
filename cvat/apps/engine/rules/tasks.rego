@@ -46,7 +46,7 @@ import data.organizations
 #                 "id": <num>
 #             },
 #             "user": {
-#                 "role": <"owner"|"maintainer"|"supervisor"|"worker"> or null
+#                 "role": <"owner"|"maintainer"|"supervisor"|"reviewer"|"worker"> or null
 #             }
 #         } or null,
 #     },
@@ -178,6 +178,11 @@ filter := [] if { # Django Q object to filter list of entries
         {"project__owner_id": user.id}, "|", {"project__assignee_id": user.id}, "|",
         {"organization": input.auth.organization.id},
         {"project__organization": input.auth.organization.id}, "|", "&"]
+} else := qobject if {
+    # Reviewer: every task in the organization
+    organizations.is_reviewer
+    qobject := [ {"organization": input.auth.organization.id},
+        {"project__organization": input.auth.organization.id}, "|"]
 }
 
 allow if {
@@ -310,6 +315,17 @@ allow if {
     utils.has_perm(utils.WORKER)
     organizations.has_perm(organizations.WORKER)
     is_project_staff
+}
+
+# Reviewer: read-only access to tasks in the same organization. Mutation
+# scopes are gated by has_perm(WORKER) above and therefore denied.
+allow if {
+    input.scope in {
+        utils.VIEW, utils.VIEW_ANNOTATIONS, utils.VIEW_METADATA,
+        utils.VIEW_DATA, utils.VIEW_VALIDATION_LAYOUT
+    }
+    input.auth.organization.id == input.resource.organization.id
+    organizations.is_reviewer
 }
 
 allow if {
