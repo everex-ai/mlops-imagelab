@@ -459,13 +459,32 @@ class TaskExporter(_ExporterBase, _TaskBackupBase):
 
             filtered_manifest_path = os.path.join(tmp_dir, self.MEDIA_MANIFEST_FILENAME)
 
-            imm_original = ImageManifestManager(
-                self._db_data.get_manifest_path(), create_index=False
-            )
+            original_manifest_path = self._db_data.get_manifest_path()
             imm_filtered = ImageManifestManager(filtered_manifest_path, create_index=False)
-            imm_filtered.create(
-                entry for frame_num, entry in imm_original if frame_num in present_frame_nums
-            )
+
+            if os.path.exists(original_manifest_path):
+                imm_original = ImageManifestManager(
+                    original_manifest_path, create_index=False
+                )
+                imm_filtered.create(
+                    entry
+                    for frame_num, entry in imm_original
+                    if frame_num in present_frame_nums
+                )
+            else:
+                # The original manifest is missing on disk. This can happen for
+                # tasks created from a mounted file share or cloud storage where
+                # the manifest was never persisted to the task's upload dir, or
+                # where it was lost. Reconstruct a minimal manifest from DB
+                # records so that the backup can proceed.
+                slogger.task[self._db_task.id].warning(
+                    "Manifest file is missing at %s; reconstructing from DB "
+                    "image records for backup.",
+                    original_manifest_path,
+                )
+                imm_filtered.create(
+                    self._iter_manifest_entries_from_db(present_frame_nums)
+                )
 
             self._write_files(
                 source_dir=tmp_dir,
@@ -475,6 +494,25 @@ class TaskExporter(_ExporterBase, _TaskBackupBase):
             )
 
             self._manifest_was_filtered = True
+
+    def _iter_manifest_entries_from_db(self, present_frame_nums: set[int]):
+        # Build manifest entries directly from the Image rows in the DB. This
+        # is a fallback used when the on-disk manifest.jsonl is missing. The
+        # shape of each entry matches what ImageManifestManager.create() expects
+        # (see ImageManifestManager._required_item_attributes and .get_subset).
+        images_qs = (
+            self._db_data.images.filter(frame__in=present_frame_nums)
+            .order_by("frame")
+        )
+        for image in images_qs:
+            name, extension = os.path.splitext(image.path)
+            entry = {
+                "name": name,
+                "extension": extension,
+                "width": image.width,
+                "height": image.height,
+            }
+            yield entry
 
     def _write_data(self, zip_object: ZipFile, target_dir: str) -> None:
         target_data_dir = os.path.join(target_dir, self.DATA_DIRNAME)
