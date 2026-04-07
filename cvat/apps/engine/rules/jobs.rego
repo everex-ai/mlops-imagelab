@@ -39,12 +39,13 @@ import data.organizations
 #                 "id": <num>
 #             },
 #             "user": {
-#                 "role": <"owner"|"maintainer"|"supervisor"|"worker"> or null
+#                 "role": <"owner"|"maintainer"|"supervisor"|"reviewer"|"worker"> or null
 #             }
 #         } or null,
 #     },
 #     "resource": {
 #         "id": <num>,
+#         "stage": <"annotation"|"validation"|"acceptance">,
 #         "assignee": { "id": <num> },
 #         "organization": { "id": <num> } or null,
 #         "project": {
@@ -161,6 +162,12 @@ filter := [] if { # Django Q object to filter list of entries
         {"segment__task__project__assignee_id": user.id}, "|",
         {"segment__task__organization": input.auth.organization.id},
         {"segment__task__project__organization": input.auth.organization.id}, "|", "&"]
+} else := qobject if {
+    # Reviewer: can see every job in the organization, regardless of stage or assignee
+    organizations.is_reviewer
+    qobject := [
+        {"segment__task__organization": input.auth.organization.id},
+        {"segment__task__project__organization": input.auth.organization.id}, "|"]
 }
 
 allow if {
@@ -298,4 +305,28 @@ allow if {
 allow if {
     input.scope == utils.DOWNLOAD_EXPORTED_FILE
     input.auth.user.id == input.resource.rq_job.owner.id
+}
+
+# === Reviewer rules ===
+# A reviewer can read every job in the organization, regardless of stage or
+# assignee, and is allowed to advance a job through stages (e.g. validation
+# -> acceptance) once review is complete. Reviewers MUST NOT be permitted
+# to mutate annotations in any way: those scopes are gated by has_perm(WORKER)
+# in the rules above, which automatically denies reviewers because reviewer
+# is intentionally absent from organizations.get_priority().
+
+allow if {
+    input.scope in {
+        utils.VIEW,
+        utils.VIEW_ANNOTATIONS, utils.VIEW_DATA, utils.VIEW_METADATA,
+        utils.VIEW_VALIDATION_LAYOUT
+    }
+    input.auth.organization.id == input.resource.organization.id
+    organizations.is_reviewer
+}
+
+allow if {
+    input.scope == utils.UPDATE_STAGE
+    input.auth.organization.id == input.resource.organization.id
+    organizations.is_reviewer
 }
