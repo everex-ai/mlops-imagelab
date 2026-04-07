@@ -18,6 +18,9 @@ import data.utils
 #         "owner": {
 #             "id": <num>
 #         },
+#         "user": {
+#             "role": <"owner"|"maintainer"|"supervisor"|"reviewer"|"worker"> or null
+#         }
 #     }
 # }
 
@@ -25,6 +28,7 @@ OWNER := "owner"
 MAINTAINER := "maintainer"
 SUPERVISOR := "supervisor"
 WORKER     := "worker"
+REVIEWER   := "reviewer"
 
 is_owner if {
     input.auth.organization.owner.id == input.auth.user.id
@@ -33,6 +37,10 @@ is_owner if {
 
 is_maintainer if {
     input.auth.organization.user.role == MAINTAINER
+}
+
+is_reviewer if {
+    input.auth.organization.user.role == REVIEWER
 }
 
 is_staff if {
@@ -47,6 +55,13 @@ is_member if {
     input.auth.organization.user.role != null
 }
 
+# IMPORTANT: REVIEWER is intentionally NOT included in get_priority.
+# This makes get_priority("reviewer") undefined, which in turn makes
+# has_perm(<any_role>) evaluate to false for reviewers. As a result,
+# every existing permission rule that uses has_perm(WORKER) etc. will
+# automatically deny reviewers, which is the primary defense against
+# reviewers performing labeling. Reviewer-specific permissions must be
+# expressed via the dedicated `is_reviewer` helper.
 get_priority(role) := {
     OWNER: 0,
     MAINTAINER: 50,
