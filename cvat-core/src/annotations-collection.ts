@@ -528,6 +528,7 @@ export default class Collection {
 
         const buildPosition = (
             frame: number,
+            outside: boolean,
             includeMutableAttributes: boolean,
         ): SerializedTrack['shapes'][0] => ({
             type: object.shapeType,
@@ -536,7 +537,7 @@ export default class Collection {
             rotation: object.rotation,
             occluded: object.occluded,
             z_order: object.zOrder,
-            outside: false,
+            outside,
             attributes: includeMutableAttributes ? Object.keys(object.attributes).reduce((
                 accumulator: { spec_id: number, value: string }[], attrID,
             ) => {
@@ -550,9 +551,19 @@ export default class Collection {
             }, []) : [],
         });
 
-        const shapes: SerializedTrack['shapes'] = [buildPosition(startFrame, true)];
+        // Preserve the source shape's own outside state (relevant for skeleton elements
+        // that may have been individually hidden by the user).
+        const sourceOutside = object.outside;
+        const shapes: SerializedTrack['shapes'] = [buildPosition(startFrame, sourceOutside, true)];
         if (endFrame !== startFrame) {
-            shapes.push(buildPosition(endFrame, false));
+            shapes.push(buildPosition(endFrame, sourceOutside, false));
+        }
+        // Cap the track right after endFrame with an outside keyframe so the track
+        // is automatically hidden for frames beyond the requested range. Without
+        // this cap, Track.interpolatePosition extrapolates the last keyframe's
+        // outside value (false) and the track would remain visible indefinitely.
+        if (endFrame + 1 <= this.stopFrame) {
+            shapes.push(buildPosition(endFrame + 1, true, false));
         }
 
         const elements: SerializedTrack['elements'] = [];
