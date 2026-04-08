@@ -430,6 +430,17 @@ export function implementJob(Job: typeof JobClass): typeof JobClass {
         },
     });
 
+    Object.defineProperty(Job.prototype.annotations.copyShapeToTrack, 'implementation', {
+        value: function copyShapeToTrackAnnotationsImplementation(
+            this: JobClass,
+            objectState: Parameters<typeof JobClass.prototype.annotations.copyShapeToTrack>[0],
+            startFrame: Parameters<typeof JobClass.prototype.annotations.copyShapeToTrack>[1],
+            endFrame: Parameters<typeof JobClass.prototype.annotations.copyShapeToTrack>[2],
+        ): ReturnType<typeof JobClass.prototype.annotations.copyShapeToTrack> {
+            return Promise.resolve(getCollection(this).copyShapeToTrack(objectState, startFrame, endFrame));
+        },
+    });
+
     Object.defineProperty(Job.prototype.annotations.group, 'implementation', {
         value: function groupAnnotationsImplementation(
             this: JobClass,
@@ -1188,6 +1199,17 @@ export function implementTask(Task: typeof TaskClass): typeof TaskClass {
             frame: Parameters<typeof TaskClass.prototype.annotations.split>[1],
         ): ReturnType<typeof TaskClass.prototype.annotations.split> {
             return Promise.resolve(getCollection(this).split(objectState, frame));
+        },
+    });
+
+    Object.defineProperty(Task.prototype.annotations.copyShapeToTrack, 'implementation', {
+        value: function copyShapeToTrackAnnotationsImplementation(
+            this: TaskClass,
+            objectState: Parameters<typeof TaskClass.prototype.annotations.copyShapeToTrack>[0],
+            startFrame: Parameters<typeof TaskClass.prototype.annotations.copyShapeToTrack>[1],
+            endFrame: Parameters<typeof TaskClass.prototype.annotations.copyShapeToTrack>[2],
+        ): ReturnType<typeof TaskClass.prototype.annotations.copyShapeToTrack> {
+            return Promise.resolve(getCollection(this).copyShapeToTrack(objectState, startFrame, endFrame));
         },
     });
 

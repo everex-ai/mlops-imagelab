@@ -519,6 +519,121 @@ export default class Collection {
         );
     }
 
+    private _copyShapeToTrackInternal(
+        object: Shape,
+        startFrame: number,
+        endFrame: number,
+    ): SerializedTrack {
+        const labelAttributes = labelAttributesAsDict(object.label);
+
+        const buildPosition = (
+            frame: number,
+            includeMutableAttributes: boolean,
+        ): SerializedTrack['shapes'][0] => ({
+            type: object.shapeType,
+            frame,
+            points: object.shapeType === ShapeType.SKELETON ? undefined : [...object.points],
+            rotation: object.rotation,
+            occluded: object.occluded,
+            z_order: object.zOrder,
+            outside: false,
+            attributes: includeMutableAttributes ? Object.keys(object.attributes).reduce((
+                accumulator: { spec_id: number, value: string }[], attrID,
+            ) => {
+                if (attrID in labelAttributes && labelAttributes[attrID].mutable) {
+                    accumulator.push({
+                        spec_id: +attrID,
+                        value: object.attributes[attrID],
+                    });
+                }
+                return accumulator;
+            }, []) : [],
+        });
+
+        const shapes: SerializedTrack['shapes'] = [buildPosition(startFrame, true)];
+        if (endFrame !== startFrame) {
+            shapes.push(buildPosition(endFrame, false));
+        }
+
+        const elements: SerializedTrack['elements'] = [];
+        if (object.shapeType === ShapeType.SKELETON) {
+            for (const element of (object as SkeletonShape).elements) {
+                elements.push(this._copyShapeToTrackInternal(element, startFrame, endFrame));
+            }
+        }
+
+        return {
+            frame: startFrame,
+            shapes,
+            elements: object.shapeType === ShapeType.SKELETON ? elements : undefined,
+            group: 0,
+            source: Source.MANUAL,
+            label_id: object.label.id,
+            attributes: Object.keys(object.attributes).reduce((
+                accumulator: { spec_id: number, value: string }[], attrID,
+            ) => {
+                if (attrID in labelAttributes && !labelAttributes[attrID].mutable) {
+                    accumulator.push({
+                        spec_id: +attrID,
+                        value: object.attributes[attrID],
+                    });
+                }
+                return accumulator;
+            }, []),
+        };
+    }
+
+    public copyShapeToTrack(objectState: ObjectState, startFrame: number, endFrame: number): void {
+        checkObjectType('object state', objectState, null, { cls: ObjectState, name: 'ObjectState' });
+        checkObjectType('start frame', startFrame, 'integer', null);
+        checkObjectType('end frame', endFrame, 'integer', null);
+
+        if (startFrame > endFrame) {
+            throw new ArgumentError(
+                `Start frame (${startFrame}) must be less than or equal to end frame (${endFrame})`,
+            );
+        }
+
+        const object = this.objects[objectState.clientID];
+        if (typeof object === 'undefined') {
+            throw new ArgumentError(
+                'The object is not in collection yet. Call annotations.put([state]) before you can copy it to a track',
+            );
+        }
+
+        if (!(object instanceof Shape)) {
+            throw new ArgumentError('Only shapes can be copied to a track');
+        }
+
+        if (objectState.shapeType === ShapeType.MASK) {
+            throw new ArgumentError('Copying masks to a track is not supported');
+        }
+
+        if (!(object.label.id in this.labels)) {
+            throw new ArgumentError(`Unknown label for the task: ${object.label.id}`);
+        }
+
+        const track = this._copyShapeToTrackInternal(object, startFrame, endFrame);
+        const imported = this.import({
+            tracks: [track],
+            tags: [],
+            shapes: [],
+        });
+
+        const [importedTrack] = imported.tracks;
+        this.history.do(
+            HistoryActions.COPIED_SHAPE_TO_TRACK,
+            () => {
+                importedTrack.removed = true;
+            },
+            () => {
+                importedTrack.removed = false;
+            },
+            [importedTrack.clientID],
+            startFrame,
+        );
+    }
+
     private _splitInternal(objectState: ObjectState, object: Track, frame: number): SerializedTrack[] {
         const labelAttributes = labelAttributesAsDict(object.label);
         // first clear all server ids which may exist in the object being splitted

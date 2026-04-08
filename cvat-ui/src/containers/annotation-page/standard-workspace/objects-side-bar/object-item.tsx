@@ -15,6 +15,7 @@ import {
     copyShape as copyShapeAction,
     activateObject as activateObjectAction,
     switchPropagateVisibility as switchPropagateVisibilityAction,
+    switchCopyShapeToTrackVisibility as switchCopyShapeToTrackVisibilityAction,
     removeObject as removeObjectAction,
 } from 'actions/annotation-actions';
 import {
@@ -63,6 +64,7 @@ interface DispatchToProps {
     removeObject: (objectState: ObjectState) => void;
     copyShape: (objectState: ObjectState) => void;
     switchPropagateVisibility: (visible: boolean) => void;
+    switchCopyShapeToTrackVisibility: (visible: boolean) => void;
     changeGroupColor(group: number, color: string): void;
     updateActiveControl(activeControl: ActiveControl): void;
 }
@@ -130,6 +132,9 @@ function mapDispatchToProps(dispatch: any): DispatchToProps {
         switchPropagateVisibility(visible: boolean): void {
             dispatch(switchPropagateVisibilityAction(visible));
         },
+        switchCopyShapeToTrackVisibility(visible: boolean): void {
+            dispatch(switchCopyShapeToTrackVisibilityAction(visible));
+        },
         changeGroupColor(group: number, color: string): void {
             dispatch(changeGroupColorAsync(group, color));
         },
@@ -179,6 +184,13 @@ class ObjectItemContainer extends React.PureComponent<Props, State> {
         const { switchPropagateVisibility, readonly } = this.props;
         if (!readonly) {
             switchPropagateVisibility(true);
+        }
+    };
+
+    private copyToTrack = (): void => {
+        const { switchCopyShapeToTrackVisibility, readonly } = this.props;
+        if (!readonly) {
+            switchCopyShapeToTrackVisibility(true);
         }
     };
 
@@ -421,6 +433,7 @@ class ObjectItemContainer extends React.PureComponent<Props, State> {
                 copy={this.copy}
                 createURL={this.createURL}
                 propagate={this.propagate}
+                copyToTrack={this.copyToTrack}
                 switchOrientation={this.switchOrientation}
                 toBackground={this.toBackground}
                 toForeground={this.toForeground}

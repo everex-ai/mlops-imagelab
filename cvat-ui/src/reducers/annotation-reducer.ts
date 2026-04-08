@@ -156,6 +156,9 @@ const defaultState: AnnotationState = {
     propagate: {
         visible: false,
     },
+    copyShapeToTrack: {
+        visible: false,
+    },
     colors: [],
     sidebarCollapsed: false,
     appearanceCollapsed: false,
@@ -893,6 +896,25 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
             return {
                 ...state,
                 propagate: {
+                    visible,
+                },
+            };
+        }
+        case AnnotationActionTypes.COPY_SHAPE_TO_TRACK_SUCCESS: {
+            const { history } = action.payload;
+            return {
+                ...state,
+                annotations: {
+                    ...state.annotations,
+                    history,
+                },
+            };
+        }
+        case AnnotationActionTypes.SWITCH_COPY_SHAPE_TO_TRACK_VISIBILITY: {
+            const { visible } = action.payload;
+            return {
+                ...state,
+                copyShapeToTrack: {
                     visible,
                 },
             };

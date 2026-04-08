@@ -8,7 +8,7 @@ import Button from 'antd/lib/button';
 import { MenuProps } from 'antd/lib/menu';
 import Icon, {
     LinkOutlined, CopyOutlined, BlockOutlined, RetweetOutlined, DeleteOutlined, EditOutlined,
-    FunctionOutlined,
+    FunctionOutlined, ForwardOutlined,
 } from '@ant-design/icons';
 
 import {
@@ -42,6 +42,7 @@ interface Props {
     copy(): void;
     remove(): void;
     propagate(): void;
+    copyToTrack(): void;
     createURL(): void;
     switchOrientation(): void;
     toBackground(): void;
@@ -137,6 +138,23 @@ function PropagateItem(props: ItemProps): JSX.Element {
                 className='cvat-object-item-menu-propagate-item'
             >
                 Propagate
+            </Button>
+        </CVATTooltip>
+    );
+}
+
+function CopyToTrackItem(props: ItemProps): JSX.Element {
+    const { toolProps } = props;
+    const { copyToTrack } = toolProps;
+    return (
+        <CVATTooltip title='Create a new track seeded from this shape'>
+            <Button
+                type='link'
+                icon={<ForwardOutlined />}
+                onClick={copyToTrack}
+                className='cvat-object-item-menu-copy-to-track-item'
+            >
+                Copy to track
             </Button>
         </CVATTooltip>
     );
@@ -263,6 +281,7 @@ export default function ItemMenu(props: Props): MenuProps {
         CREATE_URL = 'create_url',
         COPY = 'copy',
         PROPAGATE = 'propagate',
+        COPY_TO_TRACK = 'copy_to_track',
         SWITCH_ORIENTATION = 'switch_orientation',
         RESET_PERSPECTIVE = 'reset_perspective',
         TO_BACKGROUND = 'to_background',
@@ -309,6 +328,15 @@ export default function ItemMenu(props: Props): MenuProps {
         items.push({
             key: MenuKeys.PROPAGATE,
             label: <PropagateItem toolProps={props} />,
+        });
+    }
+
+    if (
+        !readonly && objectType === ObjectType.SHAPE && shapeType !== ShapeType.MASK
+    ) {
+        items.push({
+            key: MenuKeys.COPY_TO_TRACK,
+            label: <CopyToTrackItem toolProps={props} />,
         });
     }
 
