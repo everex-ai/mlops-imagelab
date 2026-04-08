@@ -35,7 +35,7 @@ interface Props {
     activate(activeElementID?: number): void;
     copy(): void;
     propagate(): void;
-    copyToTrack(): void;
+    convertToTrack(): void;
     switchOrientation(): void;
     createURL(): void;
     toBackground(): void;
@@ -69,7 +69,7 @@ function ObjectItemComponent(props: Props): JSX.Element {
         activate,
         copy,
         propagate,
-        copyToTrack,
+        convertToTrack,
         createURL,
         switchOrientation,
         toBackground,
@@ -136,7 +136,7 @@ function ObjectItemComponent(props: Props): JSX.Element {
                     copy={copy}
                     remove={remove}
                     propagate={propagate}
-                    copyToTrack={copyToTrack}
+                    convertToTrack={convertToTrack}
                     createURL={createURL}
                     switchOrientation={switchOrientation}
                     toBackground={toBackground}

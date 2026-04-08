@@ -850,7 +850,7 @@ export interface AnnotationState {
     propagate: {
         visible: boolean;
     };
-    copyShapeToTrack: {
+    convertShapeToTrack: {
         visible: boolean;
     };
     colors: any[];

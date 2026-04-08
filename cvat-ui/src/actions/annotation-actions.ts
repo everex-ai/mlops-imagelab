@@ -139,9 +139,9 @@ export enum AnnotationActionTypes {
     PROPAGATE_OBJECT_SUCCESS = 'PROPAGATE_OBJECT_SUCCESS',
     PROPAGATE_OBJECT_FAILED = 'PROPAGATE_OBJECT_FAILED',
     SWITCH_PROPAGATE_VISIBILITY = 'SWITCH_PROPAGATE_VISIBILITY',
-    COPY_SHAPE_TO_TRACK_SUCCESS = 'COPY_SHAPE_TO_TRACK_SUCCESS',
-    COPY_SHAPE_TO_TRACK_FAILED = 'COPY_SHAPE_TO_TRACK_FAILED',
-    SWITCH_COPY_SHAPE_TO_TRACK_VISIBILITY = 'SWITCH_COPY_SHAPE_TO_TRACK_VISIBILITY',
+    CONVERT_SHAPE_TO_TRACK_SUCCESS = 'CONVERT_SHAPE_TO_TRACK_SUCCESS',
+    CONVERT_SHAPE_TO_TRACK_FAILED = 'CONVERT_SHAPE_TO_TRACK_FAILED',
+    SWITCH_CONVERT_SHAPE_TO_TRACK_VISIBILITY = 'SWITCH_CONVERT_SHAPE_TO_TRACK_VISIBILITY',
     SWITCH_SHOWING_STATISTICS = 'SWITCH_SHOWING_STATISTICS',
     SWITCH_SHOWING_FILTERS = 'SWITCH_SHOWING_FILTERS',
     COLLECT_STATISTICS = 'COLLECT_STATISTICS',
@@ -510,14 +510,14 @@ export function propagateObjectAsync(from: number, to: number): ThunkAction {
     };
 }
 
-export function switchCopyShapeToTrackVisibility(visible: boolean): AnyAction {
+export function switchConvertShapeToTrackVisibility(visible: boolean): AnyAction {
     return {
-        type: AnnotationActionTypes.SWITCH_COPY_SHAPE_TO_TRACK_VISIBILITY,
+        type: AnnotationActionTypes.SWITCH_CONVERT_SHAPE_TO_TRACK_VISIBILITY,
         payload: { visible },
     };
 }
 
-export function copyShapeToTrackAsync(startFrame: number, endFrame: number): ThunkAction {
+export function convertShapeToTrackAsync(startFrame: number, endFrame: number): ThunkAction {
     return async (dispatch: ThunkDispatch, getState): Promise<void> => {
         const state = getState();
         const {
@@ -533,24 +533,24 @@ export function copyShapeToTrackAsync(startFrame: number, endFrame: number): Thu
         try {
             const objectState = objectStates.find((_state: any) => _state.clientID === activatedStateID);
             if (!objectState) {
-                throw new Error('There is not an activated object state to be copied to a track');
+                throw new Error('There is not an activated object state to be converted to a track');
             }
 
             if (!sessionInstance) {
-                throw new Error('SessionInstance is not defined, copy to track is not possible');
+                throw new Error('SessionInstance is not defined, convert to track is not possible');
             }
 
-            await sessionInstance.annotations.copyShapeToTrack(objectState, startFrame, endFrame);
+            await sessionInstance.annotations.convertShapeToTrack(objectState, startFrame, endFrame);
 
             const history = await sessionInstance.actions.get();
             dispatch({
-                type: AnnotationActionTypes.COPY_SHAPE_TO_TRACK_SUCCESS,
+                type: AnnotationActionTypes.CONVERT_SHAPE_TO_TRACK_SUCCESS,
                 payload: { history },
             });
             await dispatch(fetchAnnotationsAsync());
         } catch (error) {
             dispatch({
-                type: AnnotationActionTypes.COPY_SHAPE_TO_TRACK_FAILED,
+                type: AnnotationActionTypes.CONVERT_SHAPE_TO_TRACK_FAILED,
                 payload: { error },
             });
         }

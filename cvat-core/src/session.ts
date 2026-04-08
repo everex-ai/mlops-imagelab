@@ -132,10 +132,10 @@ function buildDuplicatedAPI(prototype) {
                     return result;
                 },
 
-                async copyShapeToTrack(objectState, startFrame, endFrame) {
+                async convertShapeToTrack(objectState, startFrame, endFrame) {
                     const result = await PluginRegistry.apiWrapper.call(
                         this,
-                        prototype.annotations.copyShapeToTrack,
+                        prototype.annotations.convertShapeToTrack,
                         objectState,
                         startFrame,
                         endFrame,
@@ -389,7 +389,7 @@ export class Session {
         put: (objectStates: ObjectState[]) => Promise<number[]>;
         merge: (objectStates: ObjectState[]) => Promise<void>;
         split: (objectState: ObjectState, frame: number) => Promise<void>;
-        copyShapeToTrack: (
+        convertShapeToTrack: (
             objectState: ObjectState,
             startFrame: number,
             endFrame: number,
@@ -509,7 +509,7 @@ export class Session {
             save: Object.getPrototypeOf(this).annotations.save.bind(this),
             merge: Object.getPrototypeOf(this).annotations.merge.bind(this),
             split: Object.getPrototypeOf(this).annotations.split.bind(this),
-            copyShapeToTrack: Object.getPrototypeOf(this).annotations.copyShapeToTrack.bind(this),
+            convertShapeToTrack: Object.getPrototypeOf(this).annotations.convertShapeToTrack.bind(this),
             group: Object.getPrototypeOf(this).annotations.group.bind(this),
             join: Object.getPrototypeOf(this).annotations.join.bind(this),
             slice: Object.getPrototypeOf(this).annotations.slice.bind(this),

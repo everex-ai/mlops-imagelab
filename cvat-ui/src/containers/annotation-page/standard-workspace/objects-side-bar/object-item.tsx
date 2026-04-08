@@ -15,7 +15,7 @@ import {
     copyShape as copyShapeAction,
     activateObject as activateObjectAction,
     switchPropagateVisibility as switchPropagateVisibilityAction,
-    switchCopyShapeToTrackVisibility as switchCopyShapeToTrackVisibilityAction,
+    switchConvertShapeToTrackVisibility as switchConvertShapeToTrackVisibilityAction,
     removeObject as removeObjectAction,
 } from 'actions/annotation-actions';
 import {
@@ -64,7 +64,7 @@ interface DispatchToProps {
     removeObject: (objectState: ObjectState) => void;
     copyShape: (objectState: ObjectState) => void;
     switchPropagateVisibility: (visible: boolean) => void;
-    switchCopyShapeToTrackVisibility: (visible: boolean) => void;
+    switchConvertShapeToTrackVisibility: (visible: boolean) => void;
     changeGroupColor(group: number, color: string): void;
     updateActiveControl(activeControl: ActiveControl): void;
 }
@@ -132,8 +132,8 @@ function mapDispatchToProps(dispatch: any): DispatchToProps {
         switchPropagateVisibility(visible: boolean): void {
             dispatch(switchPropagateVisibilityAction(visible));
         },
-        switchCopyShapeToTrackVisibility(visible: boolean): void {
-            dispatch(switchCopyShapeToTrackVisibilityAction(visible));
+        switchConvertShapeToTrackVisibility(visible: boolean): void {
+            dispatch(switchConvertShapeToTrackVisibilityAction(visible));
         },
         changeGroupColor(group: number, color: string): void {
             dispatch(changeGroupColorAsync(group, color));
@@ -187,10 +187,10 @@ class ObjectItemContainer extends React.PureComponent<Props, State> {
         }
     };
 
-    private copyToTrack = (): void => {
-        const { switchCopyShapeToTrackVisibility, readonly } = this.props;
+    private convertToTrack = (): void => {
+        const { switchConvertShapeToTrackVisibility, readonly } = this.props;
         if (!readonly) {
-            switchCopyShapeToTrackVisibility(true);
+            switchConvertShapeToTrackVisibility(true);
         }
     };
 
@@ -433,7 +433,7 @@ class ObjectItemContainer extends React.PureComponent<Props, State> {
                 copy={this.copy}
                 createURL={this.createURL}
                 propagate={this.propagate}
-                copyToTrack={this.copyToTrack}
+                convertToTrack={this.convertToTrack}
                 switchOrientation={this.switchOrientation}
                 toBackground={this.toBackground}
                 toForeground={this.toForeground}

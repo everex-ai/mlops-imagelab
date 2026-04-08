@@ -42,7 +42,7 @@ interface Props {
     copy(): void;
     remove(): void;
     propagate(): void;
-    copyToTrack(): void;
+    convertToTrack(): void;
     createURL(): void;
     switchOrientation(): void;
     toBackground(): void;
@@ -143,18 +143,18 @@ function PropagateItem(props: ItemProps): JSX.Element {
     );
 }
 
-function CopyToTrackItem(props: ItemProps): JSX.Element {
+function ConvertToTrackItem(props: ItemProps): JSX.Element {
     const { toolProps } = props;
-    const { copyToTrack } = toolProps;
+    const { convertToTrack } = toolProps;
     return (
-        <CVATTooltip title='Create a new track seeded from this shape'>
+        <CVATTooltip title='Convert this shape into a track across a frame range'>
             <Button
                 type='link'
                 icon={<ForwardOutlined />}
-                onClick={copyToTrack}
-                className='cvat-object-item-menu-copy-to-track-item'
+                onClick={convertToTrack}
+                className='cvat-object-item-menu-convert-to-track-item'
             >
-                Copy to track
+                Convert to track
             </Button>
         </CVATTooltip>
     );
@@ -281,7 +281,7 @@ export default function ItemMenu(props: Props): MenuProps {
         CREATE_URL = 'create_url',
         COPY = 'copy',
         PROPAGATE = 'propagate',
-        COPY_TO_TRACK = 'copy_to_track',
+        CONVERT_TO_TRACK = 'convert_to_track',
         SWITCH_ORIENTATION = 'switch_orientation',
         RESET_PERSPECTIVE = 'reset_perspective',
         TO_BACKGROUND = 'to_background',
@@ -335,8 +335,8 @@ export default function ItemMenu(props: Props): MenuProps {
         !readonly && objectType === ObjectType.SHAPE && shapeType !== ShapeType.MASK
     ) {
         items.push({
-            key: MenuKeys.COPY_TO_TRACK,
-            label: <CopyToTrackItem toolProps={props} />,
+            key: MenuKeys.CONVERT_TO_TRACK,
+            label: <ConvertToTrackItem toolProps={props} />,
         });
     }
 

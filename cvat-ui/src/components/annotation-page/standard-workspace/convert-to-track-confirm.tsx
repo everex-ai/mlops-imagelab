@@ -11,17 +11,17 @@ import Button from 'antd/lib/button';
 import { Row, Col } from 'antd/lib/grid';
 import Slider from 'antd/lib/slider';
 import { clamp } from 'utils/math';
-import { copyShapeToTrackAsync, switchCopyShapeToTrackVisibility } from 'actions/annotation-actions';
+import { convertShapeToTrackAsync, switchConvertShapeToTrackVisibility } from 'actions/annotation-actions';
 import { CombinedState } from 'reducers';
 
-function CopyToTrackConfirmComponent(): JSX.Element {
+function ConvertToTrackConfirmComponent(): JSX.Element {
     const dispatch = useDispatch();
     const {
         visible,
         frameNumber,
         frameNumbers,
     } = useSelector((state: CombinedState) => ({
-        visible: state.annotation.copyShapeToTrack.visible,
+        visible: state.annotation.convertShapeToTrack.visible,
         frameNumber: state.annotation.player.frame.number,
         frameNumbers: state.annotation.job.frameNumbers,
     }), shallowEqual);
@@ -40,8 +40,8 @@ function CopyToTrackConfirmComponent(): JSX.Element {
         }
     }, [visible]);
 
-    // The source shape lives on the current frame, so the selected range
-    // must contain it to form a meaningful track.
+    // The source shape lives on the current frame; requiring the range to
+    // contain it keeps the conversion's spatial meaning intuitive.
     const rangeContainsCurrent = rangeStart <= frameNumber && frameNumber <= rangeEnd;
     const rangeIsValid = rangeStart <= rangeEnd && rangeContainsCurrent;
 
@@ -58,24 +58,24 @@ function CopyToTrackConfirmComponent(): JSX.Element {
     return (
         <Modal
             okType='primary'
-            okText='Create track'
+            okText='Convert'
             cancelText='Cancel'
             onOk={() => {
-                dispatch(copyShapeToTrackAsync(rangeStart, rangeEnd))
-                    .then(() => dispatch(switchCopyShapeToTrackVisibility(false)));
+                dispatch(convertShapeToTrackAsync(rangeStart, rangeEnd))
+                    .then(() => dispatch(switchConvertShapeToTrackVisibility(false)));
             }}
-            onCancel={() => dispatch(switchCopyShapeToTrackVisibility(false))}
-            title='Copy shape to track'
+            onCancel={() => dispatch(switchConvertShapeToTrackVisibility(false))}
+            title='Convert shape to track'
             open={visible}
             destroyOnClose
             okButtonProps={{ disabled: !rangeIsValid }}
         >
-            <div className='cvat-copy-to-track-confirm'>
+            <div className='cvat-convert-to-track-confirm'>
                 <Row>
                     <Col span={24}>
                         <Text>
-                            A new track will be created with two keyframes at the range boundaries,
-                            sharing the current shape&apos;s position. The original shape is preserved.
+                            A new track will be created with keyframes at the range boundaries,
+                            matching the current shape&apos;s position. The original shape is removed.
                         </Text>
                     </Col>
                 </Row>
@@ -85,7 +85,7 @@ function CopyToTrackConfirmComponent(): JSX.Element {
                             size='small'
                             onClick={setUpToCurrent}
                             disabled={frameNumber === startFrame}
-                            className='cvat-copy-to-track-confirm-up-to-current'
+                            className='cvat-convert-to-track-confirm-up-to-current'
                         >
                             Up to current
                         </Button>
@@ -95,17 +95,17 @@ function CopyToTrackConfirmComponent(): JSX.Element {
                             size='small'
                             onClick={setFromCurrent}
                             disabled={frameNumber === stopFrame}
-                            className='cvat-copy-to-track-confirm-from-current'
+                            className='cvat-convert-to-track-confirm-from-current'
                         >
                             From current
                         </Button>
                     </Col>
                 </Row>
-                <Row style={{ marginTop: 12 }} className='cvat-copy-to-track-range-wrapper'>
+                <Row style={{ marginTop: 12 }} className='cvat-convert-to-track-range-wrapper'>
                     <Col span={24}>
                         <Text>Adjust the range:</Text>
                     </Col>
-                    <Col span={14} offset={1} className='cvat-copy-to-track-slider-wrapper'>
+                    <Col span={14} offset={1} className='cvat-convert-to-track-slider-wrapper'>
                         <Slider
                             range
                             min={startFrame}
@@ -128,7 +128,7 @@ function CopyToTrackConfirmComponent(): JSX.Element {
                     <Col offset={1}>
                         <InputNumber
                             size='small'
-                            className='cvat-copy-to-track-confirm-start-input'
+                            className='cvat-convert-to-track-confirm-start-input'
                             min={startFrame}
                             max={rangeEnd}
                             value={rangeStart}
@@ -145,7 +145,7 @@ function CopyToTrackConfirmComponent(): JSX.Element {
                     <Col offset={1}>
                         <InputNumber
                             size='small'
-                            className='cvat-copy-to-track-confirm-end-input'
+                            className='cvat-convert-to-track-confirm-end-input'
                             min={rangeStart}
                             max={stopFrame}
                             value={rangeEnd}
@@ -173,4 +173,4 @@ function CopyToTrackConfirmComponent(): JSX.Element {
     );
 }
 
-export default React.memo(CopyToTrackConfirmComponent);
+export default React.memo(ConvertToTrackConfirmComponent);

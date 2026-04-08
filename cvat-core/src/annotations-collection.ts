@@ -519,7 +519,7 @@ export default class Collection {
         );
     }
 
-    private _copyShapeToTrackInternal(
+    private _convertShapeToTrackInternal(
         object: Shape,
         startFrame: number,
         endFrame: number,
@@ -569,7 +569,7 @@ export default class Collection {
         const elements: SerializedTrack['elements'] = [];
         if (object.shapeType === ShapeType.SKELETON) {
             for (const element of (object as SkeletonShape).elements) {
-                elements.push(this._copyShapeToTrackInternal(element, startFrame, endFrame));
+                elements.push(this._convertShapeToTrackInternal(element, startFrame, endFrame));
             }
         }
 
@@ -594,7 +594,7 @@ export default class Collection {
         };
     }
 
-    public copyShapeToTrack(objectState: ObjectState, startFrame: number, endFrame: number): void {
+    public convertShapeToTrack(objectState: ObjectState, startFrame: number, endFrame: number): void {
         checkObjectType('object state', objectState, null, { cls: ObjectState, name: 'ObjectState' });
         checkObjectType('start frame', startFrame, 'integer', null);
         checkObjectType('end frame', endFrame, 'integer', null);
@@ -608,39 +608,47 @@ export default class Collection {
         const object = this.objects[objectState.clientID];
         if (typeof object === 'undefined') {
             throw new ArgumentError(
-                'The object is not in collection yet. Call annotations.put([state]) before you can copy it to a track',
+                'The object is not in collection yet. Call annotations.put([state]) before you can convert it to a track',
             );
         }
 
         if (!(object instanceof Shape)) {
-            throw new ArgumentError('Only shapes can be copied to a track');
+            throw new ArgumentError('Only shapes can be converted to a track');
         }
 
         if (objectState.shapeType === ShapeType.MASK) {
-            throw new ArgumentError('Copying masks to a track is not supported');
+            throw new ArgumentError('Converting masks to a track is not supported');
         }
 
         if (!(object.label.id in this.labels)) {
             throw new ArgumentError(`Unknown label for the task: ${object.label.id}`);
         }
 
-        const track = this._copyShapeToTrackInternal(object, startFrame, endFrame);
+        const track = this._convertShapeToTrackInternal(object, startFrame, endFrame);
         const imported = this.import({
             tracks: [track],
             tags: [],
             shapes: [],
         });
 
+        // Replace the original shape with the newly created track so that
+        // no frame ends up holding both the source shape and the track at once.
+        // The shape's data has already been copied into the track's keyframes,
+        // so nothing is lost from the user's perspective.
+        object.removed = true;
+
         const [importedTrack] = imported.tracks;
         this.history.do(
-            HistoryActions.COPIED_SHAPE_TO_TRACK,
+            HistoryActions.CONVERTED_SHAPE_TO_TRACK,
             () => {
                 importedTrack.removed = true;
+                object.removed = false;
             },
             () => {
                 importedTrack.removed = false;
+                object.removed = true;
             },
-            [importedTrack.clientID],
+            [object.clientID, importedTrack.clientID],
             startFrame,
         );
     }

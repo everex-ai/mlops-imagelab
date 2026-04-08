@@ -156,7 +156,7 @@ const defaultState: AnnotationState = {
     propagate: {
         visible: false,
     },
-    copyShapeToTrack: {
+    convertShapeToTrack: {
         visible: false,
     },
     colors: [],
@@ -900,7 +900,7 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 },
             };
         }
-        case AnnotationActionTypes.COPY_SHAPE_TO_TRACK_SUCCESS: {
+        case AnnotationActionTypes.CONVERT_SHAPE_TO_TRACK_SUCCESS: {
             const { history } = action.payload;
             return {
                 ...state,
@@ -910,11 +910,11 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 },
             };
         }
-        case AnnotationActionTypes.SWITCH_COPY_SHAPE_TO_TRACK_VISIBILITY: {
+        case AnnotationActionTypes.SWITCH_CONVERT_SHAPE_TO_TRACK_VISIBILITY: {
             const { visible } = action.payload;
             return {
                 ...state,
-                copyShapeToTrack: {
+                convertShapeToTrack: {
                     visible,
                 },
             };
