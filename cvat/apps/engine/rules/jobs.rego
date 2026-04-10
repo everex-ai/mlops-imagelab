@@ -309,9 +309,9 @@ allow if {
 
 # === Reviewer rules ===
 # A reviewer can read every job in the organization, regardless of stage or
-# assignee, and is allowed to advance a job through stages (e.g. validation
-# -> acceptance) once review is complete. Reviewers MUST NOT be permitted
-# to mutate annotations in any way: those scopes are gated by has_perm(WORKER)
+# assignee, and is allowed to manage job workflow (stage, state, assignee)
+# once review is complete. Reviewers MUST NOT be permitted to mutate
+# annotations in any way: those scopes are gated by has_perm(WORKER)
 # in the rules above, which automatically denies reviewers because reviewer
 # is intentionally absent from organizations.get_priority().
 
@@ -326,7 +326,7 @@ allow if {
 }
 
 allow if {
-    input.scope == utils.UPDATE_STAGE
+    input.scope in {utils.UPDATE_STAGE, utils.UPDATE_STATE, utils.UPDATE_ASSIGNEE}
     input.auth.organization.id == input.resource.organization.id
     organizations.is_reviewer
 }

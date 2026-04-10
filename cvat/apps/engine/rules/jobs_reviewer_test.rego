@@ -98,6 +98,22 @@ test_reviewer_can_update_stage if {
     }
 }
 
+test_reviewer_can_update_state if {
+    jobs.allow with input as {
+        "scope": "update:state",
+        "auth": reviewer_auth,
+        "resource": job_resource("annotation"),
+    }
+}
+
+test_reviewer_can_update_assignee if {
+    jobs.allow with input as {
+        "scope": "update:assignee",
+        "auth": reviewer_auth,
+        "resource": job_resource("annotation"),
+    }
+}
+
 # === Negative cases — labeling MUST be blocked ===
 
 test_reviewer_cannot_update_annotations_at_annotation if {
@@ -174,25 +190,9 @@ test_reviewer_cannot_delete_job if {
     }
 }
 
-test_reviewer_cannot_update_state if {
-    not jobs.allow with input as {
-        "scope": "update:state",
-        "auth": reviewer_auth,
-        "resource": job_resource("annotation"),
-    }
-}
-
 test_reviewer_cannot_update_metadata if {
     not jobs.allow with input as {
         "scope": "update:metadata",
-        "auth": reviewer_auth,
-        "resource": job_resource("annotation"),
-    }
-}
-
-test_reviewer_cannot_update_assignee if {
-    not jobs.allow with input as {
-        "scope": "update:assignee",
         "auth": reviewer_auth,
         "resource": job_resource("annotation"),
     }
@@ -225,6 +225,28 @@ test_reviewer_cannot_update_stage_in_other_org if {
     ])
     not jobs.allow with input as {
         "scope": "update:stage",
+        "auth": reviewer_auth,
+        "resource": other_resource,
+    }
+}
+
+test_reviewer_cannot_update_state_in_other_org if {
+    other_resource := json.patch(job_resource("validation"), [
+        {"op": "replace", "path": "/organization/id", "value": 99}
+    ])
+    not jobs.allow with input as {
+        "scope": "update:state",
+        "auth": reviewer_auth,
+        "resource": other_resource,
+    }
+}
+
+test_reviewer_cannot_update_assignee_in_other_org if {
+    other_resource := json.patch(job_resource("validation"), [
+        {"op": "replace", "path": "/organization/id", "value": 99}
+    ])
+    not jobs.allow with input as {
+        "scope": "update:assignee",
         "auth": reviewer_auth,
         "resource": other_resource,
     }
