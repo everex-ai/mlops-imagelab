@@ -18,7 +18,7 @@ import data.organizations
 #                 "id": <num>
 #             },
 #             "user": {
-#                 "role": <"owner"|"maintainer"|"supervisor"|"worker"> or null
+#                 "role": <"owner"|"maintainer"|"supervisor"|"reviewer"|"worker"> or null
 #             }
 #         } or null,
 #     },
@@ -94,5 +94,13 @@ filter := [] if { # Django Q object to filter list of entries
         {"task__assignee_id": user.id}, "|",
         {"project__owner_id": user.id}, "|",
         {"project__assignee_id": user.id}, "|",
+    ]
+} else := qobject if {
+    # Reviewer: every label in the organization
+    organizations.is_reviewer
+    org := input.auth.organization
+    qobject := [
+        {"task__organization": org.id},
+        {"project__organization": org.id}, "|",
     ]
 }

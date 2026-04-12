@@ -35,7 +35,7 @@ import data.organizations
 #                 "id": <num>
 #             },
 #             "user": {
-#                 "role": <"owner"|"maintainer"|"supervisor"|"worker"> or null
+#                 "role": <"owner"|"maintainer"|"supervisor"|"reviewer"|"worker"> or null
 #             }
 #         } or null,
 #     },
@@ -107,6 +107,10 @@ filter := [] if { # Django Q object to filter list of entries
     user := input.auth.user
     qobject := [ {"owner_id": user.id}, {"assignee_id": user.id}, "|",
         {"organization": input.auth.organization.id}, "&" ]
+} else := qobject if {
+    # Reviewer: every project in the organization
+    organizations.is_reviewer
+    qobject := [ {"organization": input.auth.organization.id} ]
 }
 
 allow if {
@@ -234,4 +238,11 @@ allow if {
 allow if {
     input.scope == utils.DOWNLOAD_EXPORTED_FILE
     input.auth.user.id == input.resource.rq_job.owner.id
+}
+
+# Reviewer: read-only access to projects in the same organization
+allow if {
+    input.scope == utils.VIEW
+    input.auth.organization.id == input.resource.organization.id
+    organizations.is_reviewer
 }

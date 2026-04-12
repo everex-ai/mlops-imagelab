@@ -10,6 +10,7 @@ export interface MemberRoleSelectorProps {
 
 const roleOptions = [
     { value: 'worker', label: 'Worker' },
+    { value: 'reviewer', label: 'Reviewer' },
     { value: 'supervisor', label: 'Supervisor' },
     { value: 'maintainer', label: 'Maintainer' },
     { value: 'owner', label: 'Owner' },
