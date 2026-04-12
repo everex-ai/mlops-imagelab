@@ -202,8 +202,9 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 validationLayout,
             } = action.payload;
 
+            const { isReviewer } = action.payload;
             const defaultLabel = job.labels.length ? job.labels[0] : null;
-            const isReview = job.stage === JobStage.VALIDATION;
+            const isReview = job.stage === JobStage.VALIDATION || isReviewer;
             let workspaceSelected = null;
             let activeObjectType;
             let activeShapeType = null;

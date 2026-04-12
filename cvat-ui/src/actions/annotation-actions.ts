@@ -1158,6 +1158,7 @@ export function getJobAsync({
             await job.logger.log(EventScope.loadJob, { duration: Date.now() - start });
 
             const openTime = Date.now();
+            const isReviewer = state.auth.user?.groups?.includes('reviewer') ?? false;
             dispatch({
                 type: AnnotationActionTypes.GET_JOB_SUCCESS,
                 payload: {
@@ -1177,6 +1178,7 @@ export function getJobAsync({
                     frameData,
                     colors,
                     filters,
+                    isReviewer,
                 },
             });
 
