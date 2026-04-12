@@ -1,0 +1,1 @@
+- [Main branch is main](feedback_main_branch.md) — PR 대상 브랜치는 main, develop 아님

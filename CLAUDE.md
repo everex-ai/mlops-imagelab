@@ -17,7 +17,7 @@ CVAT (Computer Vision Annotation Tool) is an interactive video and image annotat
 
 ## Git Workflow
 
-- **Main branch**: `develop` (PRs should target this branch)
+- **Main branch**: `main` (PRs should target this branch)
 - **Upstream**: `https://github.com/cvat-ai/cvat.git` (official CVAT repo)
 - **Git hooks**: Lefthook runs `lint-staged` on pre-commit for `*.{js,jsx,ts,tsx}` files
 
