@@ -161,6 +161,11 @@ filter := [] if { # Django Q object to filter list of entries
     qobject := [ {"organization": input.auth.organization.id},
         {"project__organization": input.auth.organization.id}, "|"]
 } else := qobject if {
+    # Sandbox reviewer: every task
+    utils.is_sandbox
+    utils.is_reviewer
+    qobject := []
+} else := qobject if {
     utils.is_sandbox
     user := input.auth.user
     qobject := [ {"owner_id": user.id}, {"assignee_id": user.id}, "|",
@@ -326,6 +331,16 @@ allow if {
     }
     input.auth.organization.id == input.resource.organization.id
     organizations.is_reviewer
+}
+
+# Sandbox reviewer: read-only access to all tasks
+allow if {
+    input.scope in {
+        utils.VIEW, utils.VIEW_ANNOTATIONS, utils.VIEW_METADATA,
+        utils.VIEW_DATA, utils.VIEW_VALIDATION_LAYOUT
+    }
+    utils.is_sandbox
+    utils.is_reviewer
 }
 
 allow if {

@@ -170,6 +170,11 @@ filter := [] if { # Django Q object to filter list of entries
         {"job__segment__task__project__organization": org.id}, "|"
     ]
 } else := qobject if {
+    # Sandbox reviewer: every issue
+    utils.is_sandbox
+    utils.is_reviewer
+    qobject := []
+} else := qobject if {
     utils.is_sandbox
     user := input.auth.user
     qobject := [
@@ -291,5 +296,26 @@ allow if {
     input.scope in {utils.UPDATE, utils.DELETE}
     input.auth.organization.id == input.resource.organization.id
     organizations.is_reviewer
+    is_issue_owner
+}
+
+# === Sandbox reviewer rules ===
+
+allow if {
+    input.scope == utils.CREATE_IN_JOB
+    utils.is_sandbox
+    utils.is_reviewer
+}
+
+allow if {
+    input.scope == utils.VIEW
+    utils.is_sandbox
+    utils.is_reviewer
+}
+
+allow if {
+    input.scope in {utils.UPDATE, utils.DELETE}
+    utils.is_sandbox
+    utils.is_reviewer
     is_issue_owner
 }

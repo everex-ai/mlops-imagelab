@@ -136,6 +136,11 @@ filter := [] if { # Django Q object to filter list of entries
         {"segment__task__organization": input.auth.organization.id},
         {"segment__task__project__organization": input.auth.organization.id}, "|" ]
 } else := qobject if {
+    # Sandbox reviewer: can see every job, regardless of stage or assignee
+    utils.is_sandbox
+    utils.is_reviewer
+    qobject := []
+} else := qobject if {
     utils.is_sandbox
     user := input.auth.user
     qobject := [
@@ -329,4 +334,24 @@ allow if {
     input.scope in {utils.UPDATE_STAGE, utils.UPDATE_STATE, utils.UPDATE_ASSIGNEE}
     input.auth.organization.id == input.resource.organization.id
     organizations.is_reviewer
+}
+
+# === Sandbox reviewer rules ===
+# Mirror of the organization reviewer rules for users with the global
+# "reviewer" privilege operating outside any organization.
+
+allow if {
+    input.scope in {
+        utils.VIEW,
+        utils.VIEW_ANNOTATIONS, utils.VIEW_DATA, utils.VIEW_METADATA,
+        utils.VIEW_VALIDATION_LAYOUT
+    }
+    utils.is_sandbox
+    utils.is_reviewer
+}
+
+allow if {
+    input.scope in {utils.UPDATE_STAGE, utils.UPDATE_STATE, utils.UPDATE_ASSIGNEE}
+    utils.is_sandbox
+    utils.is_reviewer
 }

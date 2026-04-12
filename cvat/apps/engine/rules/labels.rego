@@ -69,6 +69,11 @@ filter := [] if { # Django Q object to filter list of entries
         {"project__organization": org.id}, "|",
     ]
 } else := qobject if {
+    # Sandbox reviewer: every label
+    utils.is_sandbox
+    utils.is_reviewer
+    qobject := []
+} else := qobject if {
     utils.is_sandbox
     user := input.auth.user
     qobject := [

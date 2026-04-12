@@ -111,3 +111,10 @@ allow if {
     input.auth.organization.id == input.resource.organization.id
     organizations.is_reviewer
 }
+
+# Sandbox reviewer: read-only access to all annotation guides
+allow if {
+    input.scope == utils.VIEW
+    utils.is_sandbox
+    utils.is_reviewer
+}

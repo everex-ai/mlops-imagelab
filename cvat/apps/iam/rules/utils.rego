@@ -5,6 +5,7 @@ import rego.v1
 # Groups
 ADMIN := "admin"
 USER := "user"
+REVIEWER := "reviewer"
 WORKER := "worker"
 
 # Visibility of objects
@@ -83,6 +84,10 @@ is_user if {
 
 is_worker if {
     input.auth.user.privilege == WORKER
+}
+
+is_reviewer if {
+    input.auth.user.privilege == REVIEWER
 }
 
 is_resource_owner if {
