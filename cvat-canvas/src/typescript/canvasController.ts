@@ -39,6 +39,7 @@ export interface CanvasController {
     readonly joinData: JoinData;
     readonly sliceData: SliceData;
     readonly selected: any;
+    readonly selectedClientIDs: number[];
     readonly configuration: Configuration;
     mode: Mode;
     geometry: Geometry;
@@ -172,6 +173,10 @@ export class CanvasControllerImpl implements CanvasController {
 
     public get selected(): any {
         return this.model.selected;
+    }
+
+    public get selectedClientIDs(): number[] {
+        return this.model.selectedClientIDs;
     }
 
     public get configuration(): Configuration {

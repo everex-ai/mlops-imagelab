@@ -120,6 +120,11 @@ export class DrawHandlerImpl implements DrawHandler {
     private pointsGroup: SVG.G | null;
     private shapeSizeElement: ShapeSizeElement | null;
 
+    // Multi-paste fields
+    private multiDrawInstances: any[];
+    private multiPointsGroups: (SVG.G | null)[];
+    private multiInitialStates: any[];
+
     private getFinalEllipseCoordinates(points: number[], fitIntoFrame: boolean): number[] {
         const { offset } = this.geometry;
         const [cx, cy, rightX, topY] = points.map((coord: number) => coord - offset);
@@ -376,6 +381,17 @@ export class DrawHandlerImpl implements DrawHandler {
             // prevents recursive calls
             return;
         }
+
+        // Clean up multi-paste resources
+        for (const inst of this.multiDrawInstances) {
+            if (inst) { inst.off(); inst.remove(); }
+        }
+        for (const pg of this.multiPointsGroups) {
+            if (pg) { pg.remove(); }
+        }
+        this.multiDrawInstances = [];
+        this.multiPointsGroups = [];
+        this.multiInitialStates = [];
 
         this.autoborderHandler.autoborder(false);
         this.initialized = false;
@@ -1174,6 +1190,335 @@ export class DrawHandlerImpl implements DrawHandler {
         this.pastePolyshape();
     }
 
+    private createShapePreview(
+        state: any, offset: number,
+    ): { instance: any; pointsGroup: SVG.G | null } {
+        const { shapeType } = state;
+        let instance: any;
+        let pointsGroup: SVG.G | null = null;
+
+        if (shapeType === 'rectangle') {
+            const [xtl, ytl, xbr, ybr] = translateToCanvas(offset, state.points);
+            instance = (this.canvas as any)
+                .rect(xbr - xtl, ybr - ytl)
+                .move(xtl, ytl)
+                .addClass('cvat_canvas_shape_drawing')
+                .attr({
+                    'stroke-width': consts.BASE_STROKE_WIDTH / this.geometry.scale,
+                    'fill-opacity': this.selectedShapeOpacity,
+                    stroke: this.outlinedBorders,
+                })
+                .rotate(state.rotation || 0);
+        } else if (shapeType === 'ellipse') {
+            const [cx, cy, rightX, topY] = translateToCanvas(offset, state.points);
+            instance = (this.canvas as any)
+                .ellipse((rightX - cx) * 2, (cy - topY) * 2)
+                .center(cx, cy)
+                .addClass('cvat_canvas_shape_drawing')
+                .attr({
+                    'stroke-width': consts.BASE_STROKE_WIDTH / this.geometry.scale,
+                    'fill-opacity': this.selectedShapeOpacity,
+                    stroke: this.outlinedBorders,
+                })
+                .rotate(state.rotation || 0);
+        } else if (shapeType === 'polygon') {
+            const points = translateToCanvas(offset, state.points);
+            instance = (this.canvas as any)
+                .polygon(stringifyPoints(points))
+                .addClass('cvat_canvas_shape_drawing')
+                .attr({
+                    'stroke-width': consts.BASE_STROKE_WIDTH / this.geometry.scale,
+                    'fill-opacity': this.selectedShapeOpacity,
+                    stroke: this.outlinedBorders,
+                });
+        } else if (shapeType === 'polyline') {
+            const points = translateToCanvas(offset, state.points);
+            instance = (this.canvas as any)
+                .polyline(stringifyPoints(points))
+                .addClass('cvat_canvas_shape_drawing')
+                .attr({
+                    'stroke-width': consts.BASE_STROKE_WIDTH / this.geometry.scale,
+                    stroke: this.outlinedBorders,
+                });
+        } else if (shapeType === 'points') {
+            const points = translateToCanvas(offset, state.points);
+            instance = (this.canvas as any)
+                .polyline(stringifyPoints(points))
+                .addClass('cvat_canvas_shape_drawing')
+                .style({ 'stroke-width': 0 });
+            // Create visible point circles
+            pointsGroup = this.canvas.group();
+            const numOfPoints = points.length / 2;
+            for (let p = 0; p < numOfPoints; p++) {
+                const radius = this.controlPointsSize / this.geometry.scale;
+                const stroke = consts.POINTS_STROKE_WIDTH / this.geometry.scale;
+                pointsGroup.circle().fill('white').stroke('black').attr({
+                    r: radius,
+                    'stroke-width': stroke,
+                });
+            }
+            // Position point circles
+            const pointStr = instance.attr('points').split(' ');
+            pointsGroup.children().forEach((child: SVG.Element, idx: number): void => {
+                const [px, py] = pointStr[idx].split(',');
+                child.center(+px, +py);
+            });
+        } else if (shapeType === 'cuboid') {
+            const points = translateToCanvas(offset, state.points);
+            instance = (this.canvas as any)
+                .cube(stringifyPoints(points))
+                .addClass('cvat_canvas_shape_drawing')
+                .attr({
+                    'stroke-width': consts.BASE_STROKE_WIDTH / this.geometry.scale,
+                    'face-stroke': this.outlinedBorders,
+                    'fill-opacity': this.selectedShapeOpacity,
+                    stroke: this.outlinedBorders,
+                });
+        } else if (shapeType === 'skeleton') {
+            const points = translateToCanvas(offset, state.points);
+            const box = computeWrappingBox(points, consts.SKELETON_RECT_MARGIN);
+            instance = (this.canvas as any)
+                .rect(box.width, box.height)
+                .move(box.x, box.y)
+                .addClass('cvat_canvas_shape_drawing')
+                .attr({
+                    'stroke-width': consts.BASE_STROKE_WIDTH / this.geometry.scale,
+                    'fill-opacity': this.selectedShapeOpacity,
+                    stroke: this.outlinedBorders,
+                });
+            const skeletonSVG = this.drawData.skeletonSVGMap?.[state.label.id];
+            if (skeletonSVG) {
+                pointsGroup = makeSVGFromTemplate(skeletonSVG);
+                pointsGroup.attr({
+                    'stroke-width': consts.BASE_STROKE_WIDTH / this.geometry.scale,
+                    stroke: this.outlinedBorders,
+                });
+                this.canvas.add(pointsGroup);
+                pointsGroup.children().forEach((child: SVG.Element): void => {
+                    const dataType = child.attr('data-type');
+                    if (child.node.tagName === 'circle' && dataType && dataType.includes('element')) {
+                        child.attr('r', `${this.controlPointsSize / this.geometry.scale}`);
+                        const labelID = +child.attr('data-label-id');
+                        const element = state.elements?.find(
+                            (_el: any): boolean => _el.label.id === labelID,
+                        );
+                        if (element) {
+                            const elPoints = translateToCanvas(offset, element.points);
+                            child.center(elPoints[0], elPoints[1]);
+                        }
+                    }
+                });
+            }
+        }
+
+        return { instance, pointsGroup };
+    }
+
+    private pasteMultiShapes(): void {
+        const { offset } = this.geometry;
+        const states = this.drawData.initialStates;
+
+        // Create all shape previews
+        for (const state of states) {
+            const { instance, pointsGroup } = this.createShapePreview(state, offset);
+            this.multiDrawInstances.push(instance);
+            this.multiPointsGroups.push(pointsGroup);
+        }
+        this.multiInitialStates = [...states];
+
+        // Calculate centroid of all shapes
+        let sumX = 0;
+        let sumY = 0;
+        let count = 0;
+        for (const inst of this.multiDrawInstances) {
+            if (inst) {
+                const bbox = inst.bbox();
+                sumX += bbox.cx;
+                sumY += bbox.cy;
+                count++;
+            }
+        }
+        const centroidX = count > 0 ? sumX / count : 0;
+        const centroidY = count > 0 ? sumY / count : 0;
+
+        // Compute each shape's offset from centroid
+        const shapeOffsets: { dx: number; dy: number }[] = this.multiDrawInstances.map((inst) => {
+            if (!inst) return { dx: 0, dy: 0 };
+            const bbox = inst.bbox();
+            return { dx: bbox.cx - centroidX, dy: bbox.cy - centroidY };
+        });
+
+        // Move group to initial cursor position
+        const { x: initX, y: initY } = this.cursorPosition;
+        this.moveMultiGroup(initX, initY, shapeOffsets);
+
+        // Follow cursor
+        this.canvas.on('mousemove.draw', (): void => {
+            const { x, y } = this.cursorPosition;
+            this.moveMultiGroup(x, y, shapeOffsets);
+        });
+
+        // Hidden drawInstance for compatibility with release()
+        this.drawInstance = (this.canvas as any).rect(1, 1).opacity(0);
+
+        // Click to place
+        this.canvas.on('mousedown.draw', (e: MouseEvent): void => {
+            if (e.button !== 0 || e.altKey) return;
+            const continueDraw = e.ctrlKey;
+            const results = this.extractMultiPasteResults();
+
+            this.onDrawDone(
+                { multiStates: results },
+                Date.now() - this.startTimestamp,
+                continueDraw,
+                this.drawData,
+            );
+
+            if (!continueDraw) {
+                this.releaseMulti();
+            }
+        });
+    }
+
+    private moveMultiGroup(
+        cx: number, cy: number,
+        shapeOffsets: { dx: number; dy: number }[],
+    ): void {
+        for (let i = 0; i < this.multiDrawInstances.length; i++) {
+            const inst = this.multiDrawInstances[i];
+            if (!inst) continue;
+
+            const prevBbox = inst.bbox();
+            const prevX = prevBbox.x;
+            const prevY = prevBbox.y;
+
+            const { rotation } = inst.transform();
+            inst.untransform();
+            inst.center(cx + shapeOffsets[i].dx, cy + shapeOffsets[i].dy);
+            if (rotation) inst.rotate(rotation);
+
+            // Move associated pointsGroup (skeleton/points)
+            const pg = this.multiPointsGroups[i];
+            if (pg) {
+                const newBbox = inst.bbox();
+                const xDiff = newBbox.x - prevX;
+                const yDiff = newBbox.y - prevY;
+                pg.children().forEach((child: SVG.Element): void => {
+                    const dataType = child.attr('data-type');
+                    if (child.node.tagName === 'circle' &&
+                        ((dataType && dataType.includes('element')) || !dataType)) {
+                        child.center(child.cx() + xDiff, child.cy() + yDiff);
+                    }
+                });
+                if (this.multiInitialStates[i]?.shapeType === 'skeleton') {
+                    pg.untransform();
+                    setupSkeletonEdges(pg, pg);
+                }
+            }
+        }
+    }
+
+    private extractMultiPasteResults(): any[] {
+        const { offset } = this.geometry;
+        return this.multiDrawInstances.map((inst, i) => {
+            const state = this.multiInitialStates[i];
+            const { shapeType } = state;
+
+            const base = {
+                shapeType,
+                objectType: state.objectType,
+                occluded: state.occluded,
+                attributes: { ...state.attributes },
+                label: state.label,
+                color: state.color,
+                rotation: state.rotation || 0,
+            };
+
+            if (shapeType === 'rectangle') {
+                const points = readPointsFromShape(inst);
+                const [xtl, ytl, xbr, ybr] = this.getFinalRectCoordinates(points, !state.rotation);
+                return { ...base, points: [xtl, ytl, xbr, ybr] };
+            }
+
+            if (shapeType === 'ellipse') {
+                const points = this.getFinalEllipseCoordinates(readPointsFromShape(inst), false);
+                return { ...base, points };
+            }
+
+            if (shapeType === 'skeleton') {
+                const pg = this.multiPointsGroups[i];
+                return {
+                    ...base,
+                    elements: state.elements.map((el: any) => {
+                        const circle = pg?.children()
+                            .find((child: SVG.Element) => +child.attr('data-label-id') === el.label.id);
+                        const pts = circle ?
+                            translateFromCanvas(offset, [circle.cx(), circle.cy()]) :
+                            el.points;
+                        return {
+                            shapeType: el.shapeType,
+                            outside: el.outside,
+                            occluded: el.occluded,
+                            label: el.label,
+                            attributes: el.attributes,
+                            points: pts,
+                        };
+                    }),
+                };
+            }
+
+            if (shapeType === 'points') {
+                // For points, use polyline instance bbox to compute center offset
+                const pg = this.multiPointsGroups[i];
+                if (pg) {
+                    const pointCoords: number[] = [];
+                    pg.children().forEach((child: SVG.Element): void => {
+                        pointCoords.push(child.cx() - offset, child.cy() - offset);
+                    });
+                    return { ...base, points: pointCoords };
+                }
+                const targetPoints = inst.attr('points').split(/[,\s]/g).map(Number);
+                const { points } = this.getFinalPolyshapeCoordinates(targetPoints, true);
+                return { ...base, points };
+            }
+
+            // polygon, polyline, cuboid
+            const targetPoints = inst.attr('points').split(/[,\s]/g).map(Number);
+            if (shapeType === 'cuboid') {
+                const { points } = this.getFinalCuboidCoordinates(targetPoints);
+                return { ...base, points };
+            }
+            const { points } = this.getFinalPolyshapeCoordinates(targetPoints, true);
+            return { ...base, points };
+        });
+    }
+
+    private releaseMulti(): void {
+        this.initialized = false;
+        this.canvas.off('mousedown.draw');
+        this.canvas.off('mousemove.draw');
+
+        for (const inst of this.multiDrawInstances) {
+            if (inst) { inst.off(); inst.remove(); }
+        }
+        for (const pg of this.multiPointsGroups) {
+            if (pg) { pg.remove(); }
+        }
+        if (this.drawInstance) {
+            this.drawInstance.off();
+            this.drawInstance.remove();
+            this.drawInstance = null;
+        }
+        if (this.crosshair) {
+            this.removeCrosshair();
+        }
+
+        this.multiDrawInstances = [];
+        this.multiPointsGroups = [];
+        this.multiInitialStates = [];
+        this.onDrawDone(null);
+    }
+
     private setupPasteEvents(): void {
         this.canvas.on('mousedown.draw', (e: MouseEvent): void => {
             if (e.button === 0 && !e.altKey) {
@@ -1199,7 +1544,9 @@ export class DrawHandlerImpl implements DrawHandler {
 
     private startDraw(): void {
         // TODO: Use enums after typification cvat-core
-        if (this.drawData.initialState) {
+        if (this.drawData.initialStates?.length) {
+            this.pasteMultiShapes();
+        } else if (this.drawData.initialState) {
             const { offset } = this.geometry;
             if (this.drawData.shapeType === 'rectangle') {
                 const [xtl, ytl, xbr, ybr] = translateToCanvas(offset, this.drawData.initialState.points);
@@ -1295,6 +1642,9 @@ export class DrawHandlerImpl implements DrawHandler {
         this.crosshair = new Crosshair();
         this.drawInstance = null;
         this.pointsGroup = null;
+        this.multiDrawInstances = [];
+        this.multiPointsGroups = [];
+        this.multiInitialStates = [];
         this.cursorPosition = {
             x: 0,
             y: 0,
@@ -1422,7 +1772,11 @@ export class DrawHandlerImpl implements DrawHandler {
             this.initDrawing();
             this.startDraw();
         } else {
-            this.release();
+            if (this.multiDrawInstances.length > 0) {
+                this.releaseMulti();
+            } else {
+                this.release();
+            }
             this.drawData = drawData;
         }
     }

@@ -9,9 +9,8 @@ import { JobsActionTypes } from 'actions/jobs-actions';
 import { AuthActionTypes } from 'actions/auth-actions';
 import { BoundariesActionTypes } from 'actions/boundaries-actions';
 import { Canvas, CanvasMode } from 'cvat-canvas-wrapper';
-import { Canvas3d } from 'cvat-canvas3d-wrapper';
 import {
-    DimensionType, JobStage, Label, LabelType, ObjectType, ShapeType,
+    JobStage, Label, LabelType, ObjectType, ShapeType,
 } from 'cvat-core-wrapper';
 import { clamp } from 'utils/math';
 
@@ -119,6 +118,7 @@ const defaultState: AnnotationState = {
         activatedStateID: null,
         activatedElementID: null,
         activatedAttributeID: null,
+        selectedStatesID: [],
         highlightedConflict: null,
         saving: {
             forceExit: false,
@@ -142,6 +142,7 @@ const defaultState: AnnotationState = {
     },
     remove: {
         objectState: null,
+        objectStates: null,
         force: false,
     },
     statistics: {
@@ -210,15 +211,8 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 activeObjectType = job.mode === 'interpolation' ? ObjectType.TRACK : ObjectType.SHAPE;
             }
 
-            if (job.dimension === DimensionType.DIMENSION_2D) {
-                if (queryParameters.initialWorkspace !== Workspace.STANDARD3D) {
-                    workspaceSelected = queryParameters.initialWorkspace;
-                }
-                workspaceSelected = workspaceSelected || (isReview ? Workspace.REVIEW : Workspace.STANDARD);
-            } else {
-                workspaceSelected = Workspace.STANDARD3D;
-                activeShapeType = ShapeType.CUBOID;
-            }
+            workspaceSelected = queryParameters.initialWorkspace;
+            workspaceSelected = workspaceSelected || (isReview ? Workspace.REVIEW : Workspace.STANDARD);
 
             if (state.canvas.instance) {
                 state.canvas.instance.destroy();
@@ -277,11 +271,10 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 },
                 canvas: {
                     ...state.canvas,
-                    instance: job.dimension === DimensionType.DIMENSION_2D ? new Canvas() : new Canvas3d(),
+                    instance: new Canvas(),
                 },
                 colors,
-                workspace: isReview && job.dimension === DimensionType.DIMENSION_2D ?
-                    Workspace.REVIEW : workspaceSelected,
+                workspace: isReview ? Workspace.REVIEW : workspaceSelected,
             };
         }
         case AnnotationActionTypes.GET_JOB_FAILED: {
@@ -375,6 +368,7 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 annotations: {
                     ...state.annotations,
                     activatedStateID: updateActivatedStateID(states, activatedStateID),
+                    selectedStatesID: [],
                     highlightedConflict: null,
                     states,
                     history,
@@ -662,12 +656,17 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
 
             const objectDoesNotExist = activatedStateID !== null &&
                 !states.some((_state) => _state.clientID === activatedStateID);
-            const canvasIsNotReady = (instance as Canvas | Canvas3d)
+            const canvasIsNotReady = (instance as Canvas)
                 .mode() !== CanvasMode.IDLE || activeControl !== ActiveControl.CURSOR;
 
             if (objectDoesNotExist || canvasIsNotReady || highlightedConflict) {
                 return state;
             }
+
+            const { selectedStatesID: currentSelectedIDs } = state.annotations;
+            // Keep selection if there is an active selection
+            // Selection is only cleared when explicitly clicking empty canvas (without Shift)
+            const keepSelection = currentSelectedIDs.length > 0;
 
             return {
                 ...state,
@@ -676,6 +675,7 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                     activatedStateID,
                     activatedElementID,
                     activatedAttributeID,
+                    selectedStatesID: keepSelection ? currentSelectedIDs : [],
                 },
             };
         }
@@ -721,6 +721,9 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                     ...state.annotations,
                     history,
                     activatedStateID: null,
+                    selectedStatesID: state.annotations.selectedStatesID.filter(
+                        (id: number) => id !== objectState.clientID,
+                    ),
                     states: state.annotations.states.filter(
                         (_objectState: any) => _objectState.clientID !== objectState.clientID,
                     ),
@@ -735,6 +738,7 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 },
                 remove: {
                     objectState: null,
+                    objectStates: null,
                     force: false,
                 },
             };
@@ -744,6 +748,90 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 ...state,
                 remove: {
                     objectState: null,
+                    objectStates: null,
+                    force: false,
+                },
+            };
+        }
+        case AnnotationActionTypes.SELECT_OBJECTS: {
+            const { stateIDs } = action.payload;
+            return {
+                ...state,
+                annotations: {
+                    ...state.annotations,
+                    selectedStatesID: stateIDs,
+                },
+            };
+        }
+        case AnnotationActionTypes.TOGGLE_OBJECT_SELECTION: {
+            const { stateID } = action.payload;
+            const { selectedStatesID, activatedStateID } = state.annotations;
+            // On first toggle, include the currently activated object in selection
+            let currentSelected = [...selectedStatesID];
+            if (currentSelected.length === 0 && activatedStateID !== null) {
+                currentSelected = [activatedStateID];
+            }
+            const index = currentSelected.indexOf(stateID);
+            const newSelected = index >= 0 ?
+                currentSelected.filter((id: number) => id !== stateID) :
+                [...currentSelected, stateID];
+            return {
+                ...state,
+                annotations: {
+                    ...state.annotations,
+                    selectedStatesID: newSelected,
+                },
+            };
+        }
+        case AnnotationActionTypes.REMOVE_OBJECTS: {
+            const { objectStates, force } = action.payload;
+            return {
+                ...state,
+                remove: {
+                    ...state.remove,
+                    objectStates,
+                    force,
+                },
+            };
+        }
+        case AnnotationActionTypes.REMOVE_OBJECTS_SUCCESS: {
+            const { objectStates, history } = action.payload;
+            const removedIDs = new Set(objectStates.map((s: any) => s.clientID));
+            const contextMenuClientID = state.canvas.contextMenu.clientID;
+            const contextMenuVisible = state.canvas.contextMenu.visible;
+
+            return {
+                ...state,
+                annotations: {
+                    ...state.annotations,
+                    history,
+                    activatedStateID: null,
+                    selectedStatesID: [],
+                    states: state.annotations.states.filter(
+                        (_objectState: any) => !removedIDs.has(_objectState.clientID),
+                    ),
+                },
+                canvas: {
+                    ...state.canvas,
+                    contextMenu: {
+                        ...state.canvas.contextMenu,
+                        clientID: removedIDs.has(contextMenuClientID) ? null : contextMenuClientID,
+                        visible: removedIDs.has(contextMenuClientID) ? false : contextMenuVisible,
+                    },
+                },
+                remove: {
+                    objectState: null,
+                    objectStates: null,
+                    force: false,
+                },
+            };
+        }
+        case AnnotationActionTypes.REMOVE_OBJECTS_FAILED: {
+            return {
+                ...state,
+                remove: {
+                    objectState: null,
+                    objectStates: null,
                     force: false,
                 },
             };
@@ -774,6 +862,19 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 drawing: {
                     ...state.drawing,
                     activeInitialState: objectState,
+                    copiedStates: undefined,
+                },
+            };
+        }
+        case AnnotationActionTypes.COPY_SHAPES: {
+            const { objectStates } = action.payload;
+
+            return {
+                ...state,
+                drawing: {
+                    ...state.drawing,
+                    copiedStates: objectStates,
+                    activeInitialState: undefined,
                 },
             };
         }
@@ -938,16 +1039,22 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
             };
         }
         case AnnotationActionTypes.FETCH_ANNOTATIONS_SUCCESS: {
-            const { activatedStateID } = state.annotations;
+            const { activatedStateID, selectedStatesID: prevSelectedIDs } = state.annotations;
             const {
                 states, history, minZ, maxZ,
             } = action.payload;
+
+            const newClientIDs = new Set(states.map((s: any) => s.clientID));
+            const preservedSelectedIDs = prevSelectedIDs.filter(
+                (id: number) => newClientIDs.has(id),
+            );
 
             return {
                 ...state,
                 annotations: {
                     ...state.annotations,
                     activatedStateID: updateActivatedStateID(states, activatedStateID),
+                    selectedStatesID: preservedSelectedIDs,
                     states,
                     history,
                     initialized: true,
@@ -1069,7 +1176,7 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                     states: state.annotations.states.filter((_state) => !_state.isGroundTruth),
                     activatedStateID: null,
                     activatedAttributeID: null,
-
+                    selectedStatesID: [],
                 },
                 canvas: {
                     ...state.canvas,
@@ -1149,7 +1256,18 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 },
             };
         }
-        case AnnotationActionTypes.CLOSE_JOB:
+        case AnnotationActionTypes.CLOSE_JOB: {
+            // Preserve copy/paste state between jobs
+            const { activeInitialState, copiedStates } = state.drawing;
+            return {
+                ...defaultState,
+                drawing: {
+                    ...defaultState.drawing,
+                    activeInitialState,
+                    copiedStates,
+                },
+            };
+        }
         case AuthActionTypes.LOGOUT_SUCCESS: {
             return defaultState;
         }

@@ -15,7 +15,6 @@ import { implementJob, implementTask } from './session-implementation';
 import Project from './project';
 import implementProject from './project-implementation';
 import { Attribute, Label } from './labels';
-import MLModel from './ml-model';
 import { FrameData, FramesMetaData } from './frames';
 import CloudStorage from './cloud-storage';
 import Organization from './organization';
@@ -259,32 +258,6 @@ function build(): CVATCore {
                 return result;
             },
         },
-        lambda: {
-            async list() {
-                const result = await PluginRegistry.apiWrapper(cvat.lambda.list);
-                return result;
-            },
-            async run(task, model, args) {
-                const result = await PluginRegistry.apiWrapper(cvat.lambda.run, task, model, args);
-                return result;
-            },
-            async call(task, model, args) {
-                const result = await PluginRegistry.apiWrapper(cvat.lambda.call, task, model, args);
-                return result;
-            },
-            async cancel(requestID, functionID) {
-                const result = await PluginRegistry.apiWrapper(cvat.lambda.cancel, requestID, functionID);
-                return result;
-            },
-            async listen(requestID, functionID, onChange) {
-                const result = await PluginRegistry.apiWrapper(cvat.lambda.listen, requestID, functionID, onChange);
-                return result;
-            },
-            async requests() {
-                const result = await PluginRegistry.apiWrapper(cvat.lambda.requests);
-                return result;
-            },
-        },
         logger,
         config: {
             get backendAPI() {
@@ -456,7 +429,6 @@ function build(): CVATCore {
             Label,
             Statistics,
             ObjectState,
-            MLModel,
             Comment,
             Issue,
             FrameData,
@@ -491,7 +463,6 @@ function build(): CVATCore {
     cvat.frames = Object.freeze(cvat.frames);
     cvat.users = Object.freeze(cvat.users);
     cvat.plugins = Object.freeze(cvat.plugins);
-    cvat.lambda = Object.freeze(cvat.lambda);
     // logger: todo: logger storage implemented other way
     cvat.config = Object.freeze(cvat.config);
     cvat.enums = Object.freeze(cvat.enums);

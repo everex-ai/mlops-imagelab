@@ -37,6 +37,7 @@ class Organization(TimestampedModel):
 
 class Membership(models.Model):
     WORKER = "worker"
+    REVIEWER = "reviewer"
     SUPERVISOR = "supervisor"
     MAINTAINER = "maintainer"
     OWNER = "owner"
@@ -51,6 +52,7 @@ class Membership(models.Model):
         max_length=16,
         choices=[
             (WORKER, "Worker"),
+            (REVIEWER, "Reviewer"),
             (SUPERVISOR, "Supervisor"),
             (MAINTAINER, "Maintainer"),
             (OWNER, "Owner"),

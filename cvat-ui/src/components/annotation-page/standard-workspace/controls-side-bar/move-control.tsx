@@ -8,11 +8,10 @@ import Icon from '@ant-design/icons';
 import { MoveIcon } from 'icons';
 import { ActiveControl } from 'reducers';
 import { Canvas } from 'cvat-canvas-wrapper';
-import { Canvas3d } from 'cvat-canvas3d-wrapper';
 import CVATTooltip from 'components/common/cvat-tooltip';
 
 export interface Props {
-    canvasInstance: Canvas | Canvas3d;
+    canvasInstance: Canvas;
     activeControl: ActiveControl;
 }
 

@@ -9,7 +9,6 @@ import Icon from '@ant-design/icons';
 import { CursorIcon } from 'icons';
 import { ActiveControl, CombinedState } from 'reducers';
 import { Canvas } from 'cvat-canvas-wrapper';
-import { Canvas3d } from 'cvat-canvas3d-wrapper';
 import CVATTooltip from 'components/common/cvat-tooltip';
 import GlobalHotKeys from 'utils/mousetrap-react';
 import { ShortcutScope } from 'utils/enums';
@@ -18,7 +17,7 @@ import { subKeyMap } from 'utils/component-subkeymap';
 import { useSelector } from 'react-redux';
 
 export interface Props {
-    canvasInstance: Canvas | Canvas3d;
+    canvasInstance: Canvas;
     cursorShortkey: string;
     activeControl: ActiveControl;
 }

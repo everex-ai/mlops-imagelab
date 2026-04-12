@@ -10,6 +10,7 @@ import multiprocessing
 import os
 import os.path as osp
 import random
+import unittest
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Callable
@@ -1017,10 +1018,7 @@ class TaskDumpUploadTest(_DbTestBase):
         dump_formats = dm.views.get_export_formats()
         with TestDir() as test_dir:
             for dump_format in dump_formats:
-                if (
-                    not dump_format.ENABLED
-                    or dump_format.DIMENSION == dm.bindings.DimensionType.DIM_3D
-                ):
+                if not dump_format.ENABLED:
                     continue
                 dump_format_name = dump_format.DISPLAY_NAME
 
@@ -1264,6 +1262,7 @@ class TaskDumpUploadTest(_DbTestBase):
                 polygon_points = [float(p) for p in polygon_points.split(";")]
                 self.assertEqual(polygon_points, annotation_points)
 
+    @unittest.skip("WiderFace 1.0 format removed")
     def test_api_v2_check_widerface_with_all_attributes(self):
         test_name = self._testMethodName
         dump_format_name = "WiderFace 1.0"
@@ -1307,6 +1306,7 @@ class TaskDumpUploadTest(_DbTestBase):
                     data_from_task_after_upload = self._get_data_from_task(task_id, include_images)
                     compare_datasets(data_from_task_before_upload, data_from_task_after_upload)
 
+    @unittest.skip("MOT 1.1 format removed")
     def test_api_v2_check_mot_with_shapes_only(self):
         test_name = self._testMethodName
         format_name = "MOT 1.1"
@@ -2310,10 +2310,7 @@ class ProjectDumpUpload(_DbTestBase):
                     project["labels"] = tasks[dump_format_name]["labels"]
                 project = self._create_project(project)
                 tasks["task in project #1"]["project_id"] = project["id"]
-                if dump_format.DIMENSION == dm.bindings.DimensionType.DIM_3D:
-                    media = self._generate_task_pcd()
-                else:
-                    media = self._generate_task_images(3)
+                media = self._generate_task_images(3)
                 task = self._create_task(tasks["task in project #1"], media)
 
                 export_params = {
@@ -2383,6 +2380,7 @@ class ProjectDumpUpload(_DbTestBase):
                                 query_params={"format": upload_format_name},
                             )
 
+    @unittest.skip("3D point cloud files no longer supported")
     def test_api_v2_can_export_3d_annotations(self):
         dump_format_name = "Datumaro 3D 1.0"
         project = self._create_project(projects["main"])
@@ -2418,10 +2416,7 @@ class ProjectDumpUpload(_DbTestBase):
 
         with TestDir() as test_dir:
             for dump_format in dump_formats:
-                if (
-                    not dump_format.ENABLED
-                    or dump_format.DIMENSION == dm.bindings.DimensionType.DIM_3D
-                ):
+                if not dump_format.ENABLED:
                     continue
                 dump_format_name = dump_format.DISPLAY_NAME
                 with self.subTest(format=dump_format_name):

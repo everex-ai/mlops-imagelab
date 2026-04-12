@@ -35,6 +35,9 @@ BASE_DIR = str(Path(__file__).parents[2])
 
 ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 INTERNAL_IPS = ["127.0.0.1"]
+
+_csrf_origins = os.environ.get("CSRF_TRUSTED_ORIGINS", "")
+CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins.split(",") if o.strip()]
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
 
 
@@ -108,8 +111,6 @@ INSTALLED_APPS = [
     "cvat.apps.dataset_manager",
     "cvat.apps.organizations",
     "cvat.apps.engine",
-    "cvat.apps.dataset_repo",
-    "cvat.apps.lambda_manager",
     "cvat.apps.webhooks",
     "cvat.apps.health",
     "cvat.apps.events",
@@ -235,8 +236,6 @@ LOGIN_REDIRECT_URL = "/"
 
 OBJECTS_NOT_RELATED_WITH_ORG = [
     "user",
-    "lambda_function",
-    "lambda_request",
     "server",
     "request",
     "access_token",

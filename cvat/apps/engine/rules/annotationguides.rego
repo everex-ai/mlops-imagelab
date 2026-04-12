@@ -18,7 +18,7 @@ import data.organizations
 #                 "id": <num>
 #             },
 #             "user": {
-#                 "role": <"owner"|"maintainer"|"supervisor"|"worker"> or null
+#                 "role": <"owner"|"maintainer"|"supervisor"|"reviewer"|"worker"> or null
 #             }
 #         } or null,
 #     },
@@ -103,4 +103,11 @@ allow if {
     input.auth.organization.id == input.resource.organization.id
     organizations.is_member
     input.resource.target.is_job_staff
+}
+
+# Reviewer: read-only access to annotation guides in the same org
+allow if {
+    input.scope == utils.VIEW
+    input.auth.organization.id == input.resource.organization.id
+    organizations.is_reviewer
 }

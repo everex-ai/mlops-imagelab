@@ -18,11 +18,9 @@ from rq.job import JobStatus as RQJobStatus
 
 from cvat.apps.engine import models
 from cvat.apps.engine.log import ServerLogManager
-from cvat.apps.engine.models import RequestAction
 from cvat.apps.engine.rq import BaseRQMeta, ExportRQMeta, ImportRQMeta, RequestIdWithOptionalFormat
 from cvat.apps.engine.serializers import BasicUserSerializer
 from cvat.apps.engine.utils import parse_exception_message
-from cvat.apps.lambda_manager.rq import LambdaRQMeta
 from cvat.apps.redis_handler.rq import CustomRQJob, RequestId
 
 slogger = ServerLogManager(__name__)
@@ -54,7 +52,6 @@ class RequestDataOperationSerializer(serializers.Serializer):
     task_id = serializers.IntegerField(required=False, allow_null=True)
     job_id = serializers.IntegerField(required=False, allow_null=True)
     format = serializers.CharField(required=False, allow_null=True)
-    function_id = serializers.CharField(required=False, allow_null=True)
     lightweight = serializers.BooleanField(required=False, allow_null=True)
 
     def to_representation(self, rq_job: CustomRQJob) -> dict[str, Any]:
@@ -68,9 +65,7 @@ class RequestDataOperationSerializer(serializers.Serializer):
             "task_id": base_rq_job_meta.task_id,
             "job_id": base_rq_job_meta.job_id,
         }
-        if parsed_request_id.action == RequestAction.AUTOANNOTATE:
-            representation["function_id"] = LambdaRQMeta.for_job(rq_job).function_id
-        elif isinstance(parsed_request_id, RequestIdWithOptionalFormat):
+        if isinstance(parsed_request_id, RequestIdWithOptionalFormat):
             representation["format"] = parsed_request_id.format
         representation["lightweight"] = getattr(parsed_request_id, "lightweight", None)
 

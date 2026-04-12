@@ -51,7 +51,6 @@ docker-compose* @azhavoro
 *.conf          @azhavoro
 *.sh            @azhavoro
 /supervisord/   @azhavoro
-/helm-chart/    @azhavoro
 /utils/         @SpecLad
 /.github/       @SpecLad
 /dev/           @SpecLad

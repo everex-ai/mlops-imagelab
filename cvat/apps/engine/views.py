@@ -20,7 +20,6 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import django_rq
-from attr.converters import to_bool
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.files.storage import storages
@@ -280,8 +279,6 @@ class ServerViewSet(viewsets.ViewSet):
         data = {
             'GIT_INTEGRATION': False, # kept for backwards compatibility
             'ANALYTICS': settings.ANALYTICS_ENABLED,
-            'MODELS': to_bool(os.environ.get("CVAT_SERVERLESS", False)),
-            'PREDICT': False, # FIXME: it is unused anymore (for UI only)
         }
         return Response(PluginsSerializer(data).data)
 

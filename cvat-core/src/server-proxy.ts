@@ -1829,76 +1829,6 @@ function exportEvents(params: APIAnalyticsEventsFilter): Promise<string> {
     return promise;
 }
 
-async function getLambdaFunctions() {
-    const { backendAPI } = config;
-
-    try {
-        const response = await Axios.get(`${backendAPI}/lambda/functions`);
-        return response.data;
-    } catch (errorData) {
-        if (errorData.response.status === 503) {
-            return [];
-        }
-        throw generateError(errorData);
-    }
-}
-
-async function runLambdaRequest(body) {
-    const { backendAPI } = config;
-
-    try {
-        const response = await Axios.post(`${backendAPI}/lambda/requests`, body);
-
-        return response.data;
-    } catch (errorData) {
-        throw generateError(errorData);
-    }
-}
-
-async function callLambdaFunction(funId, body) {
-    const { backendAPI } = config;
-
-    try {
-        const response = await Axios.post(`${backendAPI}/lambda/functions/${funId}`, body);
-
-        return response.data;
-    } catch (errorData) {
-        throw generateError(errorData);
-    }
-}
-
-async function getLambdaRequests() {
-    const { backendAPI } = config;
-
-    try {
-        const response = await Axios.get(`${backendAPI}/lambda/requests`);
-        return response.data;
-    } catch (errorData) {
-        throw generateError(errorData);
-    }
-}
-
-async function getLambdaRequestStatus(requestID) {
-    const { backendAPI } = config;
-
-    try {
-        const response = await Axios.get(`${backendAPI}/lambda/requests/${requestID}`);
-        return response.data;
-    } catch (errorData) {
-        throw generateError(errorData);
-    }
-}
-
-async function cancelLambdaRequest(requestId) {
-    const { backendAPI } = config;
-
-    try {
-        await Axios.delete(`${backendAPI}/lambda/requests/${requestId}`);
-    } catch (errorData) {
-        throw generateError(errorData);
-    }
-}
-
 async function installedApps() {
     const { backendAPI } = config;
     try {
@@ -2558,15 +2488,6 @@ export default Object.freeze({
     events: Object.freeze({
         save: saveEvents,
         export: exportEvents,
-    }),
-
-    lambda: Object.freeze({
-        list: getLambdaFunctions,
-        status: getLambdaRequestStatus,
-        requests: getLambdaRequests,
-        run: runLambdaRequest,
-        call: callLambdaFunction,
-        cancel: cancelLambdaRequest,
     }),
 
     issues: Object.freeze({

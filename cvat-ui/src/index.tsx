@@ -20,7 +20,6 @@ import duration from 'dayjs/plugin/duration';
 import { getAboutAsync } from 'actions/about-actions';
 import { authenticatedAsync } from 'actions/auth-actions';
 import { getFormatsAsync } from 'actions/formats-actions';
-import { getModelsAsync } from 'actions/models-actions';
 import { getPluginsAsync } from 'actions/plugins-actions';
 import { getUserAgreementsAsync } from 'actions/useragreements-actions';
 import CVATApplication from 'components/cvat-app';
@@ -54,8 +53,6 @@ dayjs.extend(duration);
 interface StateToProps {
     pluginsInitialized: boolean;
     pluginsFetching: boolean;
-    modelsInitialized: boolean;
-    modelsFetching: boolean;
     userInitialized: boolean;
     userFetching: boolean;
     organizationFetching: boolean;
@@ -68,7 +65,6 @@ interface StateToProps {
     userAgreementsFetching: boolean;
     notifications: NotificationsState;
     user: any;
-    isModelPluginActive: boolean;
     pluginComponents: PluginsState['components'];
     invitationsFetching: boolean;
     invitationsInitialized: boolean;
@@ -84,7 +80,6 @@ interface DispatchToProps {
     loadFormats: () => void;
     verifyAuthenticated: () => void;
     loadAbout: () => void;
-    initModels: () => void;
     initPlugins: () => void;
     resetErrors: () => void;
     resetMessages: () => void;
@@ -98,7 +93,7 @@ interface DispatchToProps {
 
 function mapStateToProps(state: CombinedState): StateToProps {
     const {
-        plugins, auth, formats, about, userAgreements, models, organizations, invitations, serverAPI, requests,
+        plugins, auth, formats, about, userAgreements, organizations, invitations, serverAPI, requests,
     } = state;
 
     return {
@@ -108,8 +103,6 @@ function mapStateToProps(state: CombinedState): StateToProps {
         organizationInitialized: organizations.initialized,
         pluginsInitialized: plugins.initialized,
         pluginsFetching: plugins.fetching,
-        modelsInitialized: models.initialized,
-        modelsFetching: models.fetching,
         aboutInitialized: about.initialized,
         aboutFetching: about.fetching,
         formatsInitialized: formats.initialized,
@@ -119,7 +112,6 @@ function mapStateToProps(state: CombinedState): StateToProps {
         notifications: state.notifications,
         user: auth.user,
         pluginComponents: plugins.components,
-        isModelPluginActive: plugins.list.MODELS,
         invitationsFetching: invitations.fetching,
         invitationsInitialized: invitations.initialized,
         requestsFetching: requests.fetching,
@@ -137,7 +129,6 @@ function mapDispatchToProps(dispatch: any): DispatchToProps {
         verifyAuthenticated: (): void => dispatch(authenticatedAsync()),
         loadUserAgreements: (): void => dispatch(getUserAgreementsAsync()),
         initPlugins: (): void => dispatch(getPluginsAsync()),
-        initModels: (): void => dispatch(getModelsAsync()),
         loadAbout: (): void => dispatch(getAboutAsync()),
         resetErrors: (): void => dispatch(resetErrors()),
         resetMessages: (): void => dispatch(resetMessages()),

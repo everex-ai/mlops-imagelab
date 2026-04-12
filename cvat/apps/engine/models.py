@@ -47,7 +47,6 @@ class SafeCharField(models.CharField):
 
 
 class DimensionType(str, Enum):
-    DIM_3D = '3d'
     DIM_2D = '2d'
 
     @classmethod

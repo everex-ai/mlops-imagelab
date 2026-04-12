@@ -18,7 +18,7 @@ import data.organizations
 #                 "id": <num>
 #             },
 #             "user": {
-#                 "role": <"owner"|"maintainer"|"supervisor"|"worker"> or null
+#                 "role": <"owner"|"maintainer"|"supervisor"|"reviewer"|"worker"> or null
 #             }
 #         } or null,
 #     },
@@ -35,7 +35,8 @@ import data.organizations
 #             "assignee": { "id": <num> }
 #         },
 #         "job": {
-#             "assignee": { "id": <num> }
+#             "assignee": { "id": <num> },
+#             "stage": <"annotation"|"validation"|"acceptance">
 #         },
 #         "organization": { "id": <num> } or null
 #     }
@@ -202,6 +203,14 @@ filter := [] if { # Django Q object to filter list of entries
         {"job__segment__task__organization": org.id},
         {"job__segment__task__project__organization": org.id}, "|", "&"
     ]
+} else := qobject if {
+    # Reviewer: every issue under the organization
+    organizations.is_reviewer
+    org := input.auth.organization
+    qobject := [
+        {"job__segment__task__organization": org.id},
+        {"job__segment__task__project__organization": org.id}, "|"
+    ]
 }
 
 allow if {
@@ -259,4 +268,28 @@ allow if {
     input.auth.organization.id == input.resource.organization.id
     utils.has_perm(utils.USER)
     organizations.has_perm(organizations.MAINTAINER)
+}
+
+# === Reviewer rules ===
+# Reviewers can attach feedback to any job in the organization. They can
+# only edit/delete issues they themselves created.
+
+allow if {
+    input.scope == utils.CREATE_IN_JOB
+    input.auth.organization.id == input.resource.organization.id
+    utils.is_organization
+    organizations.is_reviewer
+}
+
+allow if {
+    input.scope == utils.VIEW
+    input.auth.organization.id == input.resource.organization.id
+    organizations.is_reviewer
+}
+
+allow if {
+    input.scope in {utils.UPDATE, utils.DELETE}
+    input.auth.organization.id == input.resource.organization.id
+    organizations.is_reviewer
+    is_issue_owner
 }

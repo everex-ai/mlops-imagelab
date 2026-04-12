@@ -33,8 +33,6 @@ import UploadFileStatusModal from 'components/common/upload-file-status-modal';
 import SelectCSUpdatingSchemeModal from 'components/update-linked-cs-modal/select-cs-updating-scheme-modal';
 
 import JobsPageComponent from 'components/jobs-page/jobs-page';
-import ModelsPageComponent from 'components/models-page/models-page';
-
 import TasksPageContainer from 'containers/tasks-page/tasks-page';
 import CreateTaskPageContainer from 'containers/create-task-page/create-task-page';
 import TaskPageComponent from 'components/task-page/task-page';
@@ -94,7 +92,6 @@ interface CVATAppProps {
     verifyAuthenticated: () => void;
     loadUserAgreements: () => void;
     initPlugins: () => void;
-    initModels: () => void;
     resetErrors: () => void;
     resetMessages: () => void;
     loadOrganization: () => void;
@@ -108,8 +105,6 @@ interface CVATAppProps {
     organizationInitialized: boolean;
     pluginsInitialized: boolean;
     pluginsFetching: boolean;
-    modelsInitialized: boolean;
-    modelsFetching: boolean;
     formatsInitialized: boolean;
     formatsFetching: boolean;
     aboutInitialized: boolean;
@@ -118,7 +113,6 @@ interface CVATAppProps {
     userAgreementsInitialized: boolean;
     notifications: NotificationsState;
     user: any;
-    isModelPluginActive: boolean;
     pluginComponents: PluginsState['components'];
     invitationsFetching: boolean;
     invitationsInitialized: boolean;
@@ -291,7 +285,6 @@ class CVATApplication extends React.PureComponent<CVATAppProps & RouteComponentP
             loadAbout,
             loadUserAgreements,
             initPlugins,
-            initModels,
             loadOrganization,
             loadServerAPISchema,
             userInitialized,
@@ -304,12 +297,9 @@ class CVATApplication extends React.PureComponent<CVATAppProps & RouteComponentP
             aboutFetching,
             pluginsInitialized,
             pluginsFetching,
-            modelsInitialized,
-            modelsFetching,
             user,
             userAgreementsFetching,
             userAgreementsInitialized,
-            isModelPluginActive,
             invitationsInitialized,
             invitationsFetching,
             initInvitations,
@@ -371,10 +361,6 @@ class CVATApplication extends React.PureComponent<CVATAppProps & RouteComponentP
 
         if (organizationInitialized && !requestsInitialized && !requestsFetching) {
             initRequests();
-        }
-
-        if (isModelPluginActive && !modelsInitialized && !modelsFetching) {
-            initModels();
         }
 
         if (!invitationsInitialized && !invitationsFetching && history.location.pathname !== '/invitations') {
@@ -480,14 +466,12 @@ class CVATApplication extends React.PureComponent<CVATAppProps & RouteComponentP
             aboutInitialized,
             pluginsInitialized,
             formatsInitialized,
-            modelsInitialized,
             organizationInitialized,
             userAgreementsInitialized,
             serverAPISchemaInitialized,
             pluginComponents,
             user,
             location,
-            isModelPluginActive,
             isPasswordResetEnabled,
             isRegistrationEnabled,
         } = this.props;
@@ -503,7 +487,7 @@ class CVATApplication extends React.PureComponent<CVATAppProps & RouteComponentP
                 pluginsInitialized &&
                 aboutInitialized &&
                 organizationInitialized &&
-                (!isModelPluginActive || modelsInitialized)
+                true
             )
         );
 
@@ -567,15 +551,6 @@ class CVATApplication extends React.PureComponent<CVATAppProps & RouteComponentP
                                         <Route exact path='/requests' component={RequestsPage} />
                                         <Route exact path='/profile' component={ProfilePageComponent} />
                                         { routesToRender }
-                                        {isModelPluginActive && (
-                                            <Route
-                                                path='/models'
-                                            >
-                                                <Switch>
-                                                    <Route exact path='/models' component={ModelsPageComponent} />
-                                                </Switch>
-                                            </Route>
-                                        )}
                                         <Redirect
                                             push
                                             to={{

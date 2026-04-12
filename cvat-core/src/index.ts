@@ -8,7 +8,6 @@ import {
 } from './server-response-types';
 import PluginRegistry from './plugins';
 import serverProxy from './server-proxy';
-import lambdaManager from './lambda-manager';
 import { AnnotationFormats } from './annotation-formats';
 import logger from './logger';
 import * as enums from './enums';
@@ -23,7 +22,6 @@ import { Event } from './event';
 import { Attribute, Label } from './labels';
 import Statistics from './statistics';
 import ObjectState from './object-state';
-import MLModel from './ml-model';
 import Issue from './issue';
 import Comment from './comment';
 import { FrameData, FramesMetaData } from './frames';
@@ -57,14 +55,6 @@ export default interface CVATCore {
     plugins: {
         list: typeof PluginRegistry.list;
         register: typeof PluginRegistry.register;
-    };
-    lambda: {
-        list: typeof lambdaManager.list;
-        run: typeof lambdaManager.run;
-        call: typeof lambdaManager.call;
-        cancel: typeof lambdaManager.cancel;
-        listen: typeof lambdaManager.listen;
-        requests: typeof lambdaManager.requests;
     };
     server: {
         about: () => Promise<AboutData>;
@@ -223,7 +213,6 @@ export default interface CVATCore {
         Label: typeof Label;
         Statistics: typeof Statistics;
         ObjectState: typeof ObjectState;
-        MLModel: typeof MLModel;
         Comment: typeof Comment;
         Issue: typeof Issue;
         FrameData: typeof FrameData;

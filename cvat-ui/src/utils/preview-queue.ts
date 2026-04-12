@@ -6,22 +6,19 @@ import { Dispatch } from 'redux';
 import {
     Job, Task, Project, CloudStorage,
 } from 'cvat-core-wrapper';
-import MLModel from 'cvat-core/src/ml-model';
 import { getJobPreviewAsync } from 'actions/jobs-actions';
 import { getTaskPreviewAsync } from 'actions/tasks-actions';
 import { getProjectsPreviewAsync } from 'actions/projects-actions';
 import { getCloudStoragePreviewAsync } from 'actions/cloud-storage-actions';
-import { getModelPreviewAsync } from 'actions/models-actions';
 
-export type PreviewEntity = Job | Task | Project | CloudStorage | MLModel;
-export type PreviewType = 'job' | 'task' | 'project' | 'cloudStorage' | 'model';
+export type PreviewEntity = Job | Task | Project | CloudStorage;
+export type PreviewType = 'job' | 'task' | 'project' | 'cloudStorage';
 
 export function getPreviewType(entity: PreviewEntity): PreviewType {
     if (entity instanceof Job) return 'job';
     if (entity instanceof Task) return 'task';
     if (entity instanceof Project) return 'project';
     if (entity instanceof CloudStorage) return 'cloudStorage';
-    if (entity instanceof MLModel) return 'model';
     throw new Error('Unknown entity type');
 }
 
@@ -92,9 +89,6 @@ class PreviewQueue {
                     break;
                 case 'cloudStorage':
                     action = getCloudStoragePreviewAsync(entity as CloudStorage);
-                    break;
-                case 'model':
-                    action = getModelPreviewAsync(entity as MLModel);
                     break;
                 default:
                     return;

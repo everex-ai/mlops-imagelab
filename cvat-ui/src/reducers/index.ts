@@ -3,12 +3,10 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { Canvas3d } from 'cvat-canvas3d/src/typescript/canvas3d';
 import { Canvas, RectDrawingMethod, CuboidDrawingMethod } from 'cvat-canvas-wrapper';
-import { OrientationVisibility } from 'cvat-canvas3d-wrapper';
 import {
-    Webhook, MLModel, Organization, Job, Task, Project, Label, User,
-    QualityConflict, FramesMetaData, RQStatus, Event, Invitation, SerializedAPISchema,
+    Webhook, Organization, Job, Task, Project, Label, User,
+    QualityConflict, FramesMetaData, Event, Invitation, SerializedAPISchema,
     Request, JobValidationLayout, QualitySettings, TaskValidationLayout, ObjectState,
     ConsensusSettings, AboutData, ShapeType, ObjectType, ApiToken,
     Membership, AnnotationFormats,
@@ -290,7 +288,6 @@ export enum SelectedResourceType {
     MEMBERS = 'members',
     WEBHOOKS = 'webhooks',
     CLOUD_STORAGES = 'cloudStorages',
-    MODELS = 'models',
 }
 
 export interface BulkActionsState {
@@ -301,7 +298,6 @@ export interface BulkActionsState {
 
 export enum SupportedPlugins {
     ANALYTICS = 'ANALYTICS',
-    MODELS = 'MODELS',
 }
 
 export type PluginsList = {
@@ -400,21 +396,6 @@ export interface PluginsState {
                 items: PluginComponent[];
             };
         }
-        modelsPage: {
-            topBar: {
-                items: PluginComponent[];
-            };
-            modelItem: {
-                menu: {
-                    items: PluginComponent[];
-                };
-                topBar:{
-                    menu: {
-                        items: PluginComponent[];
-                    };
-                };
-            };
-        };
         projectActions: {
             items: PluginComponent[];
         };
@@ -436,11 +417,6 @@ export interface PluginsState {
         about: {
             links: {
                 items: PluginComponent[];
-            };
-        };
-        aiTools: {
-            interactors: {
-                extras: PluginComponent[];
             };
         };
         router: PluginComponent[];
@@ -484,58 +460,11 @@ export interface UserAgreementsState {
 
 export type RemoteFileType = 'DIR' | 'REG';
 
-export interface ModelAttribute {
-    name: string;
-    values: string[];
-    input_type: 'select' | 'number' | 'checkbox' | 'radio' | 'text';
-}
-
-export interface ModelsQuery {
-    page: number;
-    pageSize: number;
-    id: number | null;
-    search: string | null;
-    filter: string | null;
-    sort: string | null;
-}
-
 export type OpenCVTool = IntelligentScissors | OpenCVTracker;
 
 export interface ToolsBlockerState {
     algorithmsLocked?: boolean;
     buttonVisible?: boolean;
-}
-
-export interface ActiveInference {
-    status: RQStatus;
-    progress: number;
-    error: string;
-    id: string;
-    functionID: string | number;
-}
-
-export interface ModelsState {
-    initialized: boolean;
-    fetching: boolean;
-    creatingStatus: string;
-    interactors: MLModel[];
-    detectors: MLModel[];
-    trackers: MLModel[];
-    reid: MLModel[];
-    totalCount: number;
-    requestedInferenceIDs: {
-        [index: string]: boolean;
-    };
-    inferences: {
-        [index: number]: ActiveInference;
-    };
-    modelRunnerIsVisible: boolean;
-    modelRunnerTask: any;
-    query: ModelsQuery;
-    previews: {
-        [index: string]: Preview;
-    };
-    selected: (number | string)[];
 }
 
 export interface ErrorState {
@@ -616,15 +545,6 @@ export interface NotificationsState {
         };
         about: {
             fetching: null | ErrorState;
-        };
-        models: {
-            starting: null | ErrorState;
-            fetching: null | ErrorState;
-            canceling: null | ErrorState;
-            metaFetching: null | ErrorState;
-            inferenceStatusFetching: null | ErrorState;
-            creating: null | ErrorState;
-            deleting: null | ErrorState;
         };
         annotation: {
             saving: null | ErrorState;
@@ -729,9 +649,6 @@ export interface NotificationsState {
             movingDone: null | NotificationState;
             mergingConsensusDone: null | NotificationState;
         };
-        models: {
-            inferenceDone: null | NotificationState;
-        };
         auth: {
             changePasswordDone: null | NotificationState;
             registerDone: null | NotificationState;
@@ -834,7 +751,7 @@ export interface AnnotationState {
             top: number;
             left: number;
         };
-        instance: Canvas | Canvas3d | null;
+        instance: Canvas | null;
         ready: boolean;
         activeControl: ActiveControl;
         activeObjectHidden: boolean;
@@ -879,8 +796,8 @@ export interface AnnotationState {
         hoveredChapter: number | null;
     };
     drawing: {
-        activeInteractor?: MLModel | OpenCVTool;
-        activeInteractorParameters?: MLModel['params']['canvas'];
+        activeInteractor?: OpenCVTool;
+        activeInteractorParameters?: Record<string, string | number | boolean>;
         activeShapeType: ShapeType | null;
         activeRectDrawingMethod?: RectDrawingMethod;
         activeCuboidDrawingMethod?: CuboidDrawingMethod;
@@ -888,12 +805,14 @@ export interface AnnotationState {
         activeLabelID: number | null;
         activeObjectType: ObjectType;
         activeInitialState?: any;
+        copiedStates?: any[];
     };
     editing: EditingState;
     annotations: {
         activatedStateID: number | null;
         activatedElementID: number | null;
         activatedAttributeID: number | null;
+        selectedStatesID: number[];
         highlightedConflict: QualityConflict | null;
         collapsed: Record<number, boolean>;
         collapsedAll: boolean;
@@ -917,6 +836,7 @@ export interface AnnotationState {
     };
     remove: {
         objectState: any;
+        objectStates: any[] | null;
         force: boolean;
     }
     statistics: {
@@ -938,7 +858,6 @@ export interface AnnotationState {
 }
 
 export enum Workspace {
-    STANDARD3D = 'Standard 3D',
     STANDARD = 'Standard',
     ATTRIBUTES = 'Attribute annotation',
     SINGLE_SHAPE = 'Single shape',
@@ -1013,7 +932,6 @@ export interface ShapesSettingsState {
     showBitmap: boolean;
     showProjections: boolean;
     showGroundTruth: boolean;
-    orientationVisibility: OrientationVisibility;
 }
 
 export interface SettingsState {
@@ -1163,7 +1081,6 @@ export interface CombinedState {
     formats: FormatsState;
     userAgreements: UserAgreementsState;
     plugins: PluginsState;
-    models: ModelsState;
     notifications: NotificationsState;
     annotation: AnnotationState;
     settings: SettingsState;

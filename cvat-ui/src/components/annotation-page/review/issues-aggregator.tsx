@@ -13,8 +13,8 @@ import { commentIssueAsync, resolveIssueAsync, reopenIssueAsync } from 'actions/
 import {
     AnnotationConflict, ConflictSeverity, ObjectState, QualityConflict,
 } from 'cvat-core-wrapper';
-import { Canvas, CanvasMode } from 'cvat-canvas-wrapper';
-import { highlightConflict, updateActiveControl } from 'actions/annotation-actions';
+import { Canvas } from 'cvat-canvas-wrapper';
+import { highlightConflict } from 'actions/annotation-actions';
 import CreateIssueDialog from './create-issue-dialog';
 import HiddenIssueLabel from './hidden-issue-label';
 import IssueDialog from './issue-dialog';
@@ -89,12 +89,7 @@ export default function IssueAggregatorComponent(): JSX.Element | null {
     const issueDialogs: JSX.Element[] = [];
     const conflictLabels: JSX.Element[] = [];
 
-    const onCreateIssue = useCallback(() => {
-        if (canvasReady && canvasInstance.mode() === CanvasMode.SELECT_REGION) {
-            canvasInstance.selectRegion(false);
-            dispatch(updateActiveControl(ActiveControl.CURSOR));
-        }
-    }, [canvasReady, canvasInstance]);
+    const onCreateIssue = useCallback(() => {}, []);
 
     useEffect(() => {
         if (canvasReady) {

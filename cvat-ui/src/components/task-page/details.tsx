@@ -14,11 +14,9 @@ import Title from 'antd/lib/typography/Title';
 import {
     User, getCore, Project, Task, FramesMetaData,
 } from 'cvat-core-wrapper';
-import AutomaticAnnotationProgress from 'components/tasks-page/automatic-annotation-progress';
 import MdGuideControl from 'components/md-guide/md-guide-control';
 import Preview from 'components/common/preview';
-import { cancelInferenceAsync } from 'actions/models-actions';
-import { CombinedState, ActiveInference, CloudStorage } from 'reducers';
+import { CombinedState, CloudStorage } from 'reducers';
 import CVATTag, { TagType } from 'components/common/cvat-tag';
 import UserSelector from './user-selector';
 import BugTrackerEditor from './bug-tracker-editor';
@@ -35,27 +33,13 @@ interface OwnProps {
 }
 
 interface StateToProps {
-    activeInference: ActiveInference | null;
     project?: Project;
-}
-
-interface DispatchToProps {
-    cancelAutoAnnotation(): void;
 }
 
 function mapStateToProps(state: CombinedState, own: OwnProps): StateToProps & OwnProps {
     return {
         ...own,
-        activeInference: state.models.inferences[own.task.id] || null,
         project: state.projects.current.find((project) => project.id === own.task.projectId),
-    };
-}
-
-function mapDispatchToProps(dispatch: any, own: OwnProps): DispatchToProps {
-    return {
-        cancelAutoAnnotation(): void {
-            dispatch(cancelInferenceAsync(own.task.id));
-        },
     };
 }
 
@@ -67,7 +51,7 @@ interface State {
     consensusEnabled: boolean;
 }
 
-type Props = DispatchToProps & StateToProps & OwnProps;
+type Props = StateToProps & OwnProps;
 
 class DetailsComponent extends React.PureComponent<Props, State> {
     constructor(props: Props) {
@@ -219,9 +203,7 @@ class DetailsComponent extends React.PureComponent<Props, State> {
 
     public render(): JSX.Element {
         const {
-            activeInference,
             task: taskInstance,
-            cancelAutoAnnotation,
             onUpdateTask,
         } = this.props;
 
@@ -256,12 +238,6 @@ class DetailsComponent extends React.PureComponent<Props, State> {
                                     }}
                                 />
                             </Col>
-                            <Col span={10}>
-                                <AutomaticAnnotationProgress
-                                    activeInference={activeInference}
-                                    cancelAutoAnnotation={cancelAutoAnnotation}
-                                />
-                            </Col>
                         </Row>
                         {!taskInstance.projectId && this.renderLabelsEditor()}
                         {taskInstance.projectId && this.renderSubsetField()}
@@ -272,4 +248,4 @@ class DetailsComponent extends React.PureComponent<Props, State> {
     }
 }
 
-export default connect(mapStateToProps, mapDispatchToProps)(DetailsComponent);
+export default connect(mapStateToProps)(DetailsComponent);

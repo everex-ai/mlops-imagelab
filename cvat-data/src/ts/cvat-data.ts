@@ -19,7 +19,6 @@ export enum ChunkQuality {
 }
 
 export enum DimensionType {
-    DIMENSION_3D = '3d',
     DIMENSION_2D = '2d',
 }
 

@@ -8,7 +8,6 @@ import _cvat from 'cvat-core/src/api';
 
 import ObjectState from 'cvat-core/src/object-state';
 import Webhook from 'cvat-core/src/webhook';
-import MLModel from 'cvat-core/src/ml-model';
 import CloudStorage from 'cvat-core/src/cloud-storage';
 import {
     Label, Attribute,
@@ -30,7 +29,7 @@ import ApiToken from 'cvat-core/src/api-token';
 import { FramesMetaData, FrameData } from 'cvat-core/src/frames';
 import { ServerError, RequestError } from 'cvat-core/src/exceptions';
 import {
-    ShapeType, ObjectType, LabelType, ModelKind, ModelProviders,
+    ShapeType, ObjectType, LabelType,
     DimensionType, JobType, Source, MembershipRole,
     JobStage, JobState, RQStatus, StorageLocation,
 } from 'cvat-core/src/enums';
@@ -49,7 +48,6 @@ import { BaseCollectionAction } from 'cvat-core/src/annotations-actions/base-col
 import { ActionParameterType, BaseAction } from 'cvat-core/src/annotations-actions/base-action';
 import { Request, RequestOperation } from 'cvat-core/src/request';
 import AboutData from 'cvat-core/src/about';
-import { MinimalShape, TrackerResults, InteractorResults } from 'cvat-core/src/lambda-manager';
 
 const cvat: CVATCore = _cvat;
 
@@ -88,9 +86,6 @@ export {
     Membership,
     Invitation,
     Comment,
-    MLModel,
-    ModelKind,
-    ModelProviders,
     DimensionType,
     AnnotationFormats,
     Dumper,
@@ -139,9 +134,6 @@ export type {
     OrganizationMembersFilter,
     QualitySettingsSaveFields,
     AnalyticsEventsFilter,
-    MinimalShape,
-    InteractorResults,
-    TrackerResults,
     ApiTokenModifiableFields,
     ApiTokensFilter,
 };

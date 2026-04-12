@@ -614,21 +614,8 @@ class MediaCache:
                             "Hash sums of files {} do not match".format(media_item[1])
                         )
 
-                    if db_task.dimension == models.DimensionType.DIM_3D and (
-                        storage_filename.endswith(".bin")
-                    ):
-                        media_item = (
-                            ValidateDimension().convert_bin_to_pcd(
-                                media_item[0],
-                                delete_source=(
-                                    False
-                                    # one file can be used several times for honeypots
-                                ),
-                            ),
-                            *media_item[1:],
-                        )
-
-                    if db_task.dimension == models.DimensionType.DIM_2D and decode:
+                    # 3D dimension no longer supported - .bin to .pcd conversion removed
+                    if decode:
                         media_item = load_image(media_item)
 
                     yield media_item
@@ -988,20 +975,15 @@ class MediaCache:
         if isinstance(db_segment, int):
             db_segment = models.Segment.objects.get(pk=db_segment)
 
-        if db_segment.task.dimension == models.DimensionType.DIM_3D:
-            # TODO
-            preview = PIL.Image.open(
-                os.path.join(os.path.dirname(__file__), "assets/3d_preview.jpeg")
-            )
-        else:
-            from cvat.apps.engine.frame_provider import (  # avoid circular import
-                FrameOutputType,
-                make_frame_provider,
-            )
+        # 3D dimension no longer supported
+        from cvat.apps.engine.frame_provider import (  # avoid circular import
+            FrameOutputType,
+            make_frame_provider,
+        )
 
-            task_frame_provider = make_frame_provider(db_segment.task)
-            segment_frame_provider = make_frame_provider(db_segment)
-            preview = segment_frame_provider.get_frame(
+        task_frame_provider = make_frame_provider(db_segment.task)
+        segment_frame_provider = make_frame_provider(db_segment)
+        preview = segment_frame_provider.get_frame(
                 task_frame_provider.get_rel_frame_number(min(db_segment.frame_set)),
                 quality=models.FrameQuality.COMPRESSED,
                 out_type=FrameOutputType.PIL,

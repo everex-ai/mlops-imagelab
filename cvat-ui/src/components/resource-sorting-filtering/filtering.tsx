@@ -9,7 +9,7 @@ import {
 } from '@react-awesome-query-builder/antd';
 import '@modules/@react-awesome-query-builder/antd/css/styles.css';
 import {
-    DownOutlined, FilterFilled, FilterOutlined,
+    CloseOutlined, DownOutlined, FilterFilled, FilterOutlined,
 } from '@ant-design/icons';
 import Popover from 'antd/lib/popover';
 import Space from 'antd/lib/space';
@@ -59,6 +59,20 @@ export default function ResourceFilterHOC(
         }
         savedItems.splice(0, 0, filter);
         savedItems = Array.from(new Set(savedItems)).slice(0, localStorageRecentCapacity);
+        localStorage.setItem(localStorageRecentKeyword, JSON.stringify(savedItems));
+    }
+
+    function removeFilterFromLocalStorage(filter: string): void {
+        let savedItems: string[] = [];
+        try {
+            savedItems = JSON.parse(localStorage.getItem(localStorageRecentKeyword) || '[]');
+            if (!Array.isArray(savedItems) || savedItems.some((item: any) => typeof item !== 'string')) {
+                throw new Error('Wrong filters value stored');
+            }
+        } catch (_: any) {
+            // nothing to do
+        }
+        savedItems = savedItems.filter((item: string) => item !== filter);
         localStorage.setItem(localStorageRecentKeyword, JSON.stringify(savedItems));
     }
 
@@ -290,7 +304,22 @@ export default function ResourceFilterHOC(
                                                                 }
                                                             }}
                                                         >
-                                                            {QbUtils.queryString(tree, config)}
+                                                            <span className='cvat-recent-filter-item'>
+                                                                <span className='cvat-recent-filter-item-text'>
+                                                                    {QbUtils.queryString(tree, config)}
+                                                                </span>
+                                                                <CloseOutlined
+                                                                    className='cvat-recent-filter-item-remove'
+                                                                    onClick={(e: React.MouseEvent) => {
+                                                                        e.stopPropagation();
+                                                                        removeFilterFromLocalStorage(key);
+                                                                        setRecentFilters(receiveRecentFilters());
+                                                                        if (appliedFilter.recent === key) {
+                                                                            setAppliedFilter(defaultAppliedFilter);
+                                                                        }
+                                                                    }}
+                                                                />
+                                                            </span>
                                                         </Menu.Item>
                                                     );
                                                 })}

@@ -8,7 +8,6 @@ import config from './config';
 
 import PluginRegistry from './plugins';
 import serverProxy from './server-proxy';
-import lambdaManager from './lambda-manager';
 import requestsManager from './requests-manager';
 import {
     isBoolean,
@@ -61,13 +60,6 @@ export default function implementAPI(cvat: CVATCore): CVATCore {
     implementationMixin(cvat.actions.unregister, unregisterAction);
     implementationMixin(cvat.actions.run, runAction);
     implementationMixin(cvat.actions.call, callAction);
-
-    implementationMixin(cvat.lambda.list, lambdaManager.list.bind(lambdaManager));
-    implementationMixin(cvat.lambda.run, lambdaManager.run.bind(lambdaManager));
-    implementationMixin(cvat.lambda.call, lambdaManager.call.bind(lambdaManager));
-    implementationMixin(cvat.lambda.cancel, lambdaManager.cancel.bind(lambdaManager));
-    implementationMixin(cvat.lambda.listen, lambdaManager.listen.bind(lambdaManager));
-    implementationMixin(cvat.lambda.requests, lambdaManager.requests.bind(lambdaManager));
 
     implementationMixin(cvat.requests.list, requestsManager.list.bind(requestsManager));
     implementationMixin(cvat.requests.listen, requestsManager.listen.bind(requestsManager));

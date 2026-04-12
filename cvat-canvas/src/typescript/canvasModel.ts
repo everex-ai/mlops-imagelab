@@ -117,6 +117,8 @@ export interface DrawData {
     skeletonSVG?: string;
     numberOfPoints?: number;
     initialState?: any;
+    initialStates?: any[];
+    skeletonSVGMap?: Record<number, string>;
     crosshair?: boolean;
     brushTool?: BrushTool;
     redraw?: number;
@@ -210,6 +212,7 @@ export enum UpdateReasons {
     JOIN = 'join',
     SLICE = 'slice',
     SELECT = 'select',
+    OBJECTS_SELECTED = 'objects_selected',
     CANCEL = 'cancel',
     BITMAP = 'bitmap',
     SELECT_REGION = 'select_region',
@@ -258,6 +261,7 @@ export interface CanvasModel {
     readonly sliceData: SliceData;
     readonly configuration: Configuration;
     readonly selected: any;
+    readonly selectedClientIDs: number[];
     geometry: Geometry;
     mode: Mode;
     exception: Error | null;
@@ -282,6 +286,7 @@ export interface CanvasModel {
     split(splitData: SplitData): void;
     merge(mergeData: MergeData): void;
     select(objectState: any): void;
+    setSelection(clientIDs: number[]): void;
     interact(interactionData: InteractionData): void;
 
     fitCanvas(width: number, height: number): void;
@@ -377,6 +382,7 @@ export class CanvasModelImpl extends MasterImpl implements CanvasModel {
         sliceData: SliceData;
         splitData: SplitData;
         selected: any;
+        selectedClientIDs: number[];
         mode: Mode;
         exception: Error | null;
     };
@@ -446,6 +452,7 @@ export class CanvasModelImpl extends MasterImpl implements CanvasModel {
             fittedScale: 0,
             zLayer: null,
             selected: null,
+            selectedClientIDs: [],
             mode: Mode.IDLE,
             exception: null,
             ...defaultData,
@@ -750,7 +757,7 @@ export class CanvasModelImpl extends MasterImpl implements CanvasModel {
             throw Error(`Canvas is busy. Action: ${this.data.mode}`);
         }
 
-        if (drawData.enabled) {
+        if (drawData.enabled && !drawData.initialStates?.length) {
             if (drawData.shapeType === 'skeleton' && !drawData.skeletonSVG) {
                 throw new Error('Skeleton template must be specified when drawing a skeleton');
             }
@@ -789,7 +796,9 @@ export class CanvasModelImpl extends MasterImpl implements CanvasModel {
             }
 
             this.data.drawData = { ...drawData };
-            if (this.data.drawData.initialState) {
+            if (this.data.drawData.initialStates?.length) {
+                this.data.drawData.shapeType = 'multi';
+            } else if (this.data.drawData.initialState) {
                 this.data.drawData.shapeType = this.data.drawData.initialState.shapeType;
             }
         }
@@ -934,6 +943,11 @@ export class CanvasModelImpl extends MasterImpl implements CanvasModel {
         this.data.selected = objectState;
         this.notify(UpdateReasons.SELECT);
         this.data.selected = null;
+    }
+
+    public setSelection(clientIDs: number[]): void {
+        this.data.selectedClientIDs = [...clientIDs];
+        this.notify(UpdateReasons.OBJECTS_SELECTED);
     }
 
     public configure(configuration: Configuration): void {
@@ -1150,6 +1164,10 @@ export class CanvasModelImpl extends MasterImpl implements CanvasModel {
 
     public get selected(): any {
         return this.data.selected;
+    }
+
+    public get selectedClientIDs(): number[] {
+        return [...this.data.selectedClientIDs];
     }
 
     public set mode(value: Mode) {

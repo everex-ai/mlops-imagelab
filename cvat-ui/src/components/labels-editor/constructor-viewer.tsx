@@ -14,7 +14,7 @@ interface ConstructorViewerProps {
     labels: LabelOptColor[];
     onUpdate: (label: LabelOptColor) => void;
     onDelete: (label: LabelOptColor) => void;
-    onCreate: (creatorType: 'basic' | 'skeleton' | 'model') => void;
+    onCreate: (creatorType: 'basic' | 'skeleton') => void;
 }
 
 function ConstructorViewer(props: ConstructorViewerProps): JSX.Element {
@@ -28,10 +28,6 @@ function ConstructorViewer(props: ConstructorViewerProps): JSX.Element {
         </Button>,
         <Button key='create_skeleton' onClick={() => onCreate('skeleton')} className='cvat-constructor-viewer-new-skeleton-item'>
             Setup skeleton
-            <PlusCircleOutlined />
-        </Button>,
-        <Button key='from_model' onClick={() => onCreate('model')} className='cvat-constructor-viewer-new-from-model-item'>
-            From model
             <PlusCircleOutlined />
         </Button>,
     ];

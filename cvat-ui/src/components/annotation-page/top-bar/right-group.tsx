@@ -14,7 +14,7 @@ import notification from 'antd/lib/notification';
 import { FilterIcon, FullscreenIcon, GuideIcon } from 'icons';
 import config from 'config';
 import {
-    DimensionType, Job, JobStage, JobState,
+    Job, JobStage, JobState,
 } from 'cvat-core-wrapper';
 import { Workspace } from 'reducers';
 
@@ -156,26 +156,11 @@ function RightGroup(props: Props): JSX.Element {
                     onChange={changeWorkspace}
                     value={workspace}
                 >
-                    {Object.values(Workspace).map((ws) => {
-                        if (jobInstance.dimension === DimensionType.DIMENSION_3D) {
-                            if (ws === Workspace.STANDARD) {
-                                return null;
-                            }
-                            return (
-                                <Select.Option disabled={ws !== Workspace.STANDARD3D} key={ws} value={ws}>
-                                    {ws}
-                                </Select.Option>
-                            );
-                        }
-                        if (ws !== Workspace.STANDARD3D) {
-                            return (
-                                <Select.Option key={ws} value={ws}>
-                                    {ws}
-                                </Select.Option>
-                            );
-                        }
-                        return null;
-                    })}
+                    {Object.values(Workspace).map((ws) => (
+                        <Select.Option key={ws} value={ws}>
+                            {ws}
+                        </Select.Option>
+                    ))}
                 </Select>
             </div>
         </Col>

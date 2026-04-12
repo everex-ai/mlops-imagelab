@@ -10,7 +10,6 @@ import { RadioChangeEvent } from 'antd/lib/radio';
 import { CombinedState } from 'reducers';
 import { rememberObject } from 'actions/annotation-actions';
 import { Canvas, RectDrawingMethod, CuboidDrawingMethod } from 'cvat-canvas-wrapper';
-import { Canvas3d } from 'cvat-canvas3d-wrapper';
 import DrawShapePopoverComponent from 'components/annotation-page/standard-workspace/controls-side-bar/draw-shape-popover';
 import { Label, ObjectType, ShapeType } from 'cvat-core-wrapper';
 
@@ -31,7 +30,7 @@ interface DispatchToProps {
 
 interface StateToProps {
     normalizedKeyMap: Record<string, string>;
-    canvasInstance: Canvas | Canvas3d;
+    canvasInstance: Canvas;
     shapeType: ShapeType;
     labels: any[];
     jobInstance: any;

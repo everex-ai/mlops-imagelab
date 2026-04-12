@@ -6,13 +6,12 @@
 import { AnyAction, Store } from 'redux';
 import { ThunkAction, ThunkDispatch } from 'utils/redux';
 import isAbleToChangeFrame from 'utils/is-able-to-change-frame';
-import { CanvasMode as Canvas3DMode } from 'cvat-canvas3d-wrapper';
 import {
     RectDrawingMethod, CuboidDrawingMethod, Canvas, CanvasMode as Canvas2DMode,
 } from 'cvat-canvas-wrapper';
 import {
-    getCore, MLModel, JobType, Job, QualityConflict,
-    ObjectState, ObjectType, ShapeType, JobState, JobValidationLayout,
+    getCore, JobType, Job, QualityConflict,
+    ObjectState, ObjectType, ShapeType, JobState, JobStage, JobValidationLayout,
 } from 'cvat-core-wrapper';
 import logger, { EventScope } from 'cvat-logger';
 import { getCVATStore } from 'cvat-store';
@@ -108,6 +107,7 @@ export enum AnnotationActionTypes {
     UPDATE_ACTIVE_CONTROL = 'UPDATE_ACTIVE_CONTROL',
 
     COPY_SHAPE = 'COPY_SHAPE',
+    COPY_SHAPES = 'COPY_SHAPES',
     PASTE_SHAPE = 'PASTE_SHAPE',
     REPEAT_DRAW_SHAPE = 'REPEAT_DRAW_SHAPE',
     RESET_CANVAS = 'RESET_CANVAS',
@@ -131,6 +131,11 @@ export enum AnnotationActionTypes {
     REMOVE_OBJECT = 'REMOVE_OBJECT',
     REMOVE_OBJECT_SUCCESS = 'REMOVE_OBJECT_SUCCESS',
     REMOVE_OBJECT_FAILED = 'REMOVE_OBJECT_FAILED',
+    REMOVE_OBJECTS = 'REMOVE_OBJECTS',
+    REMOVE_OBJECTS_SUCCESS = 'REMOVE_OBJECTS_SUCCESS',
+    REMOVE_OBJECTS_FAILED = 'REMOVE_OBJECTS_FAILED',
+    SELECT_OBJECTS = 'SELECT_OBJECTS',
+    TOGGLE_OBJECT_SELECTION = 'TOGGLE_OBJECT_SELECTION',
     PROPAGATE_OBJECT_SUCCESS = 'PROPAGATE_OBJECT_SUCCESS',
     PROPAGATE_OBJECT_FAILED = 'PROPAGATE_OBJECT_FAILED',
     SWITCH_PROPAGATE_VISIBILITY = 'SWITCH_PROPAGATE_VISIBILITY',
@@ -543,6 +548,55 @@ export function removeObject(objectState: any, force: boolean): AnyAction {
     };
 }
 
+export function selectObjects(stateIDs: number[]): AnyAction {
+    return {
+        type: AnnotationActionTypes.SELECT_OBJECTS,
+        payload: { stateIDs },
+    };
+}
+
+export function toggleObjectSelection(stateID: number): AnyAction {
+    return {
+        type: AnnotationActionTypes.TOGGLE_OBJECT_SELECTION,
+        payload: { stateID },
+    };
+}
+
+export function removeObjects(objectStates: any[], force: boolean): AnyAction {
+    return {
+        type: AnnotationActionTypes.REMOVE_OBJECTS,
+        payload: {
+            objectStates,
+            force,
+        },
+    };
+}
+
+export function removeObjectsAsync(objectStates: ObjectState[], force: boolean): ThunkAction {
+    return async (dispatch: ThunkDispatch): Promise<void> => {
+        try {
+            const { frame, jobInstance } = receiveAnnotationsParameters();
+            await jobInstance.logger.log(EventScope.deleteObject, { count: objectStates.length });
+
+            await jobInstance.annotations.batchRemove(objectStates, force, frame);
+            const history = await jobInstance.actions.get();
+
+            dispatch({
+                type: AnnotationActionTypes.REMOVE_OBJECTS_SUCCESS,
+                payload: {
+                    objectStates,
+                    history,
+                },
+            });
+        } catch (error) {
+            dispatch({
+                type: AnnotationActionTypes.REMOVE_OBJECTS_FAILED,
+                payload: { error },
+            });
+        }
+    };
+}
+
 export function copyShape(objectState: any): AnyAction {
     const job = getStore().getState().annotation.job.instance;
     job?.logger.log(EventScope.copyObject, { count: 1 });
@@ -552,6 +606,57 @@ export function copyShape(objectState: any): AnyAction {
         payload: {
             objectState,
         },
+    };
+}
+
+export function copyShapes(objectStates: any[]): AnyAction {
+    const job = getStore().getState().annotation.job.instance;
+    job?.logger.log(EventScope.copyObject, { count: objectStates.length });
+
+    return {
+        type: AnnotationActionTypes.COPY_SHAPES,
+        payload: {
+            objectStates,
+        },
+    };
+}
+
+export function pasteShapesAsync(): ThunkAction {
+    return async (dispatch: ThunkDispatch): Promise<void> => {
+        const {
+            canvas: { instance: canvasInstance },
+            drawing: { copiedStates },
+        } = getStore().getState().annotation;
+
+        if (!copiedStates?.length || !canvasInstance) return;
+
+        // Filter out masks and tags (not supported in draw mode)
+        const drawableStates = copiedStates.filter(
+            (s: any) => s.shapeType !== ShapeType.MASK && s.objectType !== ObjectType.TAG,
+        );
+        if (!drawableStates.length) return;
+
+        // Build skeleton SVG mapping for skeleton shapes
+        const skeletonSVGMap: Record<number, string> = {};
+        for (const state of drawableStates) {
+            if (state.shapeType === 'skeleton' && state.label?.structure?.svg) {
+                skeletonSVGMap[state.label.id] = state.label.structure.svg;
+            }
+        }
+
+        canvasInstance.cancel();
+        dispatch({
+            type: AnnotationActionTypes.PASTE_SHAPE,
+            payload: {
+                activeControl: ActiveControl.CURSOR,
+            },
+        });
+
+        canvasInstance.draw({
+            enabled: true,
+            initialStates: drawableStates,
+            skeletonSVGMap,
+        });
     };
 }
 
@@ -1093,9 +1198,10 @@ export function finishCurrentJobAsync(onSuccess: () => void): ThunkAction {
             }
         }
 
-        if (jobInstance.state !== JobState.COMPLETED) {
-            await dispatch(updateJobAsync(jobInstance, { state: JobState.COMPLETED }));
-        }
+        await dispatch(updateJobAsync(jobInstance, {
+            state: JobState.COMPLETED,
+            stage: JobStage.ACCEPTANCE,
+        }));
 
         onSuccess();
     };
@@ -1161,6 +1267,23 @@ export function updateAnnotationsAsync(statesToUpdate: any[]): ThunkAction {
                     maxZ,
                 },
             });
+        } catch (error) {
+            dispatch({
+                type: AnnotationActionTypes.UPDATE_ANNOTATIONS_FAILED,
+                payload: { error },
+            });
+            dispatch(fetchAnnotationsAsync());
+        }
+    };
+}
+
+export function updateMultipleAnnotationsAsync(statesToUpdate: any[]): ThunkAction {
+    return async (dispatch: ThunkDispatch): Promise<void> => {
+        try {
+            const promises = statesToUpdate.map((objectState: any): Promise<any> => objectState.save());
+            await Promise.all(promises);
+
+            dispatch(fetchAnnotationsAsync());
         } catch (error) {
             dispatch({
                 type: AnnotationActionTypes.UPDATE_ANNOTATIONS_FAILED,
@@ -1441,9 +1564,9 @@ export function pasteShapeAsync(): ThunkAction {
 }
 
 export function interactWithCanvas(
-    activeInteractor: MLModel | OpenCVTool,
+    activeInteractor: OpenCVTool,
     activeLabelID: number,
-    activeInteractorParameters: MLModel['params']['canvas'],
+    activeInteractorParameters: Record<string, string | number | boolean>,
 ): AnyAction {
     return {
         type: AnnotationActionTypes.INTERACT_WITH_CANVAS,
@@ -1620,9 +1743,7 @@ export function deleteFrameAsync(frame: number): ThunkAction {
         try {
             dispatch({ type: AnnotationActionTypes.DELETE_FRAME });
 
-            if (canvasInstance &&
-                canvasInstance.mode() !== Canvas2DMode.IDLE &&
-                canvasInstance.mode() !== Canvas3DMode.IDLE) {
+            if (canvasInstance && canvasInstance.mode() !== Canvas2DMode.IDLE) {
                 canvasInstance.cancel();
             }
             await jobInstance.frames.delete(frame);

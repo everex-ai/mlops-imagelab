@@ -1,0 +1,81 @@
+#
+# Docker Compose override for running unit tests
+# Builds server image with testing configuration (includes fakeredis, enables sync RQ)
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.unit-test.yml up -d --build
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml -f docker-compose.unit-test.yml exec cvat_server_everex python manage.py test cvat.apps
+#
+
+services:
+  cvat_server_everex:
+    build:
+      context: .
+      args:
+        CVAT_CONFIGURATION: testing
+    environment:
+      DJANGO_SETTINGS_MODULE: cvat.settings.testing
+
+  cvat_worker_export_everex:
+    build:
+      context: .
+      args:
+        CVAT_CONFIGURATION: testing
+    environment:
+      DJANGO_SETTINGS_MODULE: cvat.settings.testing
+
+  cvat_worker_import_everex:
+    build:
+      context: .
+      args:
+        CVAT_CONFIGURATION: testing
+    environment:
+      DJANGO_SETTINGS_MODULE: cvat.settings.testing
+
+  cvat_worker_quality_reports_everex:
+    build:
+      context: .
+      args:
+        CVAT_CONFIGURATION: testing
+    environment:
+      DJANGO_SETTINGS_MODULE: cvat.settings.testing
+
+  cvat_worker_consensus_everex:
+    build:
+      context: .
+      args:
+        CVAT_CONFIGURATION: testing
+    environment:
+      DJANGO_SETTINGS_MODULE: cvat.settings.testing
+
+  cvat_worker_annotation_everex:
+    build:
+      context: .
+      args:
+        CVAT_CONFIGURATION: testing
+    environment:
+      DJANGO_SETTINGS_MODULE: cvat.settings.testing
+
+  cvat_worker_chunks_everex:
+    build:
+      context: .
+      args:
+        CVAT_CONFIGURATION: testing
+    environment:
+      DJANGO_SETTINGS_MODULE: cvat.settings.testing
+
+  cvat_worker_webhooks_everex:
+    build:
+      context: .
+      args:
+        CVAT_CONFIGURATION: testing
+    environment:
+      DJANGO_SETTINGS_MODULE: cvat.settings.testing
+
+  cvat_worker_utils_everex:
+    build:
+      context: .
+      args:
+        CVAT_CONFIGURATION: testing
+    environment:
+      DJANGO_SETTINGS_MODULE: cvat.settings.testing

@@ -18,7 +18,7 @@ import data.organizations
 #                 "id": <num>
 #             },
 #             "user": {
-#                 "role": <"owner"|"maintainer"|"supervisor"|"worker"> or null
+#                 "role": <"owner"|"maintainer"|"supervisor"|"reviewer"|"worker"> or null
 #             }
 #         } or null,
 #     },
@@ -34,7 +34,8 @@ import data.organizations
 #             "assignee": { "id": <num> }
 #         },
 #         "job": {
-#             "assignee": { "id": <num> }
+#             "assignee": { "id": <num> },
+#             "stage": <"annotation"|"validation"|"acceptance">
 #         },
 #         "issue": {
 #             "owner": { "id": <num> },
@@ -213,6 +214,14 @@ filter := [] if { # Django Q object to filter list of entries
         {"issue__job__segment__task__organization": org.id},
         {"issue__job__segment__task__project__organization": org.id}, "|", "&"
     ]
+} else := qobject if {
+    # Reviewer: every comment under the organization
+    organizations.is_reviewer
+    org := input.auth.organization
+    qobject := [
+        {"issue__job__segment__task__organization": org.id},
+        {"issue__job__segment__task__project__organization": org.id}, "|"
+    ]
 }
 
 allow if {
@@ -255,4 +264,28 @@ allow if {
     is_comment_staff
     utils.has_perm(utils.WORKER)
     organizations.is_member
+}
+
+# === Reviewer rules ===
+# Reviewers can leave comments on any issue in the organization but may
+# only edit/delete comments they themselves authored.
+
+allow if {
+    input.scope == utils.CREATE_IN_ISSUE
+    input.auth.organization.id == input.resource.organization.id
+    utils.is_organization
+    organizations.is_reviewer
+}
+
+allow if {
+    input.scope == utils.VIEW
+    input.auth.organization.id == input.resource.organization.id
+    organizations.is_reviewer
+}
+
+allow if {
+    input.scope in {utils.UPDATE, utils.DELETE}
+    input.auth.organization.id == input.resource.organization.id
+    organizations.is_reviewer
+    is_comment_owner
 }

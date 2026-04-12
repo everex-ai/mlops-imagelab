@@ -138,16 +138,6 @@ REPLACEMENT_RULES = [
         lambda v, m: m[1] + v.compose_repr() + m[3],
     ),
     ReplacementRule(
-        "helm-chart/values.yaml",
-        re.compile(r"(^    image: cvat/(?:ui|server)\n    tag: )([\w.]+)", re.M),
-        lambda v, m: m[1] + v.compose_repr(),
-    ),
-    ReplacementRule(
-        "helm-chart/Chart.yaml",
-        re.compile(r"^version: [\d.]+$", re.M),
-        lambda v, m: f"version: {v.major}.{v.minor}.{v.patch}",
-    ),
-    ReplacementRule(
         "cvat-sdk/gen/generate.sh",
         re.compile(r'^VERSION="[\d.]+"$', re.M),
         lambda v, m: f'VERSION="{v.major}.{v.minor}.{v.patch}"',

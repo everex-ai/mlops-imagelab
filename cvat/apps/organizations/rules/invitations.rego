@@ -18,14 +18,14 @@ import data.organizations
 #                 "id": <num>
 #             },
 #             "user": {
-#                 "role": <"owner"|"maintainer"|"supervisor"|"worker"> or null
+#                 "role": <"owner"|"maintainer"|"supervisor"|"reviewer"|"worker"> or null
 #             }
 #         } or null,
 #     },
 #     "resource": {
 #         "owner": { "id": <num> },
 #         "invitee": { "id": <num> },
-#         "role": <"owner"|"maintainer"|"supervisor"|"worker">,
+#         "role": <"owner"|"maintainer"|"supervisor"|"reviewer"|"worker">,
 #         "organization": { "id": <num> }
 #     } or null,
 # }

@@ -85,6 +85,7 @@ function InvitationModal(props: Props): JSX.Element {
                                         >
                                             <Select>
                                                 <Select.Option value='worker'>Worker</Select.Option>
+                                                <Select.Option value='reviewer'>Reviewer</Select.Option>
                                                 <Select.Option value='supervisor'>Supervisor</Select.Option>
                                                 <Select.Option value='maintainer'>Maintainer</Select.Option>
                                             </Select>

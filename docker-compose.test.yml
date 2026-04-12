@@ -1,0 +1,34 @@
+# 로컬 테스트용 docker-compose 오버라이드
+# 볼륨을 로컬 경로로 재정의하여 빌드/배포 검증에 사용
+
+volumes:
+  cvat_db:
+    driver_opts:
+      type: none
+      o: bind
+      device: ${CVAT_TEST_DATA_PATH:-/tmp/cvat-test}/cvat_db
+  cvat_data:
+    driver_opts:
+      type: none
+      o: bind
+      device: ${CVAT_TEST_DATA_PATH:-/tmp/cvat-test}/cvat_data
+  cvat_keys:
+    driver_opts:
+      type: none
+      o: bind
+      device: ${CVAT_TEST_DATA_PATH:-/tmp/cvat-test}/cvat_keys
+  cvat_logs:
+    driver_opts:
+      type: none
+      o: bind
+      device: ${CVAT_TEST_DATA_PATH:-/tmp/cvat-test}/cvat_logs
+  cvat_events_db:
+    driver_opts:
+      type: none
+      o: bind
+      device: ${CVAT_TEST_DATA_PATH:-/tmp/cvat-test}/cvat_events_db
+  cvat_cache_db:
+    driver_opts:
+      type: none
+      o: bind
+      device: ${CVAT_TEST_DATA_PATH:-/tmp/cvat-test}/cvat_cache_db

@@ -42,7 +42,6 @@ export enum JobType {
 
 export enum DimensionType {
     DIMENSION_2D = '2d',
-    DIMENSION_3D = '3d',
 }
 
 export enum RQStatus {
@@ -153,17 +152,6 @@ export enum HistoryActions {
     COMMIT_ANNOTATIONS = 'Commit annotations',
 }
 
-export enum ModelKind {
-    DETECTOR = 'detector',
-    INTERACTOR = 'interactor',
-    TRACKER = 'tracker',
-    REID = 'reid',
-}
-
-export enum ModelProviders {
-    CVAT = 'cvat',
-}
-
 export const colors = [
     '#33ddff',
     '#fa3253',
@@ -218,6 +206,7 @@ export enum CloudStorageStatus {
 
 export enum MembershipRole {
     WORKER = 'worker',
+    REVIEWER = 'reviewer',
     SUPERVISOR = 'supervisor',
     MAINTAINER = 'maintainer',
     OWNER = 'owner',

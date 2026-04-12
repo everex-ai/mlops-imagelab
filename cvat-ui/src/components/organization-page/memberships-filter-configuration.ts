@@ -26,6 +26,7 @@ export const config: Partial<Config> = {
             fieldSettings: {
                 listValues: [
                     { value: 'worker', title: 'Worker' },
+                    { value: 'reviewer', title: 'Reviewer' },
                     { value: 'supervisor', title: 'Supervisor' },
                     { value: 'maintainer', title: 'Maintainer' },
                     { value: 'owner', title: 'Owner' },
@@ -39,6 +40,7 @@ export const localStorageRecentCapacity = 10;
 export const localStorageRecentKeyword = 'recentlyAppliedMembershipsFilters';
 export const predefinedFilterValues = {
     Workers: '{"and":[{"==":[{"var":"role"},"worker"]}]}',
+    Reviewers: '{"and":[{"==":[{"var":"role"},"reviewer"]}]}',
     Supervisors: '{"and":[{"==":[{"var":"role"},"supervisor"]}]}',
     Maintainers: '{"and":[{"==":[{"var":"role"},"maintainer"]}]}',
 };

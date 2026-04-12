@@ -202,6 +202,26 @@ function buildDuplicatedAPI(prototype) {
                     return result;
                 },
 
+                async batchRemove(objectStates, force, frame) {
+                    const result = await PluginRegistry.apiWrapper.call(
+                        this,
+                        prototype.annotations.batchRemove,
+                        objectStates,
+                        force,
+                        frame,
+                    );
+                    return result;
+                },
+
+                async batchUpdatePoints(updates) {
+                    const result = await PluginRegistry.apiWrapper.call(
+                        this,
+                        prototype.annotations.batchUpdatePoints,
+                        updates,
+                    );
+                    return result;
+                },
+
                 hasUnsavedChanges() {
                     const result = prototype.annotations.hasUnsavedChanges.implementation.call(this);
                     return result;
@@ -411,6 +431,14 @@ export class Session {
             targetStorage: Storage,
             name?: string,
         ) => Promise<string | void>;
+        batchRemove: (
+            objectStates: ObjectState[],
+            force: boolean,
+            frame: number,
+        ) => Promise<boolean>;
+        batchUpdatePoints: (
+            updates: { clientID: number; points: number[]; frame: number }[],
+        ) => Promise<void>;
     };
 
     public actions: {
@@ -478,6 +506,8 @@ export class Session {
             statistics: Object.getPrototypeOf(this).annotations.statistics.bind(this),
             hasUnsavedChanges: Object.getPrototypeOf(this).annotations.hasUnsavedChanges.bind(this),
             exportDataset: Object.getPrototypeOf(this).annotations.exportDataset.bind(this),
+            batchRemove: Object.getPrototypeOf(this).annotations.batchRemove.bind(this),
+            batchUpdatePoints: Object.getPrototypeOf(this).annotations.batchUpdatePoints.bind(this),
         };
 
         this.actions = {

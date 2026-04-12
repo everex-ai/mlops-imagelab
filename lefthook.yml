@@ -1,0 +1,10 @@
+# Lefthook 설정
+# 문서: https://github.com/evilmartians/lefthook
+
+# pre-commit: 빠른 검증 (lint 등)
+pre-commit:
+  parallel: true
+  commands:
+    lint-staged:
+      glob: "*.{js,jsx,ts,tsx}"
+      run: npx lint-staged

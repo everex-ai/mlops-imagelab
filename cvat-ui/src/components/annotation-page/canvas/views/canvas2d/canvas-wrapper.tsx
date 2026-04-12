@@ -20,7 +20,6 @@ import {
 } from 'reducers';
 import { EventScope } from 'cvat-logger';
 import { Canvas, HighlightSeverity, CanvasHint } from 'cvat-canvas-wrapper';
-import { Canvas3d } from 'cvat-canvas3d-wrapper';
 import {
     AnnotationConflict, ObjectState, ObjectType, ShapeType, QualityConflict, getCore,
 } from 'cvat-core-wrapper';
@@ -32,6 +31,7 @@ import {
     resetCanvas,
     updateActiveControl as updateActiveControlAction,
     updateAnnotationsAsync,
+    updateMultipleAnnotationsAsync,
     createAnnotationsAsync,
     mergeAnnotationsAsync,
     groupAnnotationsAsync,
@@ -39,6 +39,8 @@ import {
     sliceAnnotationsAsync,
     splitAnnotationsAsync,
     activateObject,
+    selectObjects as selectObjectsAction,
+    toggleObjectSelection as toggleObjectSelectionAction,
     updateCanvasContextMenu,
     addZLayer,
     switchZLayer,
@@ -70,7 +72,7 @@ const cvat = getCore();
 const MAX_DISTANCE_TO_OPEN_SHAPE = 50;
 
 interface StateToProps {
-    canvasInstance: Canvas | Canvas3d | null;
+    canvasInstance: Canvas | null;
     jobInstance: any;
     activatedStateID: number | null;
     activatedElementID: number | null;
@@ -119,6 +121,7 @@ interface StateToProps {
     showGroundTruth: boolean;
     highlightedConflict: QualityConflict | null;
     imageFilters: ImageFilter[];
+    selectedStatesID: number[];
     activeControl: ActiveControl;
     activeObjectHidden: boolean;
 }
@@ -149,6 +152,9 @@ interface DispatchToProps {
     onCanvasErrorOccurred(error: Error): void;
     onStartIssue(position: number[]): void;
     onUpdateEditedObject(editedState: ObjectState | null): void;
+    onToggleObjectSelection(stateID: number): void;
+    onSelectObjects(stateIDs: number[]): void;
+    onUpdateMultipleAnnotations(statesToUpdate: any[]): void;
 }
 
 function mapStateToProps(state: CombinedState): StateToProps {
@@ -168,6 +174,7 @@ function mapStateToProps(state: CombinedState): StateToProps {
                 activatedStateID,
                 activatedElementID,
                 activatedAttributeID,
+                selectedStatesID,
                 zLayer: { cur: curZLayer, min: minZLayer, max: maxZLayer },
                 highlightedConflict,
             },
@@ -261,6 +268,7 @@ function mapStateToProps(state: CombinedState): StateToProps {
         conflicts,
         showGroundTruth,
         highlightedConflict,
+        selectedStatesID,
         imageFilters,
         activeObjectHidden,
     };
@@ -358,6 +366,15 @@ function mapDispatchToProps(dispatch: any): DispatchToProps {
         onUpdateEditedObject(editedState: ObjectState | null): void {
             dispatch(updateEditedStateAsync(editedState));
         },
+        onToggleObjectSelection(stateID: number): void {
+            dispatch(toggleObjectSelectionAction(stateID));
+        },
+        onSelectObjects(stateIDs: number[]): void {
+            dispatch(selectObjectsAction(stateIDs));
+        },
+        onUpdateMultipleAnnotations(statesToUpdate: any[]): void {
+            dispatch(updateMultipleAnnotationsAsync(statesToUpdate));
+        },
     };
 }
 
@@ -366,6 +383,7 @@ type Props = StateToProps & DispatchToProps;
 class CanvasWrapperComponent extends React.PureComponent<Props> {
     private debouncedUpdate = debounce(this.updateCanvas.bind(this), 250, { leading: true });
     private canvasTipsRef = React.createRef<CanvasTipsComponent>();
+    private shiftClickStart: { x: number; y: number } | null = null;
 
     public componentDidMount(): void {
         const {
@@ -598,6 +616,11 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
             }
         }
 
+        const { selectedStatesID } = this.props;
+        if (prevProps.selectedStatesID !== selectedStatesID) {
+            canvasInstance.setSelection(selectedStatesID);
+        }
+
         this.activateOnCanvas();
     }
 
@@ -605,6 +628,7 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         const { canvasInstance } = this.props as { canvasInstance: Canvas };
 
         canvasInstance.html().removeEventListener('mousedown', this.onCanvasMouseDown);
+        canvasInstance.html().removeEventListener('mouseup', this.onCanvasMouseUp as EventListener);
         canvasInstance.html().removeEventListener('click', this.onCanvasClicked);
         canvasInstance.html().removeEventListener('canvas.editstart', this.onCanvasEditStart);
         canvasInstance.html().removeEventListener('canvas.edited', this.onCanvasEditDone);
@@ -631,6 +655,9 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         canvasInstance.html().removeEventListener('canvas.joined', this.onCanvasObjectsJoined);
         canvasInstance.html().removeEventListener('canvas.regionselected', this.onCanvasPositionSelected);
         canvasInstance.html().removeEventListener('canvas.splitted', this.onCanvasTrackSplitted);
+
+        canvasInstance.html().removeEventListener('canvas.multiedited', this.onCanvasMultiEdited);
+        canvasInstance.html().removeEventListener('canvas.multiselected', this.onCanvasMultiSelected);
 
         canvasInstance.html().removeEventListener('canvas.error', this.onCanvasErrorOccurrence);
         canvasInstance.html().removeEventListener('canvas.message', this.onCanvasMessage as EventListener);
@@ -662,7 +689,41 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
             updateActiveControl(ActiveControl.CURSOR);
         }
 
-        const { state, duration } = event.detail;
+        const { duration } = event.detail;
+
+        // Multi-paste: event.detail.states is an array
+        if (event.detail.states) {
+            const objectStates = event.detail.states.map((s: any) => {
+                s.frame = frame;
+                s.objectType = s.objectType ?? activeObjectType;
+                s.label = s.label || jobInstance.labels
+                    .filter((label: any) => label.id === activeLabelID)[0];
+                s.rotation = s.rotation || 0;
+                s.occluded = s.occluded || false;
+                s.outside = s.outside || false;
+                s.hidden = s.hidden || (activeObjectHidden && workspace !== Workspace.SINGLE_SHAPE);
+                if (s.shapeType === ShapeType.SKELETON && Array.isArray(s.elements)) {
+                    s.elements.forEach((element: Record<string, any>) => {
+                        element.objectType = s.objectType;
+                        element.label = element.label || s.label.structure
+                            .sublabels.find((label: any) => label.id === element.labelID);
+                        element.frame = frame;
+                        element.rotation = 0;
+                        element.occluded = element.occluded || false;
+                        element.outside = element.outside || false;
+                    });
+                }
+                return new cvat.classes.ObjectState(s);
+            });
+
+            jobInstance.logger.log(EventScope.pasteObject, { count: objectStates.length, duration });
+            onCreateAnnotations(objectStates);
+            onUpdateEditedObject(null);
+            return;
+        }
+
+        // Single shape draw/paste
+        const { state } = event.detail;
         const isDrawnFromScratch = !state.label;
 
         state.objectType = state.shapeType === ShapeType.MASK ?
@@ -759,11 +820,63 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
     };
 
     private onCanvasMouseDown = (e: MouseEvent): void => {
-        const { workspace, activatedStateID, onActivateObject } = this.props;
+        const {
+            workspace, activatedStateID, onActivateObject, onSelectObjects, selectedStatesID,
+        } = this.props;
 
         if ((e.target as HTMLElement).tagName === 'svg' && e.button !== 2) {
+            if (!e.shiftKey && selectedStatesID.length > 0) {
+                onSelectObjects([]);
+            }
             if (activatedStateID !== null && workspace !== Workspace.ATTRIBUTES) {
                 onActivateObject(null, null);
+            }
+        }
+
+        // Track Shift+mousedown position for Shift+Click selection
+        if (e.shiftKey && e.button === 0) {
+            this.shiftClickStart = { x: e.clientX, y: e.clientY };
+        }
+    };
+
+    private onCanvasMouseUp = (e: MouseEvent): void => {
+        if (!this.shiftClickStart || !e.shiftKey || e.button !== 0) {
+            this.shiftClickStart = null;
+            return;
+        }
+
+        // Only handle as click if mouse didn't move much (not a drag)
+        const dist = Math.sqrt(
+            (e.clientX - this.shiftClickStart.x) ** 2 + (e.clientY - this.shiftClickStart.y) ** 2,
+        );
+        this.shiftClickStart = null;
+        if (dist > 5) return;
+
+        const { onToggleObjectSelection, annotations } = this.props;
+
+        // Use elementFromPoint to find the shape under cursor
+        const target = document.elementFromPoint(e.clientX, e.clientY);
+        if (!target) return;
+
+        const shapeEl = (target as Element).closest('[data-z-order]');
+        if (!shapeEl) return;
+
+        const idMatch = shapeEl.id?.match(/^cvat_canvas_shape_(\d+)$/);
+        if (!idMatch) return;
+
+        const clickedClientID = parseInt(idMatch[1], 10);
+
+        // Find the top-level state (for skeleton elements, use parentID)
+        const clickedState = annotations.find((s: any) => s.clientID === clickedClientID);
+        if (clickedState) {
+            onToggleObjectSelection(clickedClientID);
+        } else {
+            // It might be a skeleton element, find parent
+            for (const ann of annotations) {
+                if (ann.elements?.some((el: any) => el.clientID === clickedClientID)) {
+                    onToggleObjectSelection(ann.clientID);
+                    break;
+                }
             }
         }
     };
@@ -806,6 +919,13 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
 
     private onCanvasShapeClicked = (e: any): void => {
         const { clientID, parentID } = e.detail.state;
+        const { shiftKey } = e.detail;
+
+        // Shift+Click selection is handled by onCanvasMouseUp to avoid double-toggle
+        if (shiftKey) {
+            return;
+        }
+
         let sidebarItem = null;
         if (Number.isInteger(parentID)) {
             sidebarItem = window.document.getElementById(`cvat-objects-sidebar-state-item-element-${clientID}`);
@@ -816,6 +936,23 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         if (sidebarItem) {
             sidebarItem.scrollIntoView();
         }
+    };
+
+    private onCanvasMultiEdited = (event: any): void => {
+        const { onUpdateMultipleAnnotations } = this.props;
+        const { edits } = event.detail;
+        const statesToUpdate = edits.map((edit: { state: any; points: number[] }) => {
+            const updatedState = edit.state;
+            updatedState.points = edit.points;
+            return updatedState;
+        });
+        onUpdateMultipleAnnotations(statesToUpdate);
+    };
+
+    private onCanvasMultiSelected = (event: any): void => {
+        const { onSelectObjects } = this.props;
+        const { clientIDs } = event.detail;
+        onSelectObjects(clientIDs);
     };
 
     private onCanvasShapeDeactivated = (e: any): void => {
@@ -836,6 +973,11 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         } = this.props;
 
         if (![Workspace.STANDARD, Workspace.REVIEW, Workspace.SINGLE_SHAPE].includes(workspace)) {
+            return;
+        }
+
+        // When Shift is held, don't auto-activate objects (user is selecting)
+        if (event.detail.shiftKey) {
             return;
         }
 
@@ -1068,6 +1210,7 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         );
 
         canvasInstance.html().addEventListener('mousedown', this.onCanvasMouseDown);
+        canvasInstance.html().addEventListener('mouseup', this.onCanvasMouseUp as EventListener);
         canvasInstance.html().addEventListener('click', this.onCanvasClicked);
         canvasInstance.html().addEventListener('canvas.editstart', this.onCanvasEditStart);
         canvasInstance.html().addEventListener('canvas.edited', this.onCanvasEditDone);
@@ -1094,6 +1237,9 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         canvasInstance.html().addEventListener('canvas.joined', this.onCanvasObjectsJoined);
         canvasInstance.html().addEventListener('canvas.regionselected', this.onCanvasPositionSelected);
         canvasInstance.html().addEventListener('canvas.splitted', this.onCanvasTrackSplitted);
+
+        canvasInstance.html().addEventListener('canvas.multiedited', this.onCanvasMultiEdited);
+        canvasInstance.html().addEventListener('canvas.multiselected', this.onCanvasMultiSelected);
 
         canvasInstance.html().addEventListener('canvas.error', this.onCanvasErrorOccurrence);
         canvasInstance.html().addEventListener('canvas.message', this.onCanvasMessage as EventListener);

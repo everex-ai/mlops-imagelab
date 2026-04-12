@@ -12,7 +12,6 @@ import { CVATMenuEditLabel } from '../common/cvat-menu-edit-label';
 interface MenuItemsData {
     taskId: number;
     projectId: number | null;
-    isAutomaticAnnotationEnabled: boolean;
     isConsensusEnabled: boolean;
     isMergingConsensusEnabled: boolean;
     pluginActions: ReturnType<typeof usePlugins>;
@@ -21,7 +20,6 @@ interface MenuItemsData {
     onUploadAnnotations: () => void;
     onExportDataset: () => void;
     onBackupTask: () => void;
-    onRunAutoAnnotation: (() => void) | null;
     onMoveTaskToProject: () => void;
     onDeleteTask: () => void;
     startEditField: (key: string) => void;
@@ -37,7 +35,6 @@ export default function TaskActionsItems(menuItemsData: MenuItemsData, taskMenuP
         selectedIds,
         projectId,
         pluginActions,
-        isAutomaticAnnotationEnabled,
         isConsensusEnabled,
         isMergingConsensusEnabled,
         onMergeConsensusJobs,
@@ -45,7 +42,6 @@ export default function TaskActionsItems(menuItemsData: MenuItemsData, taskMenuP
         onExportDataset,
         onOpenBugTracker,
         onBackupTask,
-        onRunAutoAnnotation,
         onMoveTaskToProject,
         onDeleteTask,
     } = menuItemsData;
@@ -77,13 +73,6 @@ export default function TaskActionsItems(menuItemsData: MenuItemsData, taskMenuP
             disabled: isDisabled('open_bug_tracker'),
         }, 20]);
     }
-
-    menuItems.push([{
-        disabled: isAutomaticAnnotationEnabled || isDisabled('run_auto_annotation'),
-        key: 'run_auto_annotation',
-        onClick: onRunAutoAnnotation ?? undefined,
-        label: withCount('Automatic annotation', 'run_auto_annotation'),
-    }, 30]);
 
     menuItems.push([{
         key: 'backup_task',

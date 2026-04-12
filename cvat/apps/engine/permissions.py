@@ -968,6 +968,7 @@ class JobPermission(OpenPolicyAgentPermission, DownloadExportedExtension):
 
             data = {
                 "id": self.obj.id,
+                "stage": self.obj.stage,
                 "assignee": { "id": self.obj.assignee_id },
                 'organization': { "id": organization_id },
                 "task": {
@@ -1064,7 +1065,8 @@ class CommentPermission(OpenPolicyAgentPermission):
                     "assignee": { "id": db_issue.job.segment.task.assignee_id }
                 },
                 "job": {
-                    "assignee": { "id": db_issue.job.assignee_id }
+                    "assignee": { "id": db_issue.job.assignee_id },
+                    "stage": db_issue.job.stage
                 },
                 "issue": {
                     "owner": { "id": db_issue.owner_id},
@@ -1154,7 +1156,8 @@ class IssuePermission(OpenPolicyAgentPermission):
                     "assignee": { "id": db_job.segment.task.assignee_id }
                 },
                 "job": {
-                    "assignee": { "id": db_job.assignee_id }
+                    "assignee": { "id": db_job.assignee_id },
+                    "stage": db_job.stage
                 },
                 'organization': {
                     "id": organization_id

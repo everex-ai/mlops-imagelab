@@ -49,8 +49,6 @@ function BulkWrapper(props: Readonly<BulkWrapperProps>): JSX.Element {
                 return state.webhooks.selected;
             case SelectedResourceType.CLOUD_STORAGES:
                 return state.cloudStorages.selected;
-            case SelectedResourceType.MODELS:
-                return state.models.selected;
             default:
                 return [];
         }
@@ -127,7 +125,6 @@ function BulkWrapper(props: Readonly<BulkWrapperProps>): JSX.Element {
                 'cvat-bulk-wrapper',
                 'cvat-cloud-storages-list-row',
                 'cvat-jobs-list-row',
-                'cvat-models-list-row',
                 'cvat-projects-list-row',
             ];
             const hasResetClass = resetClasses.some((cls) => target.classList.contains(cls));

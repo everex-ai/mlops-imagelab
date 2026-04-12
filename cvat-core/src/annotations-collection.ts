@@ -68,6 +68,8 @@ export default class Collection {
         dimension: DimensionType;
         framesInfo: BasicInjection['framesInfo'];
         jobType: JobType;
+        jobId?: number;
+        taskId?: number;
     }) {
         this.stopFrame = data.stopFrame;
 
@@ -102,6 +104,8 @@ export default class Collection {
             nextClientID: () => ++config.globalObjectsCounter,
             getMasksOnFrame: (frame: number) => (this.shapes[frame] as MaskShape[])
                 .filter((object) => object instanceof MaskShape),
+            jobId: data.jobId,
+            taskId: data.taskId,
         };
     }
 
@@ -1025,6 +1029,109 @@ export default class Collection {
         }
 
         return new Statistics(labels, total);
+    }
+
+    public batchRemove(objectStates: ObjectState[], force: boolean, frame: number): boolean {
+        const objects = objectStates.map((state) => {
+            const obj = this.objects[state.clientID];
+            if (!obj) {
+                throw new ArgumentError(`Object with clientID ${state.clientID} not found`);
+            }
+            return obj;
+        });
+
+        // Check locks
+        for (const obj of objects) {
+            if (obj.lock && !force) {
+                throw new ArgumentError('Cannot remove locked objects without force flag');
+            }
+        }
+
+        // Backup removed state for undo
+        const prevRemoved = objects.map((obj) => obj.removed);
+
+        // Remove all
+        for (const obj of objects) {
+            obj.removed = true;
+        }
+
+        // Single history entry for batch undo
+        this.history.do(
+            HistoryActions.REMOVED_OBJECT,
+            () => {
+                // Undo: restore previous state
+                objects.forEach((obj, idx) => {
+                    obj.removed = prevRemoved[idx];
+                    obj.updated = Date.now();
+                });
+            },
+            () => {
+                // Redo: remove again
+                for (const obj of objects) {
+                    obj.removed = true;
+                    obj.updated = Date.now();
+                }
+            },
+            objects.map((obj) => obj.clientID),
+            frame,
+        );
+
+        return true;
+    }
+
+    public batchUpdatePoints(updates: { clientID: number; points: number[]; frame: number }[]): void {
+        const objects = updates.map((u) => {
+            const obj = this.objects[u.clientID];
+            if (!obj) {
+                throw new ArgumentError(`Object with clientID ${u.clientID} not found`);
+            }
+            return { obj, ...u };
+        });
+
+        // Backup current points for undo
+        const undoData = objects.map(({ obj }) => ({
+            clientID: obj.clientID,
+            points: [...(obj as Shape).points],
+        }));
+
+        // Apply new points
+        for (const { obj, points } of objects) {
+            (obj as Shape).points = points;
+            obj.updated = Date.now();
+        }
+
+        // Collect redo data
+        const redoData = objects.map(({ obj }) => ({
+            clientID: obj.clientID,
+            points: [...(obj as Shape).points],
+        }));
+
+        // Single history entry for batch undo
+        this.history.do(
+            HistoryActions.CHANGED_POINTS,
+            () => {
+                // Undo
+                for (const data of undoData) {
+                    const obj = this.objects[data.clientID];
+                    if (obj) {
+                        (obj as Shape).points = data.points;
+                        obj.updated = Date.now();
+                    }
+                }
+            },
+            () => {
+                // Redo
+                for (const data of redoData) {
+                    const obj = this.objects[data.clientID];
+                    if (obj) {
+                        (obj as Shape).points = data.points;
+                        obj.updated = Date.now();
+                    }
+                }
+            },
+            objects.map((o) => o.clientID),
+            updates[0].frame,
+        );
     }
 
     public put(objectStates: ObjectState[]): number[] {

@@ -37,6 +37,31 @@
     }
 }
 
+.cvat-recent-filter-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+
+    .cvat-recent-filter-item-text {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        margin-right: $grid-unit-size;
+    }
+
+    .cvat-recent-filter-item-remove {
+        font-size: 12px;
+        color: rgba(0, 0, 0, 45%);
+        flex-shrink: 0;
+
+        &:hover {
+            color: rgba(0, 0, 0, 85%);
+        }
+    }
+}
+
 .cvat-resource-page-filters-builder {
     background: white;
     padding: $grid-unit-size;

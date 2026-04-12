@@ -566,7 +566,7 @@ def _create_task_manifest_from_cloud_data(
             k: {'related_images': related_images[k] }
             for k in related_images
         },
-        DIM_3D=(dimension == models.DimensionType.DIM_3D),
+        DIM_3D=False,  # 3D dimension no longer supported
         stop=len(sorted_media) - 1,
     )
     manifest.create()
@@ -925,20 +925,8 @@ def create_thread(
             f"same as other tasks in project ({db_task.project.tasks.first().dimension})"
         )
 
+    # 3D tasks are rejected earlier by ValidateDimension.detect_dimension_for_paths()
     db_task.dimension = validate_dimension.dimension
-
-    if validate_dimension.dimension == models.DimensionType.DIM_3D:
-        extractor.reconcile(
-            source_files=[
-                # We always work with .pcd files instead of .bin
-                (os.path.splitext(p)[0] + ".pcd") if p.endswith(".bin") else p
-                for p in extractor.absolute_source_paths
-            ],
-            step=db_data.get_frame_step(),
-            start=db_data.start_frame,
-            stop=data['stop_frame'],
-            dimension=validate_dimension.dimension,
-        )
 
     related_images = {}
     if isinstance(extractor, MEDIA_TYPES['image']['extractor']):
@@ -1134,7 +1122,7 @@ def create_thread(
                         for k in related_images
                     },
                     data_dir=upload_dir,
-                    DIM_3D=(db_task.dimension == models.DimensionType.DIM_3D),
+                    DIM_3D=False,  # 3D dimension no longer supported
                 )
                 manifest.create()
             else:

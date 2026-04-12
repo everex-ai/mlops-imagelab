@@ -18,12 +18,12 @@ import data.organizations
 #                 "id": <num>
 #             },
 #             "user": {
-#                 "role": <"owner"|"maintainer"|"supervisor"|"worker"> or null
+#                 "role": <"owner"|"maintainer"|"supervisor"|"reviewer"|"worker"> or null
 #             }
 #         } or null,
 #     },
 #     "resource": {
-#         "role": <"owner"|"maintainer"|"supervisor"|"worker">,
+#         "role": <"owner"|"maintainer"|"supervisor"|"reviewer"|"worker">,
 #         "is_active": <true|false>,
 #         "user": { "id": <num> },
 #         "organization": { "id": <num> }

@@ -13,7 +13,6 @@ import { ThunkDispatch, ThunkAction } from 'utils/redux';
 
 import { ValidationMode } from 'components/create-task-page/quality-configuration-form';
 import { ResourceUpdateTypes } from 'utils/enums';
-import { getInferenceStatusAsync } from './models-actions';
 import { updateRequestProgress } from './requests-actions';
 
 const cvat = getCore();
@@ -94,7 +93,6 @@ export function getTasksAsync(
 
         if (isRequestRelevant()) {
             const array = Array.from(result);
-            dispatch(getInferenceStatusAsync());
             dispatch(getTasksSuccess(array, result.count));
         }
     };

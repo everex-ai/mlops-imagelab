@@ -8,7 +8,6 @@ import { AnyAction } from 'redux';
 import { ServerError, RequestError, StorageLocation } from 'cvat-core-wrapper';
 import { AuthActionTypes } from 'actions/auth-actions';
 import { FormatsActionTypes } from 'actions/formats-actions';
-import { ModelsActionTypes } from 'actions/models-actions';
 import { TasksActionTypes } from 'actions/tasks-actions';
 import { ProjectsActionTypes } from 'actions/projects-actions';
 import { AboutActionTypes } from 'actions/about-actions';
@@ -97,15 +96,6 @@ const defaultState: NotificationsState = {
         },
         about: {
             fetching: null,
-        },
-        models: {
-            starting: null,
-            fetching: null,
-            canceling: null,
-            metaFetching: null,
-            inferenceStatusFetching: null,
-            creating: null,
-            deleting: null,
         },
         annotation: {
             saving: null,
@@ -209,9 +199,6 @@ const defaultState: NotificationsState = {
             importingDone: null,
             movingDone: null,
             mergingConsensusDone: null,
-        },
-        models: {
-            inferenceDone: null,
         },
         auth: {
             changePasswordDone: null,
@@ -956,115 +943,6 @@ export default function (state = defaultState, action: AnyAction): Notifications
                         ...state.errors.about,
                         fetching: {
                             message: 'Could not get info about the server',
-                            reason: action.payload.error,
-                            shouldLog: shouldLog(action.payload.error),
-                        },
-                    },
-                },
-            };
-        }
-        case ModelsActionTypes.GET_INFERENCE_STATUS_SUCCESS: {
-            if (action.payload.activeInference.status === 'finished') {
-                const { taskID } = action.payload;
-                return {
-                    ...state,
-                    messages: {
-                        ...state.messages,
-                        models: {
-                            ...state.messages.models,
-                            inferenceDone: {
-                                message: 'Automatic annotation accomplished for the ' +
-                                `[task #${taskID}](/tasks/${taskID})`,
-                            },
-                        },
-                    },
-                };
-            }
-
-            return {
-                ...state,
-            };
-        }
-        case ModelsActionTypes.FETCH_META_FAILED: {
-            if (action.payload.error.code === 403) {
-                return state;
-            }
-
-            return {
-                ...state,
-                errors: {
-                    ...state.errors,
-                    models: {
-                        ...state.errors.models,
-                        metaFetching: {
-                            message: 'Could not fetch models meta information',
-                            reason: action.payload.error,
-                            shouldLog: shouldLog(action.payload.error),
-                        },
-                    },
-                },
-            };
-        }
-        case ModelsActionTypes.GET_INFERENCE_STATUS_FAILED: {
-            const { taskID } = action.payload;
-            return {
-                ...state,
-                errors: {
-                    ...state.errors,
-                    models: {
-                        ...state.errors.models,
-                        inferenceStatusFetching: {
-                            message: `Fetching inference status for the [task #${taskID}](/tasks/${taskID})`,
-                            reason: action.payload.error,
-                            shouldLog: shouldLog(action.payload.error),
-                        },
-                    },
-                },
-            };
-        }
-        case ModelsActionTypes.GET_MODELS_FAILED: {
-            return {
-                ...state,
-                errors: {
-                    ...state.errors,
-                    models: {
-                        ...state.errors.models,
-                        fetching: {
-                            message: 'Could not get models from the server',
-                            reason: action.payload.error,
-                            shouldLog: shouldLog(action.payload.error),
-                        },
-                    },
-                },
-            };
-        }
-        case ModelsActionTypes.START_INFERENCE_FAILED: {
-            const { taskID } = action.payload;
-            return {
-                ...state,
-                errors: {
-                    ...state.errors,
-                    models: {
-                        ...state.errors.models,
-                        starting: {
-                            message: `Could not infer model for the [task #${taskID}](/tasks/${taskID})`,
-                            reason: action.payload.error,
-                            shouldLog: shouldLog(action.payload.error),
-                        },
-                    },
-                },
-            };
-        }
-        case ModelsActionTypes.CANCEL_INFERENCE_FAILED: {
-            const { taskID } = action.payload;
-            return {
-                ...state,
-                errors: {
-                    ...state.errors,
-                    models: {
-                        ...state.errors.models,
-                        canceling: {
-                            message: `Could not cancel model inference for the [task #${taskID}](/tasks/${taskID})`,
                             reason: action.payload.error,
                             shouldLog: shouldLog(action.payload.error),
                         },
