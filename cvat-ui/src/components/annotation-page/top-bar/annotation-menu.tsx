@@ -224,13 +224,27 @@ function AnnotationMenuComponent(): JSX.Element {
         }],
     }, 60]);
 
+    const isReviewerOnly = useSelector((state: CombinedState) => {
+        const groups = state.auth.user?.groups ?? [];
+        return groups.includes('reviewer') && !groups.includes('admin');
+    });
+
     menuItems.push([{
         key: Actions.FINISH_JOB,
         label: 'Finish the job',
         onClick: () => {
             Modal.confirm({
                 title: 'Would you like to finish the job?',
-                content: 'It will save annotations and set the job state to "completed"',
+                content: (
+                    <div>
+                        <span>It will save annotations and set the job state to &quot;completed&quot;</span>
+                        {isReviewerOnly && (
+                            <p style={{ color: 'red', marginTop: 8, marginBottom: 0 }}>
+                                Reviewer accounts do not save annotation data.
+                            </p>
+                        )}
+                    </div>
+                ),
                 okText: 'Continue',
                 cancelText: 'Cancel',
                 className: 'cvat-modal-content-finish-job',

@@ -1240,8 +1240,12 @@ export function finishCurrentJobAsync(onSuccess: () => void): ThunkAction {
         const state = getState();
         const beforeCallbacks = state.plugins.callbacks.annotationPage.header.menu.beforeJobFinish;
         const { jobInstance } = receiveAnnotationsParameters();
+        const groups = state.auth.user?.groups ?? [];
+        const isReviewerOnly = groups.includes('reviewer') && !groups.includes('admin');
 
-        await dispatch(saveAnnotationsAsync());
+        if (!isReviewerOnly) {
+            await dispatch(saveAnnotationsAsync());
+        }
 
         for await (const callback of beforeCallbacks) {
             const result = await callback();
