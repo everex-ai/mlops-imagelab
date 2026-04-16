@@ -49,6 +49,9 @@ allow if {
 filter := [] if { # Django Q object to filter list of entries
     utils.is_admin
     utils.is_sandbox
+} else := [] if {
+    utils.is_sandbox
+    utils.is_reviewer
 } else := qobject if {
     utils.is_sandbox
     qobject := [ {"id": input.auth.user.id} ]
@@ -60,6 +63,12 @@ filter := [] if { # Django Q object to filter list of entries
 allow if {
     input.scope == utils.VIEW
     input.resource.id == input.auth.user.id
+}
+
+allow if {
+    input.scope == utils.VIEW
+    utils.is_sandbox
+    utils.is_reviewer
 }
 
 allow if {
