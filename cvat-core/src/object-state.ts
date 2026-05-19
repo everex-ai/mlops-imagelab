@@ -15,6 +15,7 @@ interface UpdateFlags {
     attributes: boolean;
     description: boolean;
     points: boolean;
+    bbox: boolean;
     rotation: boolean;
     outside: boolean;
     occluded: boolean;

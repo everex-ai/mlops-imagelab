@@ -1006,10 +1006,19 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         const {
             activeControl, onUpdateAnnotations, updateActiveControl, onUpdateEditedObject,
         } = this.props;
-        const { state, points, rotation } = event.detail;
+        const {
+            state, points, rotation, bbox,
+        } = event.detail;
+        // Skeleton edits can carry an optional bbox alongside points/rotation.
+        // The canvas signals: rotation handle => rotation update; corner/edge
+        // resize on a skeleton => bbox-only; line drag or keypoint move =>
+        // points (and the bbox that translated or soft-snapped with them).
+        if (state.shapeType === 'skeleton' && Array.isArray(bbox) && bbox.length === 4) {
+            state.bbox = bbox;
+        }
         if (state.rotation !== rotation) {
             state.rotation = rotation;
-        } else {
+        } else if (Array.isArray(points) && points.length > 0) {
             state.points = points;
         }
 

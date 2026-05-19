@@ -2321,9 +2321,43 @@ export class SkeletonShape extends Shape {
 
         // Persist parent skeleton bbox before delegating to base Shape.save.
         // Reset the flag so base Shape.save does not see it (we own it here).
+        let nextBbox: number[] | null = null;
         if ((data.updateFlags as any).bbox) {
-            this.saveBbox(data.bbox as number[], frame);
+            nextBbox = [...(data.bbox as number[])];
             (data.updateFlags as any).bbox = false;
+        }
+
+        // Soft-snap: if keypoints just moved and the current bbox no longer
+        // contains every visible/occluded keypoint, expand the bbox tightly
+        // (0px margin) to absorb the new positions. Honors the rule that the
+        // bbox is a first-class annotator-drawn entity but never disconnects
+        // from the keypoints it surrounds.
+        const shouldSoftSnap = updatedPoints.length > 0 || nextBbox !== null;
+        if (shouldSoftSnap) {
+            const baseBbox = nextBbox ?? (this.bbox && this.bbox.length === 4 ? [...this.bbox] : null);
+            if (baseBbox) {
+                let [xtl, ytl, xbr, ybr] = baseBbox;
+                let touched = false;
+                for (const element of this.elements) {
+                    if (element.outside) continue;
+                    const pts = element.points;
+                    for (let i = 0; i < pts.length; i += 2) {
+                        const px = pts[i];
+                        const py = pts[i + 1];
+                        if (px < xtl) { xtl = px; touched = true; }
+                        if (py < ytl) { ytl = py; touched = true; }
+                        if (px > xbr) { xbr = px; touched = true; }
+                        if (py > ybr) { ybr = py; touched = true; }
+                    }
+                }
+                if (touched || nextBbox !== null) {
+                    nextBbox = [xtl, ytl, xbr, ybr];
+                }
+            }
+        }
+
+        if (nextBbox !== null) {
+            this.saveBbox(nextBbox, frame);
         }
 
         const result = Shape.prototype.save.call(this, frame, data);
@@ -3377,9 +3411,47 @@ export class SkeletonTrack extends Track {
 
         // Persist skeleton bbox at this frame (implicit keyframe semantics)
         // before delegating to base Track.save.
+        let nextBbox: number[] | null = null;
         if ((data.updateFlags as any).bbox) {
-            this.saveBbox(data.bbox as number[], frame);
+            nextBbox = [...(data.bbox as number[])];
             (data.updateFlags as any).bbox = false;
+        }
+
+        // Soft-snap: keep the per-frame bbox tight around visible/occluded
+        // keypoints after a keypoint edit. See SkeletonShape.save for the
+        // matching rationale.
+        const shouldSoftSnap = updatedPoints.length > 0 || nextBbox !== null;
+        if (shouldSoftSnap) {
+            const storedShape = this.shapes[frame];
+            const baseBbox = nextBbox ??
+                (storedShape && Array.isArray((storedShape as any).bbox) &&
+                    (storedShape as any).bbox.length === 4 ?
+                    [...(storedShape as any).bbox as number[]] :
+                    null);
+            if (baseBbox) {
+                let [xtl, ytl, xbr, ybr] = baseBbox;
+                let touched = false;
+                for (const element of this.elements) {
+                    const elementPosition = element.get(frame);
+                    if (elementPosition.outside) continue;
+                    const pts = elementPosition.points as number[];
+                    for (let i = 0; i < pts.length; i += 2) {
+                        const px = pts[i];
+                        const py = pts[i + 1];
+                        if (px < xtl) { xtl = px; touched = true; }
+                        if (py < ytl) { ytl = py; touched = true; }
+                        if (px > xbr) { xbr = px; touched = true; }
+                        if (py > ybr) { ybr = py; touched = true; }
+                    }
+                }
+                if (touched || nextBbox !== null) {
+                    nextBbox = [xtl, ytl, xbr, ybr];
+                }
+            }
+        }
+
+        if (nextBbox !== null) {
+            this.saveBbox(nextBbox, frame);
         }
 
         const result = Track.prototype.save.call(this, frame, data);
