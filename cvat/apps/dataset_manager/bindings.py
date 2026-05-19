@@ -1917,10 +1917,12 @@ class CvatToDmAnnotationConverter:
 
             dm_attr["keyframe"] = any([element.attributes.get("keyframe") for element in elements])
 
-            # Carry skeleton bbox through Datumaro via a reserved-prefix attribute.
-            # The prefix `__cvat_*` is filtered out of attribute comparison by
-            # quality_control and consensus pipelines so transport metadata does
-            # not produce spurious MISMATCHING_ATTRIBUTES conflicts.
+            # Carry the annotator-drawn bbox via a reserved-prefix transport
+            # attribute. The COCO Keypoints exporter post-processes the
+            # generated JSON to rewrite each annotation's top-level `bbox`
+            # from this value and then strip the attribute, so it never
+            # leaks into the final dataset. The same prefix is filtered out
+            # by quality_control/consensus attribute comparison.
             skeleton_bbox = list(getattr(shape, "bbox", None) or [])
             if len(skeleton_bbox) == 4:
                 import json
@@ -1939,11 +1941,12 @@ class CvatToDmAnnotationConverter:
         if anno:
             results.append(anno)
 
-        # For skeletons with a Normal-state bbox, also emit a companion dm.Bbox
-        # in the same group so the COCO keypoints exporter (and other adapters
-        # that consume bbox annotations) can write a `person bbox` entry.
-        # Skip emission for the degenerate state [0,0,0,0] so we don't pollute
-        # downstream outputs with a meaningless box.
+        # For skeletons with a Normal-state bbox, emit a companion dm.Bbox in
+        # the same group so COCO/other adapters can write a person bbox. The
+        # transport-only `__cvat_bbox` attribute is intentionally NOT placed on
+        # either annotation here — it is leak-prone and the companion dm.Bbox
+        # is sufficient for adapters that honor it.
+        # Skip emission for the degenerate state [0,0,0,0].
         if shape.type == ShapeType.SKELETON:
             skeleton_bbox = list(getattr(shape, "bbox", None) or [])
             if (
@@ -1952,9 +1955,16 @@ class CvatToDmAnnotationConverter:
                 and skeleton_bbox != [0.0, 0.0, 0.0, 0.0]
             ):
                 xtl, ytl, xbr, ybr = skeleton_bbox
+                # Strip user/runtime attributes from the companion bbox so we
+                # don't double-write them. Keep only the bare structural keys
+                # the adapter needs.
+                bbox_attr = {}
+                for transient_key in ("track_id", "keyframe", "occluded"):
+                    if transient_key in dm_attr:
+                        bbox_attr[transient_key] = dm_attr[transient_key]
                 results.append(dm.Bbox(
                     xtl, ytl, xbr - xtl, ybr - ytl,
-                    label=dm_label, attributes=dm_attr, group=dm_group,
+                    label=dm_label, attributes=bbox_attr, group=dm_group,
                     z_order=shape.z_order,
                 ))
 
@@ -2246,6 +2256,7 @@ def import_dm_annotations(dm_dataset: dm.Dataset, instance_data: ProjectData | C
                             source=source,
                             rotation=rotation,
                             attributes=attributes,
+                            bbox=skeleton_bbox if ann.type == dm.AnnotationType.skeleton else (),
                         )
 
                         tracks[track_id]['shapes'].append(track)

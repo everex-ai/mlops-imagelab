@@ -2013,10 +2013,39 @@ export class SkeletonShape extends Shape {
         this.points = [];
         // bbox is the annotator-drawn object boundary. Degenerate state
         // [0,0,0,0] is allowed for skeletons whose elements are all outside;
-        // it normalizes on the next user edit.
-        this.bbox = Array.isArray(data.bbox) && data.bbox.length === 4 ?
-            [...data.bbox] :
-            [0, 0, 0, 0];
+        // it normalizes on the next user edit. When the server sends no bbox
+        // (or the legacy [0,0,0,0] fallback) but the element keypoints are
+        // present, derive a sensible starting bbox from the keypoints plus a
+        // small visual margin so first-edit soft-snap does not collapse the
+        // bbox onto the keypoint corner.
+        const SKELETON_BBOX_FALLBACK_MARGIN = 20;
+        const incoming = Array.isArray(data.bbox) && data.bbox.length === 4 ?
+            data.bbox :
+            null;
+        const incomingIsDegenerate = !incoming ||
+            (incoming[0] === 0 && incoming[1] === 0 && incoming[2] === 0 && incoming[3] === 0);
+        if (incoming && !incomingIsDegenerate) {
+            this.bbox = [...incoming];
+        } else {
+            const xs: number[] = [];
+            const ys: number[] = [];
+            for (const element of data.elements) {
+                if (element.outside) continue;
+                const pts = element.points || [];
+                for (let i = 0; i < pts.length; i += 2) {
+                    xs.push(pts[i]);
+                    if (i + 1 < pts.length) ys.push(pts[i + 1]);
+                }
+            }
+            this.bbox = xs.length && ys.length ?
+                [
+                    Math.min(...xs) - SKELETON_BBOX_FALLBACK_MARGIN,
+                    Math.min(...ys) - SKELETON_BBOX_FALLBACK_MARGIN,
+                    Math.max(...xs) + SKELETON_BBOX_FALLBACK_MARGIN,
+                    Math.max(...ys) + SKELETON_BBOX_FALLBACK_MARGIN,
+                ] :
+                [0, 0, 0, 0];
+        }
         this.readOnlyFields = ['points', 'label', 'occluded'];
 
         const [cx, cy] = data.elements.reduce((acc, element, idx) => {
@@ -2228,6 +2257,12 @@ export class SkeletonShape extends Shape {
 
         this.bbox = redoBbox;
         this.source = redoSource;
+        // Bump updated immediately. The history redo/undo callbacks also bump
+        // it, but they don't run on the original save path — the canvas diff
+        // logic (drawnState.updated !== state.updated) relies on this so the
+        // wrapping rect gets re-drawn after a soft-snap or programmatic bbox
+        // change.
+        this.updated = Date.now();
 
         this.history.do(
             HistoryActions.CHANGED_POINTS,
@@ -2327,32 +2362,32 @@ export class SkeletonShape extends Shape {
             (data.updateFlags as any).bbox = false;
         }
 
-        // Soft-snap: if keypoints just moved and the current bbox no longer
-        // contains every visible/occluded keypoint, expand the bbox tightly
-        // (0px margin) to absorb the new positions. Honors the rule that the
-        // bbox is a first-class annotator-drawn entity but never disconnects
-        // from the keypoints it surrounds.
-        const shouldSoftSnap = updatedPoints.length > 0 || nextBbox !== null;
-        if (shouldSoftSnap) {
-            const baseBbox = nextBbox ?? (this.bbox && this.bbox.length === 4 ? [...this.bbox] : null);
-            if (baseBbox) {
-                let [xtl, ytl, xbr, ybr] = baseBbox;
-                let touched = false;
-                for (const element of this.elements) {
-                    if (element.outside) continue;
-                    const pts = element.points;
-                    for (let i = 0; i < pts.length; i += 2) {
-                        const px = pts[i];
-                        const py = pts[i + 1];
-                        if (px < xtl) { xtl = px; touched = true; }
-                        if (py < ytl) { ytl = py; touched = true; }
-                        if (px > xbr) { xbr = px; touched = true; }
-                        if (py > ybr) { ybr = py; touched = true; }
-                    }
+        // Soft-snap: after any keypoint or bbox change, recompute the bbox so
+        // that it always contains every visible/occluded keypoint. Runs
+        // unconditionally because the redux store creates fresh ObjectStates
+        // for parent and children on every fetch, so we can't rely on
+        // `data.elements[i].updateFlags.points` to flag what moved — the
+        // canonical truth is `this.elements[i].points` (internal Shape
+        // instances).
+        const baseBbox = nextBbox ??
+            (this.bbox && this.bbox.length === 4 ? [...this.bbox] : null);
+        if (baseBbox) {
+            let [xtl, ytl, xbr, ybr] = baseBbox;
+            let touched = false;
+            for (const element of this.elements) {
+                if (element.outside) continue;
+                const pts = element.points;
+                for (let i = 0; i < pts.length; i += 2) {
+                    const px = pts[i];
+                    const py = pts[i + 1];
+                    if (px < xtl) { xtl = px; touched = true; }
+                    if (py < ytl) { ytl = py; touched = true; }
+                    if (px > xbr) { xbr = px; touched = true; }
+                    if (py > ybr) { ybr = py; touched = true; }
                 }
-                if (touched || nextBbox !== null) {
-                    nextBbox = [xtl, ytl, xbr, ybr];
-                }
+            }
+            if (touched || nextBbox !== null) {
+                nextBbox = [xtl, ytl, xbr, ybr];
             }
         }
 
@@ -3163,6 +3198,10 @@ export class SkeletonTrack extends Track {
 
         this.shapes[frame] = redoShape;
         this.source = redoSource;
+        // See SkeletonShape.saveBbox — bump updated immediately so the canvas
+        // redraw diff picks up the new bbox without waiting for a separate
+        // user action on the wrapping rect.
+        this.updated = Date.now();
 
         this.history.do(
             HistoryActions.CHANGED_POINTS,
@@ -3418,33 +3457,57 @@ export class SkeletonTrack extends Track {
         }
 
         // Soft-snap: keep the per-frame bbox tight around visible/occluded
-        // keypoints after a keypoint edit. See SkeletonShape.save for the
-        // matching rationale.
-        const shouldSoftSnap = updatedPoints.length > 0 || nextBbox !== null;
-        if (shouldSoftSnap) {
-            const storedShape = this.shapes[frame];
-            const baseBbox = nextBbox ??
-                (storedShape && Array.isArray((storedShape as any).bbox) &&
-                    (storedShape as any).bbox.length === 4 ?
-                    [...(storedShape as any).bbox as number[]] :
-                    null);
-            if (baseBbox) {
-                let [xtl, ytl, xbr, ybr] = baseBbox;
-                let touched = false;
-                for (const element of this.elements) {
-                    const elementPosition = element.get(frame);
-                    if (elementPosition.outside) continue;
-                    const pts = elementPosition.points as number[];
-                    for (let i = 0; i < pts.length; i += 2) {
-                        const px = pts[i];
-                        const py = pts[i + 1];
-                        if (px < xtl) { xtl = px; touched = true; }
-                        if (py < ytl) { ytl = py; touched = true; }
-                        if (px > xbr) { xbr = px; touched = true; }
-                        if (py > ybr) { ybr = py; touched = true; }
-                    }
+        // keypoints after any keypoint or bbox change. Runs unconditionally
+        // (same rationale as SkeletonShape.save): redux store creates fresh
+        // ObjectStates on every fetch, so we cannot rely on
+        // `data.elements[i].updateFlags.points` to flag what moved — the
+        // canonical truth is `this.elements[i].get(frame).points`.
+        //
+        // When the stored shape at this frame has no bbox (or the legacy
+        // [0,0,0,0] fallback), seed the soft-snap from the keypoints + a small
+        // visual margin so the first edit does not collapse the bbox onto the
+        // keypoint corner. Matches SkeletonShape constructor's fallback.
+        const SKELETON_TRACK_BBOX_FALLBACK_MARGIN = 20;
+        const storedShape = this.shapes[frame];
+        const storedBbox = storedShape && Array.isArray((storedShape as any).bbox) &&
+            (storedShape as any).bbox.length === 4 ?
+            [...(storedShape as any).bbox as number[]] :
+            null;
+        const storedIsDegenerate = !storedBbox ||
+            (storedBbox[0] === 0 && storedBbox[1] === 0 &&
+                storedBbox[2] === 0 && storedBbox[3] === 0);
+
+        const seedBbox = nextBbox ?? (storedBbox && !storedIsDegenerate ? storedBbox : null);
+        if (seedBbox || nextBbox !== null || updatedPoints.length > 0 || storedShape) {
+            let xtl = seedBbox ? seedBbox[0] : Number.POSITIVE_INFINITY;
+            let ytl = seedBbox ? seedBbox[1] : Number.POSITIVE_INFINITY;
+            let xbr = seedBbox ? seedBbox[2] : Number.NEGATIVE_INFINITY;
+            let ybr = seedBbox ? seedBbox[3] : Number.NEGATIVE_INFINITY;
+            let touched = !seedBbox; // when seeding from keypoints we must add the margin
+            for (const element of this.elements) {
+                const elementPosition = element.get(frame);
+                if (elementPosition.outside) continue;
+                const pts = elementPosition.points as number[];
+                for (let i = 0; i < pts.length; i += 2) {
+                    const px = pts[i];
+                    const py = pts[i + 1];
+                    if (px < xtl) { xtl = px; touched = true; }
+                    if (py < ytl) { ytl = py; touched = true; }
+                    if (px > xbr) { xbr = px; touched = true; }
+                    if (py > ybr) { ybr = py; touched = true; }
                 }
-                if (touched || nextBbox !== null) {
+            }
+            if (touched && Number.isFinite(xtl) && Number.isFinite(ytl) &&
+                Number.isFinite(xbr) && Number.isFinite(ybr)) {
+                if (!seedBbox) {
+                    // No usable prior bbox — emit a freshly-derived one with margin.
+                    nextBbox = [
+                        xtl - SKELETON_TRACK_BBOX_FALLBACK_MARGIN,
+                        ytl - SKELETON_TRACK_BBOX_FALLBACK_MARGIN,
+                        xbr + SKELETON_TRACK_BBOX_FALLBACK_MARGIN,
+                        ybr + SKELETON_TRACK_BBOX_FALLBACK_MARGIN,
+                    ];
+                } else if (touched || nextBbox !== null) {
                     nextBbox = [xtl, ytl, xbr, ybr];
                 }
             }

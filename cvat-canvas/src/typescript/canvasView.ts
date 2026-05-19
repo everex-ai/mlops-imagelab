@@ -3975,10 +3975,18 @@ export class CanvasViewImpl implements CanvasView, Listener {
         // annotator-drawn value from ObjectState; fall back to keypoint-derived
         // wrapping + SKELETON_RECT_MARGIN only when the state has no usable
         // bbox (legacy data not yet migrated, or pre-server-roundtrip drafts).
+        // state.bbox is stored in image coordinates — convert to canvas
+        // coordinates here because the wrapping rect lives in the same SVG
+        // group as the keypoint circles, which were already translated.
         const stateBbox = (state as any).bbox as number[] | null | undefined;
         if (Array.isArray(stateBbox) && stateBbox.length === 4 &&
             !(stateBbox[0] === 0 && stateBbox[1] === 0 && stateBbox[2] === 0 && stateBbox[3] === 0)) {
-            [xtl, ytl, xbr, ybr] = stateBbox;
+            const [cxtl, cytl] = this.translateToCanvas([stateBbox[0], stateBbox[1]]);
+            const [cxbr, cybr] = this.translateToCanvas([stateBbox[2], stateBbox[3]]);
+            xtl = cxtl;
+            ytl = cytl;
+            xbr = cxbr;
+            ybr = cybr;
         } else {
             // Fallback: derive from element points + legacy margin.
             xtl = xtl || 0;

@@ -644,6 +644,7 @@ class JobAnnotation:
                 "z_order",
                 "rotation",
                 "points",
+                "bbox",
                 "parent",
             )
             .order_by("frame")
@@ -722,6 +723,7 @@ class JobAnnotation:
                 "shape__z_order",
                 "shape__rotation",
                 "shape__points",
+                "shape__bbox",
                 "shape__id",
                 "shape__frame",
                 "shape__outside",
@@ -738,6 +740,7 @@ class JobAnnotation:
                     "shape__occluded",
                     "shape__z_order",
                     "shape__points",
+                    "shape__bbox",
                     "shape__rotation",
                     "shape__id",
                     "shape__frame",

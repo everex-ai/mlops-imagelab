@@ -57,6 +57,65 @@ def _import(src_file: BinaryIO, temp_dir, instance_data, load_data_callback=None
         import_dm_annotations(dataset, instance_data)
 
 
+def _postprocess_coco_keypoints_bbox(temp_dir):
+    """Rewrite the exported person_keypoints*.json so each annotation's
+    top-level COCO `bbox` matches the user-drawn skeleton bbox carried via the
+    `__cvat_bbox` transport attribute, then strip that transport attribute.
+
+    Datumaro's coco_person_keypoints exporter derives `bbox` from keypoint
+    extents when the skeleton has no companion dm.Bbox in the same group.
+    Even when we emit a companion dm.Bbox, group=0 (the common CVAT default)
+    causes the exporter's `find_solitary_points` branch to ignore it. The
+    cleanest cross-version-safe fix is to post-process the JSON after the
+    datumaro export completes.
+    """
+    import glob
+    import json as _json
+
+    for json_path in glob.glob(str(Path(temp_dir) / "annotations" / "*.json")):
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                doc = _json.load(f)
+        except (OSError, ValueError):
+            continue
+
+        annotations = doc.get("annotations")
+        if not isinstance(annotations, list):
+            continue
+
+        changed = False
+        for ann in annotations:
+            attrs = ann.get("attributes")
+            if not isinstance(attrs, dict):
+                continue
+
+            payload = attrs.pop("__cvat_bbox", None)
+            changed = True if "__cvat_bbox" not in attrs else changed
+            if payload is None:
+                continue
+
+            try:
+                parsed = _json.loads(payload) if isinstance(payload, str) else payload
+                fmt = parsed.get("format", "xyxy")
+                values = list(parsed.get("values", []))
+                if len(values) != 4:
+                    continue
+                if fmt == "xywh":
+                    x, y, w, h = values
+                else:
+                    x, y, x2, y2 = values
+                    w, h = x2 - x, y2 - y
+                ann["bbox"] = [float(x), float(y), float(w), float(h)]
+                ann["area"] = float(w) * float(h)
+                changed = True
+            except (TypeError, ValueError, AttributeError):
+                continue
+
+        if changed:
+            with open(json_path, "w", encoding="utf-8") as f:
+                _json.dump(doc, f)
+
+
 @exporter(name="COCO Keypoints", ext="ZIP", version="1.0")
 def _export(dst_file, temp_dir, instance_data, save_images=False):
     with GetCVATDataExtractor(instance_data, include_images=save_images) as extractor:
@@ -66,6 +125,7 @@ def _export(dst_file, temp_dir, instance_data, save_images=False):
             temp_dir, "coco_person_keypoints", save_media=save_images, merge_images=False
         )
 
+    _postprocess_coco_keypoints_bbox(temp_dir)
     make_zip_archive(temp_dir, dst_file)
 
 
