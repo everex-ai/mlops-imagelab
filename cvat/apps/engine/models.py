@@ -1191,6 +1191,7 @@ class Shape(models.Model):
     z_order = models.IntegerField(default=0)
     points = FloatArrayField(default=[])
     rotation = FloatField(default=0)
+    bbox = FloatArrayField(default=[])  # [xtl, ytl, xbr, ybr] for skeleton; empty for other shape types
 
     class Meta:
         abstract = True

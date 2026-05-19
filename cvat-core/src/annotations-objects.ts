@@ -19,7 +19,7 @@ import logger from './logger';
 import { SerializedShape, SerializedTrack, SerializedTag } from './server-response-types';
 import {
     checkNumberOfPoints, attrsAsAnObject, checkShapeArea, mask2Rle, rle2Mask,
-    computeWrappingBox, findAngleDiff, rotatePoint, validateAttributeValue, cropMask,
+    findAngleDiff, rotatePoint, validateAttributeValue, cropMask,
 } from './object-utils';
 
 const defaultGroupColor = '#E0E0E0';
@@ -1999,14 +1999,24 @@ export class CuboidShape extends Shape {
 
 export class SkeletonShape extends Shape {
     public elements: Shape[];
+    public bbox: number[];
 
     constructor(data: SerializedShape, clientID: number, color: string, injection: AnnotationInjection) {
         super(data, clientID, color, injection);
         this.shapeType = ShapeType.SKELETON;
         this.pinned = false;
-        this.rotation = 0;
+        // Skeleton rotation is now a meaningful first-class field. The wrapping
+        // bbox stays axis-aligned and rotation is carried separately, so
+        // element keypoints are NOT mutated when the user rotates the skeleton.
+        // Base Shape constructor already initialized this.rotation from data.
         this.occluded = false;
         this.points = [];
+        // bbox is the annotator-drawn object boundary. Degenerate state
+        // [0,0,0,0] is allowed for skeletons whose elements are all outside;
+        // it normalizes on the next user edit.
+        this.bbox = Array.isArray(data.bbox) && data.bbox.length === 4 ?
+            [...data.bbox] :
+            [0, 0, 0, 0];
         this.readOnlyFields = ['points', 'label', 'occluded'];
 
         const [cx, cy] = data.elements.reduce((acc, element, idx) => {
@@ -2097,7 +2107,8 @@ export class SkeletonShape extends Shape {
             outside: elements.every((el) => el.outside),
             z_order: this.zOrder,
             points: [],
-            rotation: 0,
+            bbox: [...this.bbox],
+            rotation: this.rotation,
             attributes: Object.keys(this.attributes).reduce((attributeAccumulator, attrId) => {
                 attributeAccumulator.push({
                     spec_id: +attrId,
@@ -2120,7 +2131,7 @@ export class SkeletonShape extends Shape {
         return result;
     }
 
-    public get(frame): Omit<Required<SerializedData>, 'parentID' | 'keyframe' | 'keyframes'> {
+    public get(frame): Omit<Required<SerializedData>, 'parentID' | 'keyframe' | 'keyframes'> & { bbox: number[] } {
         if (frame !== this.frame) {
             throw new ScriptingError('Received frame is not equal to the frame of the shape');
         }
@@ -2139,8 +2150,9 @@ export class SkeletonShape extends Shape {
             clientID: this.clientID,
             serverID: this.serverID,
             points: this.points,
+            bbox: [...this.bbox],
             zOrder: this.zOrder,
-            rotation: 0,
+            rotation: this.rotation,
             attributes: { ...this.attributes },
             descriptions: [...this.descriptions],
             elements,
@@ -2175,44 +2187,61 @@ export class SkeletonShape extends Shape {
     }
 
     protected saveRotation(rotation, frame): void {
-        const undoSkeletonPoints = this.elements.map((element) => element.points);
+        // Skeleton rotation is now stored on the parent as a scalar; the
+        // wrapping bbox stays axis-aligned and child keypoints are NOT mutated.
+        // Visualization rotates via an SVG transform on the canvas instead.
+        const undoRotation = this.rotation;
+        const redoRotation = rotation;
         const undoSource = this.source;
         const redoSource = this.readOnlyFields.includes('source') ? this.source : computeNewSource(this.source);
 
-        const bbox = computeWrappingBox(undoSkeletonPoints.flat());
-        const [cx, cy] = [bbox.x + bbox.width / 2, bbox.y + bbox.height / 2];
-        for (const element of this.elements) {
-            const { points } = element;
-            const rotatedPoints = [];
-            for (let i = 0; i < points.length; i += 2) {
-                const [x, y] = [points[i], points[i + 1]];
-                rotatedPoints.push(...rotatePoint(x, y, rotation, cx, cy));
-            }
-
-            element.points = rotatedPoints;
-        }
+        this.rotation = redoRotation;
         this.source = redoSource;
 
-        const redoSkeletonPoints = this.elements.map((element) => element.points);
         this.history.do(
             HistoryActions.CHANGED_ROTATION,
             () => {
-                for (let i = 0; i < this.elements.length; i++) {
-                    this.elements[i].points = undoSkeletonPoints[i];
-                    this.elements[i].updated = Date.now();
-                }
+                this.rotation = undoRotation;
                 this.source = undoSource;
                 this.updated = Date.now();
             },
             () => {
-                for (let i = 0; i < this.elements.length; i++) {
-                    this.elements[i].points = redoSkeletonPoints[i];
-                    this.elements[i].updated = Date.now();
-                }
+                this.rotation = redoRotation;
                 this.source = redoSource;
                 this.updated = Date.now();
             },
-            [this.clientID, ...this.elements.map((element) => element.clientID)],
+            [this.clientID],
+            frame,
+        );
+    }
+
+    protected saveBbox(bbox: number[], frame: number): void {
+        if (!Array.isArray(bbox) || bbox.length !== 4) {
+            throw new ArgumentError(
+                `Skeleton bbox must be a 4-element array [xtl, ytl, xbr, ybr]; got ${JSON.stringify(bbox)}`,
+            );
+        }
+        const undoBbox = [...this.bbox];
+        const redoBbox = [...bbox];
+        const undoSource = this.source;
+        const redoSource = this.readOnlyFields.includes('source') ? this.source : computeNewSource(this.source);
+
+        this.bbox = redoBbox;
+        this.source = redoSource;
+
+        this.history.do(
+            HistoryActions.CHANGED_POINTS,
+            () => {
+                this.bbox = undoBbox;
+                this.source = undoSource;
+                this.updated = Date.now();
+            },
+            () => {
+                this.bbox = redoBbox;
+                this.source = redoSource;
+                this.updated = Date.now();
+            },
+            [this.clientID],
             frame,
         );
     }
@@ -2288,6 +2317,13 @@ export class SkeletonShape extends Shape {
         if (updatedLock.length) {
             updatedLock.forEach((el) => { el.updateFlags.lock = true; });
             updateElements(updatedLock, HistoryActions.CHANGED_LOCK, 'lock');
+        }
+
+        // Persist parent skeleton bbox before delegating to base Shape.save.
+        // Reset the flag so base Shape.save does not see it (we own it here).
+        if ((data.updateFlags as any).bbox) {
+            this.saveBbox(data.bbox as number[], frame);
+            (data.updateFlags as any).bbox = false;
         }
 
         const result = Shape.prototype.save.call(this, frame, data);
@@ -3039,65 +3075,78 @@ export class SkeletonTrack extends Track {
     }
 
     protected saveRotation(rotation: number, frame: number): void {
-        const undoSkeletonShapes = this.elements.map((element) => element.shapes[frame]);
+        // Skeleton track rotation now persists on the parent shape at the given
+        // frame (with implicit keyframe semantics matching savePoints), instead
+        // of rewriting each child keypoint. Visualization is handled by a
+        // canvas SVG transform.
+        const wasKeyframe = frame in this.shapes;
+        const undoShape = wasKeyframe ? this.shapes[frame] : undefined;
         const undoSource = this.source;
         const redoSource = this.readOnlyFields.includes('source') ? this.source : computeNewSource(this.source);
+        const redoShape = wasKeyframe ?
+            { ...this.shapes[frame], rotation } :
+            { ...copyShape(this.get(frame)), rotation };
 
-        const elementsData = this.elements.map((element) => element.get(frame));
-        const skeletonPoints = elementsData.map((data) => data.points);
-        const bbox = computeWrappingBox(skeletonPoints.flat());
-        const [cx, cy] = [bbox.x + bbox.width / 2, bbox.y + bbox.height / 2];
-
-        for (let i = 0; i < this.elements.length; i++) {
-            const element = this.elements[i];
-            const { points } = elementsData[i];
-
-            const rotatedPoints = [];
-            for (let j = 0; j < points.length; j += 2) {
-                const [x, y] = [points[j], points[j + 1]];
-                rotatedPoints.push(...rotatePoint(x, y, rotation, cx, cy));
-            }
-
-            if (undoSkeletonShapes[i]) {
-                element.shapes[frame] = {
-                    ...undoSkeletonShapes[i],
-                    points: rotatedPoints,
-                };
-            } else {
-                element.shapes[frame] = {
-                    ...copyShape(elementsData[i]),
-                    points: rotatedPoints,
-                };
-            }
-        }
+        this.shapes[frame] = redoShape;
         this.source = redoSource;
 
-        const redoSkeletonShapes = this.elements.map((element) => element.shapes[frame]);
         this.history.do(
             HistoryActions.CHANGED_ROTATION,
             () => {
-                for (let i = 0; i < this.elements.length; i++) {
-                    const element = this.elements[i];
-                    if (undoSkeletonShapes[i]) {
-                        element.shapes[frame] = undoSkeletonShapes[i];
-                    } else {
-                        delete element.shapes[frame];
-                    }
-                    this.updated = Date.now();
+                if (undoShape) {
+                    this.shapes[frame] = undoShape;
+                } else {
+                    delete this.shapes[frame];
                 }
                 this.source = undoSource;
                 this.updated = Date.now();
             },
             () => {
-                for (let i = 0; i < this.elements.length; i++) {
-                    const element = this.elements[i];
-                    element.shapes[frame] = redoSkeletonShapes[i];
-                    this.updated = Date.now();
-                }
+                this.shapes[frame] = redoShape;
                 this.source = redoSource;
                 this.updated = Date.now();
             },
-            [this.clientID, ...this.elements.map((element) => element.clientID)],
+            [this.clientID],
+            frame,
+        );
+    }
+
+    protected saveBbox(bbox: number[], frame: number): void {
+        if (!Array.isArray(bbox) || bbox.length !== 4) {
+            throw new ArgumentError(
+                `Skeleton bbox must be a 4-element array [xtl, ytl, xbr, ybr]; got ${JSON.stringify(bbox)}`,
+            );
+        }
+        // Mirror savePoints semantics so editing an interpolated frame implicitly
+        // promotes that frame to a keyframe (matches keypoint editing UX).
+        const wasKeyframe = frame in this.shapes;
+        const undoShape = wasKeyframe ? this.shapes[frame] : undefined;
+        const undoSource = this.source;
+        const redoSource = this.readOnlyFields.includes('source') ? this.source : computeNewSource(this.source);
+        const redoShape = wasKeyframe ?
+            { ...this.shapes[frame], bbox: [...bbox] } :
+            { ...copyShape(this.get(frame)), bbox: [...bbox] };
+
+        this.shapes[frame] = redoShape;
+        this.source = redoSource;
+
+        this.history.do(
+            HistoryActions.CHANGED_POINTS,
+            () => {
+                if (undoShape) {
+                    this.shapes[frame] = undoShape;
+                } else {
+                    delete this.shapes[frame];
+                }
+                this.source = undoSource;
+                this.updated = Date.now();
+            },
+            () => {
+                this.shapes[frame] = redoShape;
+                this.source = redoSource;
+                this.updated = Date.now();
+            },
+            [this.clientID],
             frame,
         );
     }
@@ -3106,10 +3155,19 @@ export class SkeletonTrack extends Track {
     public toJSON(): SerializedTrack {
         const result: SerializedTrack = Track.prototype.toJSON.call(this);
 
-        result.shapes = result.shapes.map((shape) => ({
-            ...shape,
-            points: [],
-        }));
+        // Parent (skeleton) keyframes carry rotation + bbox per frame.
+        // points are always empty for skeleton parents.
+        result.shapes = result.shapes.map((shape) => {
+            const storedShape = this.shapes[shape.frame];
+            const bbox = storedShape && Array.isArray((storedShape as any).bbox) ?
+                [...(storedShape as any).bbox as number[]] :
+                [0, 0, 0, 0];
+            return {
+                ...shape,
+                points: [],
+                bbox,
+            };
+        });
 
         result.elements = this.elements.map((el) => ({
             ...el.toJSON(),
@@ -3119,6 +3177,8 @@ export class SkeletonTrack extends Track {
 
         result.elements.forEach((element) => {
             element.shapes.forEach((shape) => {
+                // Child keypoints have no independent rotation; the parent
+                // shape carries the meaningful rotation value.
                 shape.rotation = 0;
                 const { frame } = shape;
                 const skeletonShape = result.shapes
@@ -3132,7 +3192,7 @@ export class SkeletonTrack extends Track {
         return result;
     }
 
-    public get(frame: number): Required<SerializedData> {
+    public get(frame: number): Required<SerializedData> & { bbox: number[] } {
         const { prev, next } = this.boundedKeyframes(frame);
         const position = this.getPosition(frame, prev, next);
         const elements = this.elements.map((element) => ({
@@ -3315,37 +3375,69 @@ export class SkeletonTrack extends Track {
             updateElements(updatedLock, HistoryActions.CHANGED_LOCK, 'lock');
         }
 
+        // Persist skeleton bbox at this frame (implicit keyframe semantics)
+        // before delegating to base Track.save.
+        if ((data.updateFlags as any).bbox) {
+            this.saveBbox(data.bbox as number[], frame);
+            (data.updateFlags as any).bbox = false;
+        }
+
         const result = Track.prototype.save.call(this, frame, data);
         return result;
     }
 
     protected getPosition(
         targetFrame: number, leftKeyframe: number | null, rightKeyframe: number | null,
-    ): InterpolatedPosition & { keyframe: boolean } {
+    ): InterpolatedPosition & { keyframe: boolean, bbox: number[] } {
         const leftFrame = targetFrame in this.shapes ? targetFrame : leftKeyframe;
         const rightPosition = Number.isInteger(rightKeyframe) ? this.shapes[rightKeyframe] : null;
         const leftPosition = Number.isInteger(leftFrame) ? this.shapes[leftFrame] : null;
 
+        const bboxOf = (shape: any): number[] => {
+            const b = shape && shape.bbox;
+            return Array.isArray(b) && b.length === 4 ? b : [0, 0, 0, 0];
+        };
+        const rotationOf = (shape: any): number => {
+            const r = shape && shape.rotation;
+            return typeof r === 'number' ? r : 0;
+        };
+
         if (leftPosition && rightPosition) {
+            // Linear interpolation of bbox + rotation between two keyframes.
+            // Mirrors how keypoint positions interpolate elsewhere.
+            const leftBbox = bboxOf(leftPosition);
+            const rightBbox = bboxOf(rightPosition);
+            const span = (rightKeyframe as number) - (leftFrame as number);
+            const t = span > 0 ? (targetFrame - (leftFrame as number)) / span : 0;
+            const interpolatedBbox = [
+                leftBbox[0] + (rightBbox[0] - leftBbox[0]) * t,
+                leftBbox[1] + (rightBbox[1] - leftBbox[1]) * t,
+                leftBbox[2] + (rightBbox[2] - leftBbox[2]) * t,
+                leftBbox[3] + (rightBbox[3] - leftBbox[3]) * t,
+            ];
+            const leftRot = rotationOf(leftPosition);
+            const rightRot = rotationOf(rightPosition);
             return {
-                rotation: 0,
+                rotation: leftRot + (rightRot - leftRot) * t,
                 occluded: leftPosition.occluded,
                 outside: leftPosition.outside,
                 zOrder: leftPosition.zOrder,
                 keyframe: targetFrame in this.shapes,
                 points: [],
+                bbox: interpolatedBbox,
             };
         }
 
         const singlePosition = leftPosition || rightPosition;
         if (singlePosition) {
             return {
-                rotation: 0,
+                rotation: rotationOf(singlePosition),
                 occluded: singlePosition.occluded,
                 zOrder: singlePosition.zOrder,
                 keyframe: targetFrame in this.shapes,
                 outside: singlePosition === rightPosition ? true : singlePosition.outside,
                 points: [],
+                bbox: bboxOf(singlePosition),
             };
         }
 

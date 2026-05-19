@@ -3886,17 +3886,25 @@ export class CanvasViewImpl implements CanvasView, Listener {
             }
         }
 
-        // if all elements were outside, set coordinates to zeros
-        xtl = xtl || 0;
-        ytl = ytl || 0;
-        xbr = xbr || 0;
-        ybr = ybr || 0;
-
-        // apply bounding box margin
-        xtl -= consts.SKELETON_RECT_MARGIN;
-        ytl -= consts.SKELETON_RECT_MARGIN;
-        xbr += consts.SKELETON_RECT_MARGIN;
-        ybr += consts.SKELETON_RECT_MARGIN;
+        // Skeleton bbox is now a first-class persisted field. Prefer the
+        // annotator-drawn value from ObjectState; fall back to keypoint-derived
+        // wrapping + SKELETON_RECT_MARGIN only when the state has no usable
+        // bbox (legacy data not yet migrated, or pre-server-roundtrip drafts).
+        const stateBbox = (state as any).bbox as number[] | null | undefined;
+        if (Array.isArray(stateBbox) && stateBbox.length === 4 &&
+            !(stateBbox[0] === 0 && stateBbox[1] === 0 && stateBbox[2] === 0 && stateBbox[3] === 0)) {
+            [xtl, ytl, xbr, ybr] = stateBbox;
+        } else {
+            // Fallback: derive from element points + legacy margin.
+            xtl = xtl || 0;
+            ytl = ytl || 0;
+            xbr = xbr || 0;
+            ybr = ybr || 0;
+            xtl -= consts.SKELETON_RECT_MARGIN;
+            ytl -= consts.SKELETON_RECT_MARGIN;
+            xbr += consts.SKELETON_RECT_MARGIN;
+            ybr += consts.SKELETON_RECT_MARGIN;
+        }
 
         skeleton.on('remove', () => {
             Object.values(svgElements).forEach((element) => element.fire('remove'));

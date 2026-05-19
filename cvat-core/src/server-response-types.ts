@@ -428,6 +428,7 @@ export interface SerializedShape {
     occluded: boolean;
     outside: boolean;
     points?: number[];
+    bbox?: number[];
     rotation: number;
     z_order: number;
     type: ShapeType;
@@ -445,6 +446,7 @@ export interface SerializedTrack {
         attributes: SerializedTrack['attributes'];
         id?: number;
         points?: number[];
+        bbox?: number[];
         frame: number;
         occluded: boolean;
         outside: boolean;

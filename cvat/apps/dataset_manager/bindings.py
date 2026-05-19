@@ -231,6 +231,7 @@ class CommonData(InstanceLabelData):
         elements: Sequence[CommonData.LabeledShape] = ()
         outside: bool = False
         id: int | None = None
+        bbox: Sequence[float] = ()  # Only populated for skeleton; [xtl, ytl, xbr, ybr].
 
     class TrackedShape(NamedTuple):
         type: int
@@ -248,6 +249,7 @@ class CommonData(InstanceLabelData):
         track_id: int = 0
         elements: Sequence[CommonData.TrackedShape] = ()
         id: int | None = None
+        bbox: Sequence[float] = ()  # Only populated for skeleton; [xtl, ytl, xbr, ybr].
 
     class Track(NamedTuple):
         label: int
@@ -433,7 +435,8 @@ class CommonData(InstanceLabelData):
             track_id=shape["track_id"],
             source=shape.get("source", "manual"),
             attributes=self._export_attributes(shape["attributes"]),
-            elements=[self._export_tracked_shape(element) for element in shape.get("elements", [])]
+            elements=[self._export_tracked_shape(element) for element in shape.get("elements", [])],
+            bbox=shape.get("bbox", ()) or (),
         )
 
     def _export_labeled_shape(self, shape):
@@ -450,7 +453,8 @@ class CommonData(InstanceLabelData):
             group=shape.get("group", 0),
             source=shape["source"],
             attributes=self._export_attributes(shape["attributes"]),
-            elements=[self._export_labeled_shape(element) for element in shape.get("elements", [])]
+            elements=[self._export_labeled_shape(element) for element in shape.get("elements", [])],
+            bbox=shape.get("bbox", ()) or (),
         )
 
     def _export_shape(self, shape):
@@ -1023,6 +1027,7 @@ class ProjectData(InstanceLabelData):
         subset: str = attrib(default=None)
         outside: bool = attrib(default=False)
         elements: list['ProjectData.LabeledShape'] = attrib(default=[])
+        bbox: list[float] = attrib(factory=list)  # Skeleton only; [xtl, ytl, xbr, ybr].
 
     @attrs
     class TrackedShape:
@@ -1040,6 +1045,7 @@ class ProjectData(InstanceLabelData):
         label: str = attrib(default=None)
         track_id: int = attrib(default=0)
         elements: list['ProjectData.TrackedShape'] = attrib(default=[])
+        bbox: list[float] = attrib(factory=list)  # Skeleton only; [xtl, ytl, xbr, ybr].
 
     @attrs
     class Track:
@@ -1235,6 +1241,7 @@ class ProjectData(InstanceLabelData):
             source=shape.get("source", "manual"),
             attributes=self._export_attributes(shape["attributes"]),
             elements=[self._export_tracked_shape(element, task_id) for element in shape.get("elements", [])],
+            bbox=list(shape.get("bbox") or []),
         )
 
     def _export_labeled_shape(self, shape: dict, task_id: int):
@@ -1252,6 +1259,7 @@ class ProjectData(InstanceLabelData):
             attributes=self._export_attributes(shape["attributes"]),
             elements=[self._export_labeled_shape(element, task_id) for element in shape.get("elements", [])],
             task_id=task_id,
+            bbox=list(shape.get("bbox") or []),
         )
 
     def _export_tag(self, tag: dict, task_id: int):
@@ -1836,7 +1844,7 @@ class CvatToDmAnnotationConverter:
         dm_attr = self._convert_attrs(shape.label, shape.attributes)
         dm_attr['occluded'] = shape.occluded
 
-        if shape.type in (ShapeType.RECTANGLE, ShapeType.ELLIPSE):
+        if shape.type in (ShapeType.RECTANGLE, ShapeType.ELLIPSE, ShapeType.SKELETON):
             dm_attr['rotation'] = shape.rotation
 
         if hasattr(shape, 'track_id'):
@@ -1908,6 +1916,19 @@ class CvatToDmAnnotationConverter:
                     attributes=element_attr))
 
             dm_attr["keyframe"] = any([element.attributes.get("keyframe") for element in elements])
+
+            # Carry skeleton bbox through Datumaro via a reserved-prefix attribute.
+            # The prefix `__cvat_*` is filtered out of attribute comparison by
+            # quality_control and consensus pipelines so transport metadata does
+            # not produce spurious MISMATCHING_ATTRIBUTES conflicts.
+            skeleton_bbox = list(getattr(shape, "bbox", None) or [])
+            if len(skeleton_bbox) == 4:
+                import json
+                dm_attr["__cvat_bbox"] = json.dumps({
+                    "format": "xyxy",
+                    "values": skeleton_bbox,
+                })
+
             anno = dm.Skeleton(elements, label=dm_label,
                 attributes=dm_attr, group=dm_group, z_order=shape.z_order)
         else:
@@ -1917,6 +1938,25 @@ class CvatToDmAnnotationConverter:
 
         if anno:
             results.append(anno)
+
+        # For skeletons with a Normal-state bbox, also emit a companion dm.Bbox
+        # in the same group so the COCO keypoints exporter (and other adapters
+        # that consume bbox annotations) can write a `person bbox` entry.
+        # Skip emission for the degenerate state [0,0,0,0] so we don't pollute
+        # downstream outputs with a meaningless box.
+        if shape.type == ShapeType.SKELETON:
+            skeleton_bbox = list(getattr(shape, "bbox", None) or [])
+            if (
+                len(skeleton_bbox) == 4
+                and skeleton_bbox != [0, 0, 0, 0]
+                and skeleton_bbox != [0.0, 0.0, 0.0, 0.0]
+            ):
+                xtl, ytl, xbr, ybr = skeleton_bbox
+                results.append(dm.Bbox(
+                    xtl, ytl, xbr - xtl, ybr - ytl,
+                    label=dm_label, attributes=dm_attr, group=dm_group,
+                    z_order=shape.z_order,
+                ))
 
         return results
 
@@ -2078,6 +2118,11 @@ def import_dm_annotations(dm_dataset: dm.Dataset, instance_data: ProjectData | C
                 if hasattr(ann, 'label') and ann.label is None:
                     raise CvatImportError("annotation has no label")
 
+                # Pop reserved-prefix transport attributes BEFORE building the
+                # user-visible attribute list so they don't leak into ObjectState.
+                skeleton_bbox_payload = ann.attributes.pop('__cvat_bbox', None) \
+                    if ann.type == dm.AnnotationType.skeleton else None
+
                 attributes = [
                     instance_data.Attribute(name=n, value=str(v))
                     for n, v in ann.attributes.items()
@@ -2114,6 +2159,29 @@ def import_dm_annotations(dm_dataset: dm.Dataset, instance_data: ProjectData | C
                     track_id = ann.attributes.pop('track_id', None)
                     source = ann.attributes.pop('source').lower() \
                         if ann.attributes.get('source', '').lower() in sources else SourceType.FILE
+
+                    # Resolve skeleton bbox for this annotation, if present.
+                    # Accept either xyxy (CVAT native) or xywh (legacy / COCO);
+                    # store internally as xyxy. Fall back to degenerate state
+                    # for skeletons without a carried bbox.
+                    skeleton_bbox = ()
+                    if ann.type == dm.AnnotationType.skeleton:
+                        if skeleton_bbox_payload:
+                            try:
+                                import json
+                                payload = json.loads(skeleton_bbox_payload)
+                                fmt = payload.get("format", "xyxy")
+                                values = list(payload.get("values", []))
+                                if len(values) == 4:
+                                    if fmt == "xywh":
+                                        x, y, w, h = values
+                                        skeleton_bbox = (x, y, x + w, y + h)
+                                    else:
+                                        skeleton_bbox = tuple(values)
+                            except (ValueError, TypeError):
+                                skeleton_bbox = ()
+                        if not skeleton_bbox:
+                            skeleton_bbox = (0.0, 0.0, 0.0, 0.0)
 
                     shape_type = shapes[ann.type]
                     if track_id is None or 'keyframe' not in ann.attributes or dm_dataset.format not in track_formats:
@@ -2152,6 +2220,7 @@ def import_dm_annotations(dm_dataset: dm.Dataset, instance_data: ProjectData | C
                             source=source,
                             rotation=rotation,
                             attributes=attributes,
+                            bbox=skeleton_bbox,
                             elements=elements,
                         ))
                         continue

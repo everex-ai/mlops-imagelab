@@ -1918,6 +1918,7 @@ class _Comparator:
             "group",  # changes from job to job, compared by other means
             "rotation",  # handled by other means
             "outside",  # handled by other means
+            "__cvat_bbox",  # reserved transport attribute carrying skeleton bbox round-trip
         }
         self.included_ann_types = settings.included_annotation_types
         self.non_groupable_ann_type = settings.non_groupable_ann_type

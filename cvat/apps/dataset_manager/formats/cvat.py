@@ -315,6 +315,21 @@ class CvatExtractor(DatasetBase):
                         )
                     elif el.tag == "skeleton":
                         shape["points"] = []
+                        if all(k in el.attrib for k in ("xtl", "ytl", "xbr", "ybr")):
+                            shape["bbox"] = list(
+                                map(
+                                    float,
+                                    [
+                                        el.attrib["xtl"],
+                                        el.attrib["ytl"],
+                                        el.attrib["xbr"],
+                                        el.attrib["ybr"],
+                                    ],
+                                )
+                            )
+                        else:
+                            # Legacy export with no bbox attributes — degenerate fallback.
+                            shape["bbox"] = [0.0, 0.0, 0.0, 0.0]
                     else:
                         shape["points"] = []
                         for pair in el.attrib["points"].split(";"):
@@ -588,6 +603,21 @@ class CvatExtractor(DatasetBase):
             elements = []
             for element in ann.get("elements", []):
                 elements.append(cls._parse_shape_ann(element, categories))
+
+            # Carry skeleton bbox through Datumaro via a reserved-prefix attribute.
+            # Reserved prefix (__cvat_*) keeps quality/consensus attribute comparison
+            # from treating transport metadata as a user attribute (handled in U5).
+            if all(k in ann for k in ("xtl", "ytl", "xbr", "ybr")):
+                import json
+                attributes["__cvat_bbox"] = json.dumps({
+                    "format": "xyxy",
+                    "values": [
+                        float(ann["xtl"]),
+                        float(ann["ytl"]),
+                        float(ann["xbr"]),
+                        float(ann["ybr"]),
+                    ],
+                })
 
             return Skeleton(
                 elements,
@@ -930,6 +960,23 @@ def dump_as_cvat_annotation(dumper, annotations: JobData | TaskData | ProjectDat
                             ]
                         )
                     )
+                elif shape.type == "skeleton":
+                    bbox = getattr(shape, "bbox", None) or []
+                    if len(bbox) == 4:
+                        dump_data.update(
+                            OrderedDict(
+                                [
+                                    ("xtl", "{:.2f}".format(bbox[0])),
+                                    ("ytl", "{:.2f}".format(bbox[1])),
+                                    ("xbr", "{:.2f}".format(bbox[2])),
+                                    ("ybr", "{:.2f}".format(bbox[3])),
+                                ]
+                            )
+                        )
+                    if shape.rotation:
+                        dump_data.update(
+                            OrderedDict([("rotation", "{:.2f}".format(shape.rotation))])
+                        )
                 elif shape.type != "skeleton":
                     dump_data.update(
                         OrderedDict(
@@ -1070,6 +1117,21 @@ def dump_as_cvat_interpolation(dumper, annotations: CommonData | ProjectData):
                     ]
                 )
             )
+        elif shape.type == "skeleton":
+            bbox = getattr(shape, "bbox", None) or []
+            if len(bbox) == 4:
+                dump_data.update(
+                    OrderedDict(
+                        [
+                            ("xtl", "{:.2f}".format(bbox[0])),
+                            ("ytl", "{:.2f}".format(bbox[1])),
+                            ("xbr", "{:.2f}".format(bbox[2])),
+                            ("ybr", "{:.2f}".format(bbox[3])),
+                        ]
+                    )
+                )
+            if shape.rotation:
+                dump_data.update(OrderedDict([("rotation", "{:.2f}".format(shape.rotation))]))
         elif shape.type == "cuboid":
             dump_data.update(
                 OrderedDict(

@@ -424,6 +424,7 @@ class TestPostTaskData:
                     "z_order": 0,
                     "rotation": 0,
                     "points": [],
+                    "bbox": [111.0, 145.0, 375.0, 325.0],
                     "frame": 0,
                     "label_id": label_ids["skeleton"][0],
                     "group": 0,
@@ -473,6 +474,7 @@ class TestPostTaskData:
                             "z_order": 0,
                             "rotation": 0,
                             "points": [],
+                            "bbox": [275.0, 452.0, 640.0, 867.0],
                             "frame": 0,
                             "attributes": [],
                         }

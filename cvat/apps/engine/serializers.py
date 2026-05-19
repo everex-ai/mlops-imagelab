@@ -3238,6 +3238,9 @@ class ShapeSerializer(serializers.Serializer):
     points = OptimizedFloatListField(
         allow_empty=True, required=False
     )
+    bbox = OptimizedFloatListField(
+        allow_empty=True, required=False
+    )
 
     def validate(self, attrs):
         shape_type = attrs["type"]
@@ -3266,6 +3269,29 @@ class ShapeSerializer(serializers.Serializer):
             bad_num_points_unless(num_points == 0)
         else:
             assert False, f"Unknown shape type '{shape_type}'"
+
+        bbox = attrs.get("bbox", [])
+        if shape_type == models.ShapeType.SKELETON:
+            # Valid skeleton bbox is one of:
+            #  - Normal: len==4 and xtl < xbr and ytl < ybr (annotator-drawn object boundary)
+            #  - Degenerate: exactly [0, 0, 0, 0] (migration backfill for all-outside skeleton)
+            # Anything else (empty, wrong length, zero-area non-degenerate, inverted) is rejected.
+            if bbox == [0.0, 0.0, 0.0, 0.0] or bbox == [0, 0, 0, 0]:
+                pass  # degenerate state allowed
+            elif len(bbox) == 4 and bbox[0] < bbox[2] and bbox[1] < bbox[3]:
+                pass  # normal state
+            else:
+                raise serializers.ValidationError({
+                    "bbox": (
+                        "skeleton requires bbox = [xtl, ytl, xbr, ybr] with xtl<xbr and ytl<ybr, "
+                        "or exactly [0,0,0,0] for all-outside skeletons"
+                    )
+                })
+        else:
+            if len(bbox) != 0:
+                raise serializers.ValidationError({
+                    "bbox": f"bbox is only allowed for skeleton shape, not '{shape_type}'"
+                })
 
         return attrs
 
@@ -3320,7 +3346,7 @@ class LabeledShapeSerializerFromDB(serializers.BaseSerializer):
         def convert_shape(shape):
             result = _convert_annotation(shape, [
                 'id', 'label_id', 'type', 'frame', 'group', 'source',
-                'occluded', 'outside', 'z_order', 'rotation', 'points',
+                'occluded', 'outside', 'z_order', 'rotation', 'points', 'bbox',
             ])
             result['attributes'] = _convert_attributes(shape['attributes'])
             if shape.get('elements', None) is not None and shape['parent'] is None:
@@ -3336,7 +3362,7 @@ class LabeledTrackSerializerFromDB(serializers.BaseSerializer):
         def convert_track(track):
             shape_keys = [
                 'id', 'type', 'frame', 'occluded', 'outside', 'z_order',
-                'rotation', 'points', 'attributes',
+                'rotation', 'points', 'bbox', 'attributes',
             ]
             result = _convert_annotation(track, ['id', 'label_id', 'frame', 'group', 'source'])
             result['shapes'] = [_convert_annotation(shape, shape_keys) for shape in track['shapes']]

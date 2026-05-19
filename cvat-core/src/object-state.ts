@@ -93,6 +93,7 @@ export default class ObjectState {
     public hidden: boolean;
     public pinned: boolean;
     public points: number[] | null;
+    public bbox: number[] | null;
     public rotation: number | null;
     public zOrder: number;
     public outside: boolean;
@@ -131,6 +132,7 @@ export default class ObjectState {
                 this.descriptions = false;
 
                 this.points = false;
+                this.bbox = false;
                 this.rotation = false;
                 this.outside = false;
                 this.occluded = false;
@@ -157,6 +159,7 @@ export default class ObjectState {
                 serialized.elements.map((element) => new ObjectState(element)) : null,
 
             points: null,
+            bbox: null,
             rotation: null,
             outside: false,
             occluded: false,
@@ -293,6 +296,30 @@ export default class ObjectState {
                         } else {
                             throw new ArgumentError('Rotation is expected to be a number.');
                         }
+                    },
+                },
+                bbox: {
+                    // Only meaningful for skeleton shapes; null for everything else.
+                    get: () => {
+                        if (data.shapeType === ShapeType.SKELETON) {
+                            return Array.isArray(data.bbox) ? data.bbox : null;
+                        }
+                        return null;
+                    },
+                    set: (bbox) => {
+                        if (data.shapeType !== ShapeType.SKELETON) {
+                            throw new ArgumentError(
+                                'bbox can only be set on skeleton shapes.',
+                            );
+                        }
+                        if (!Array.isArray(bbox) || bbox.length !== 4 ||
+                            bbox.some((coord) => typeof coord !== 'number')) {
+                            throw new ArgumentError(
+                                'bbox must be a 4-element number array [xtl, ytl, xbr, ybr].',
+                            );
+                        }
+                        data.updateFlags.bbox = true;
+                        data.bbox = [...bbox];
                     },
                 },
                 group: {
@@ -479,6 +506,9 @@ export default class ObjectState {
         }
         if (Array.isArray(serialized.points)) {
             data.points = serialized.points;
+        }
+        if (Array.isArray((serialized as any).bbox)) {
+            data.bbox = [...(serialized as any).bbox];
         }
         if (
             Array.isArray(serialized.descriptions) &&

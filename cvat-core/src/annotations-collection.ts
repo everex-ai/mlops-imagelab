@@ -315,6 +315,9 @@ export default class Collection {
                     type: shapeType,
                     frame: object.frame,
                     points: object.shapeType === ShapeType.SKELETON ? undefined : [...object.points],
+                    bbox: object.shapeType === ShapeType.SKELETON ?
+                        [...((object as any).bbox || [0, 0, 0, 0])] :
+                        undefined,
                     occluded: object.occluded,
                     rotation: object.rotation,
                     z_order: object.zOrder,
@@ -374,6 +377,9 @@ export default class Collection {
                         type: shapeType,
                         frame: +keyframe,
                         points: object.shapeType === ShapeType.SKELETON ? undefined : [...shape.points],
+                        bbox: object.shapeType === ShapeType.SKELETON ?
+                            [...((shape as any).bbox || [0, 0, 0, 0])] :
+                            undefined,
                         rotation: shape.rotation,
                         occluded: shape.occluded,
                         outside: shape.outside,
@@ -534,6 +540,9 @@ export default class Collection {
             type: object.shapeType,
             frame,
             points: object.shapeType === ShapeType.SKELETON ? undefined : [...object.points],
+            bbox: object.shapeType === ShapeType.SKELETON ?
+                [...((object as any).bbox || [0, 0, 0, 0])] :
+                undefined,
             rotation: object.rotation,
             occluded: object.occluded,
             z_order: object.zOrder,
@@ -679,6 +688,9 @@ export default class Collection {
         const position = {
             type: objectState.shapeType,
             points: objectState.shapeType === ShapeType.SKELETON ? undefined : [...objectState.points],
+            bbox: objectState.shapeType === ShapeType.SKELETON ?
+                [...((objectState as any).bbox || [0, 0, 0, 0])] :
+                undefined,
             rotation: objectState.rotation,
             occluded: objectState.occluded,
             outside: objectState.outside,

@@ -34,6 +34,7 @@ const JSON_SERIALIZER_KEYS = [
     'occluded',
     'z_order',
     'points',
+    'bbox',
     'rotation',
     'type',
     'shapes',
