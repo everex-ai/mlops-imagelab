@@ -2145,7 +2145,6 @@ paths:
         schema:
           type: string
           enum:
-          - 3d
           - 2d
       - name: filter
         required: false
@@ -3164,195 +3163,6 @@ paths:
       responses:
         '204':
           description: The label has been deleted
-  /api/lambda/functions:
-    get:
-      operationId: lambda_list_functions
-      summary: Method returns a list of functions
-      tags:
-      - lambda
-      security:
-      - tokenAuth: []
-      - accessTokenAuth: []
-      - sessionAuth: []
-        csrfAuth: []
-        csrfHeaderAuth: []
-      - basicAuth: []
-      responses:
-        '200':
-          description: No response body
-  /api/lambda/functions/{func_id}:
-    get:
-      operationId: lambda_retrieve_functions
-      summary: Method returns the information about the function
-      parameters:
-      - in: path
-        name: func_id
-        schema:
-          type: string
-          pattern: ^[a-zA-Z0-9_.-]+$
-        required: true
-      tags:
-      - lambda
-      security:
-      - tokenAuth: []
-      - accessTokenAuth: []
-      - sessionAuth: []
-        csrfAuth: []
-        csrfHeaderAuth: []
-      - basicAuth: []
-      responses:
-        '200':
-          content:
-            application/vnd.cvat+json:
-              schema:
-                type: object
-          description: Information about the function
-    post:
-      operationId: lambda_create_functions
-      description: |
-        Allows to execute a function for immediate computation.
-
-        Intended for short-lived executions, useful for interactive calls.
-
-        When executed for interactive annotation, the job id must be specified
-        in the 'job' input field. The task id is not required in this case,
-        but if it is specified, it must match the job task id.
-      parameters:
-      - in: path
-        name: func_id
-        schema:
-          type: string
-          pattern: ^[a-zA-Z0-9_.-]+$
-        required: true
-      tags:
-      - lambda
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/OnlineFunctionCallRequest'
-      security:
-      - tokenAuth: []
-      - accessTokenAuth: []
-      - sessionAuth: []
-        csrfAuth: []
-        csrfHeaderAuth: []
-      - basicAuth: []
-      responses:
-        '200':
-          description: Returns function invocation results
-  /api/lambda/requests:
-    get:
-      operationId: lambda_list_requests
-      summary: Method returns a list of requests
-      tags:
-      - lambda
-      security:
-      - tokenAuth: []
-      - accessTokenAuth: []
-      - sessionAuth: []
-        csrfAuth: []
-        csrfHeaderAuth: []
-      - basicAuth: []
-      responses:
-        '200':
-          content:
-            application/vnd.cvat+json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/FunctionCall'
-          description: ''
-    post:
-      operationId: lambda_create_requests
-      summary: Method calls the function
-      parameters:
-      - in: header
-        name: X-Organization
-        schema:
-          type: string
-        description: Organization unique slug
-      - in: query
-        name: org
-        schema:
-          type: string
-        description: Organization unique slug
-      - in: query
-        name: org_id
-        schema:
-          type: integer
-        description: Organization identifier
-      tags:
-      - lambda
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/FunctionCallRequest'
-        required: true
-      security:
-      - tokenAuth: []
-      - accessTokenAuth: []
-      - sessionAuth: []
-        csrfAuth: []
-        csrfHeaderAuth: []
-      - basicAuth: []
-      responses:
-        '200':
-          content:
-            application/vnd.cvat+json:
-              schema:
-                $ref: '#/components/schemas/FunctionCall'
-          description: ''
-  /api/lambda/requests/{id}:
-    get:
-      operationId: lambda_retrieve_requests
-      summary: Method returns the status of the request
-      parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-        description: Request id
-        required: true
-      tags:
-      - lambda
-      security:
-      - tokenAuth: []
-      - accessTokenAuth: []
-      - sessionAuth: []
-        csrfAuth: []
-        csrfHeaderAuth: []
-      - basicAuth: []
-      responses:
-        '200':
-          content:
-            application/vnd.cvat+json:
-              schema:
-                $ref: '#/components/schemas/FunctionCall'
-          description: ''
-    delete:
-      operationId: lambda_delete_requests
-      summary: Method cancels the request
-      parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-        description: Request id
-        required: true
-      tags:
-      - lambda
-      security:
-      - tokenAuth: []
-      - accessTokenAuth: []
-      - sessionAuth: []
-        csrfAuth: []
-        csrfHeaderAuth: []
-      - basicAuth: []
-      responses:
-        '204':
-          description: No response body
   /api/memberships:
     get:
       operationId: memberships_list
@@ -3408,6 +3218,7 @@ paths:
           type: string
           enum:
           - worker
+          - reviewer
           - supervisor
           - maintainer
           - owner
@@ -5137,7 +4948,6 @@ paths:
         schema:
           type: string
           enum:
-          - 3d
           - 2d
       - name: filter
         required: false
@@ -7995,102 +7805,6 @@ components:
         * `random_uniform` - RANDOM_UNIFORM
         * `random_per_job` - RANDOM_PER_JOB
         * `manual` - MANUAL
-    FunctionCall:
-      type: object
-      properties:
-        id:
-          type: string
-          description: Request id
-        function:
-          $ref: '#/components/schemas/FunctionCallParams'
-        status:
-          type: string
-          nullable: true
-        progress:
-          type: integer
-          nullable: true
-          default: 0
-        enqueued:
-          type: string
-          format: date-time
-          nullable: true
-        started:
-          type: string
-          format: date-time
-          nullable: true
-        ended:
-          type: string
-          format: date-time
-          nullable: true
-        exc_info:
-          type: string
-          nullable: true
-      required:
-      - ended
-      - enqueued
-      - function
-      - id
-      - started
-      - status
-    FunctionCallParams:
-      type: object
-      properties:
-        id:
-          type: string
-          nullable: true
-          description: The name of the function
-        task:
-          type: integer
-          nullable: true
-          description: The id of the task
-        job:
-          type: integer
-          description: The id of the job
-        threshold:
-          type: number
-          format: double
-          nullable: true
-      required:
-      - id
-      - task
-      - threshold
-    FunctionCallRequest:
-      type: object
-      properties:
-        function:
-          type: string
-          minLength: 1
-          description: The name of the function to execute
-        task:
-          type: integer
-          description: The id of the task to be annotated
-        job:
-          type: integer
-          description: The id of the job to be annotated
-        max_distance:
-          type: integer
-        threshold:
-          type: number
-          format: double
-        cleanup:
-          type: boolean
-          default: false
-          description: Whether existing annotations should be removed
-        convMaskToPoly:
-          type: boolean
-          writeOnly: true
-          description: Deprecated; use conv_mask_to_poly instead
-        conv_mask_to_poly:
-          type: boolean
-          description: Convert mask shapes to polygons
-        mapping:
-          type: object
-          additionalProperties:
-            $ref: '#/components/schemas/LabelMappingEntryRequest'
-          description: Label mapping from the model to the task labels
-      required:
-      - function
-      - task
     InputTypeEnum:
       enum:
       - checkbox
@@ -8534,25 +8248,6 @@ components:
           readOnly: true
       required:
       - name
-    LabelMappingEntryRequest:
-      type: object
-      properties:
-        name:
-          type: string
-          minLength: 1
-        attributes:
-          type: object
-          additionalProperties:
-            type: string
-            minLength: 1
-        sublabels:
-          type: object
-          additionalProperties:
-            $ref: '#/components/schemas/SublabelMappingEntryRequest'
-          description: Label mapping for from the model to the task sublabels within
-            a parent label
-      required:
-      - name
     LabelType:
       enum:
       - any
@@ -8699,6 +8394,11 @@ components:
           items:
             type: number
             format: double
+        bbox:
+          type: array
+          items:
+            type: number
+            format: double
         id:
           type: integer
           nullable: true
@@ -8749,6 +8449,11 @@ components:
           minimum: 0
           default: 0.0
         points:
+          type: array
+          items:
+            type: number
+            format: double
+        bbox:
           type: array
           items:
             type: number
@@ -8920,13 +8625,6 @@ components:
     NullEnum:
       enum:
       - null
-    OnlineFunctionCallRequest:
-      type: object
-      properties:
-        job:
-          type: integer
-        task:
-          type: integer
     OperationStatus:
       enum:
       - new
@@ -10059,15 +9757,9 @@ components:
           type: boolean
         ANALYTICS:
           type: boolean
-        MODELS:
-          type: boolean
-        PREDICT:
-          type: boolean
       required:
       - ANALYTICS
       - GIT_INTEGRATION
-      - MODELS
-      - PREDICT
     ProjectFileRequest:
       type: object
       properties:
@@ -10695,9 +10387,6 @@ components:
         format:
           type: string
           nullable: true
-        function_id:
-          type: string
-          nullable: true
         lightweight:
           type: boolean
           nullable: true
@@ -10725,12 +10414,14 @@ components:
     RoleEnum:
       enum:
       - worker
+      - reviewer
       - supervisor
       - maintainer
       - owner
       type: string
       description: |-
         * `worker` - Worker
+        * `reviewer` - Reviewer
         * `supervisor` - Supervisor
         * `maintainer` - Maintainer
         * `owner` - Owner
@@ -10863,6 +10554,11 @@ components:
           items:
             type: number
             format: double
+        bbox:
+          type: array
+          items:
+            type: number
+            format: double
         id:
           type: integer
           nullable: true
@@ -10909,6 +10605,11 @@ components:
           minimum: 0
           default: 0.0
         points:
+          type: array
+          items:
+            type: number
+            format: double
+        bbox:
           type: array
           items:
             type: number
@@ -11041,19 +10742,6 @@ components:
             * `tag` - TAG
         has_parent:
           type: boolean
-      required:
-      - name
-    SublabelMappingEntryRequest:
-      type: object
-      properties:
-        name:
-          type: string
-          minLength: 1
-        attributes:
-          type: object
-          additionalProperties:
-            type: string
-            minLength: 1
       required:
       - name
     SublabelRequest:
@@ -11367,6 +11055,11 @@ components:
           items:
             type: number
             format: double
+        bbox:
+          type: array
+          items:
+            type: number
+            format: double
         id:
           type: integer
           nullable: true
@@ -11402,6 +11095,11 @@ components:
           minimum: 0
           default: 0.0
         points:
+          type: array
+          items:
+            type: number
+            format: double
+        bbox:
           type: array
           items:
             type: number
