@@ -140,3 +140,86 @@ class FreshnessSerializer(serializers.Serializer):
     scope = serializers.CharField()
     days = FreshnessDaySerializer(many=True)
     last_seen = serializers.DateTimeField(allow_null=True)
+
+
+class JobRoundSerializer(serializers.Serializer):
+    """
+    One (round, role) segment of a job's timeline.
+
+    A round is a pass over the job: round 1 is the first annotation and the review that
+    followed it, round 2 is the rework a rejection triggered and its re-review, and so on.
+    Each round therefore appears twice - once as `annotation`, once as `review` - so a job
+    that was rejected once comes back as four entries.
+    """
+
+    round = serializers.IntegerField(min_value=1)
+    phase = serializers.ChoiceField(choices=[ROLE_ANNOTATION, ROLE_REVIEW])
+    started_at = serializers.DateTimeField()
+    # Null while the segment is still open. Never filled with the time of the request:
+    # doing so would make two page loads of the same drilldown disagree.
+    ended_at = serializers.DateTimeField(allow_null=True)
+    # Split by whoever booked the time: reviewers (identified by acceptance, or by
+    # rejection on a job that was never accepted) on one side, everybody else on the
+    # other. A ~90s working-time batch can straddle a boundary, so a little time leaks
+    # into the neighbouring segment - the screen says so (R37).
+    worker_seconds = serializers.FloatField()
+    reviewer_seconds = serializers.FloatField()
+
+
+class TrailingActivitySerializer(serializers.Serializer):
+    """
+    Working time recorded after the job was first accepted.
+
+    Rounds terminate at the *first* `stage -> acceptance`; three jobs in the production
+    dump were then reverted to `annotation` and worked on again. That activity is real but
+    belongs to no round, so it is surfaced here instead of being folded into one - which
+    is also the answer to "why do the round times not add up to the job total?".
+    """
+
+    started_at = serializers.DateTimeField()
+    # Always null: the trailing bucket is open-ended by construction.
+    ended_at = serializers.DateTimeField(allow_null=True)
+    worker_seconds = serializers.FloatField()
+    reviewer_seconds = serializers.FloatField()
+
+
+class JobTotalsSerializer(serializers.Serializer):
+    """
+    The job's whole working time, reported separately rather than implied.
+
+    Rounds plus trailing can be *less* than these totals: time booked before the first
+    transition of a job that never reached `in progress` sits outside every segment.
+    """
+
+    worker_seconds = serializers.FloatField()
+    reviewer_seconds = serializers.FloatField()
+
+
+class JobRoundsSerializer(serializers.Serializer):
+    """One job's round decomposition. The identity block mirrors JobFactSerializer."""
+
+    job_id = serializers.IntegerField()
+
+    task_id = serializers.IntegerField()
+    task_name = serializers.CharField()
+    project_id = serializers.IntegerField(allow_null=True)
+    project_name = serializers.CharField(allow_null=True)
+
+    assignee = UserRefSerializer(allow_null=True)
+    stage = serializers.CharField()
+    state = serializers.CharField()
+    # Null on a job that has never reached the acceptance stage; the rounds then end with
+    # an open segment rather than with a terminator.
+    accepted_at = serializers.DateTimeField(allow_null=True)
+
+    reviewer = UserRefSerializer(allow_null=True)
+    reviewers = UserRefSerializer(many=True)
+    reviewer_source = serializers.CharField(allow_null=True)
+
+    # Empty for a job that never reached `state -> in progress`. That is a legitimate 200,
+    # not a failure: the screen renders it as "no work recorded" (R33), which it can only
+    # do if an empty list is distinguishable from a failed lookup.
+    rounds = JobRoundSerializer(many=True)
+    # Null when the job was never accepted, so there is no "after acceptance" yet.
+    trailing = TrailingActivitySerializer(allow_null=True)
+    totals = JobTotalsSerializer()

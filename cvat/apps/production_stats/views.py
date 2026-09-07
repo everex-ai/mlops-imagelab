@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,18 +14,20 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
 from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
+from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 
 from cvat.apps.engine.models import Job
 from cvat.apps.engine.pagination import CustomPagination
 from cvat.apps.engine.types import ExtendedRequest
 from cvat.apps.production_stats.permissions import ProductionStatsPermission
-from cvat.apps.production_stats.queries import freshness, job_facts
+from cvat.apps.production_stats.queries import freshness, job_facts, job_rounds
 from cvat.apps.production_stats.queries.clickhouse import handle_clickhouse_exceptions
 from cvat.apps.production_stats.serializers import (
     FreshnessSerializer,
     JobFactSerializer,
     JobFactsQuerySerializer,
+    JobRoundsSerializer,
 )
 
 # These view sets are deliberately excluded from the OpenAPI schema: CI
@@ -85,18 +87,28 @@ def _fetch_jobs(job_ids: Sequence[int]) -> dict[int, Job]:
     return {job.id: job for job in queryset}
 
 
-def _resolve_usernames(
-    jobs: Mapping[int, Job], facts: Mapping[int, Mapping[str, Any]]
-) -> dict[int, str]:
+def _fetch_usernames(user_ids: Iterable[Any], resolved: dict[int, str]) -> dict[int, str]:
     """
-    Resolve every user id the response mentions in a single query.
+    Fill in every username ``resolved`` is still missing, in a single query.
 
     Reviewers, estimated workers and working-time entries arrive from ClickHouse as bare
     ``user_id`` integers (the source rounds query keyed on the event-time username snapshot,
     which orphaned a person's history the moment they were renamed). Looking each one up per
     row would mean thousands of queries per request. Assignees need no query at all -
-    select_related has already fetched them.
+    select_related has already fetched them, so seeding ``resolved`` with them keeps them
+    out of the ``IN`` list.
     """
+    wanted = {int(user_id) for user_id in user_ids if user_id is not None} - resolved.keys()
+    if wanted:
+        resolved.update(User.objects.filter(id__in=sorted(wanted)).values_list("id", "username"))
+
+    return resolved
+
+
+def _resolve_usernames(
+    jobs: Mapping[int, Job], facts: Mapping[int, Mapping[str, Any]]
+) -> dict[int, str]:
+    """Resolve every user id the job facts response mentions."""
     resolved = {
         job.assignee_id: job.assignee.username
         for job in jobs.values()
@@ -110,11 +122,7 @@ def _resolve_usernames(
         if fact["estimated_worker_user_id"] is not None:
             wanted.add(fact["estimated_worker_user_id"])
 
-    wanted -= resolved.keys()
-    if wanted:
-        resolved.update(User.objects.filter(id__in=sorted(wanted)).values_list("id", "username"))
-
-    return resolved
+    return _fetch_usernames(wanted, resolved)
 
 
 def _user_ref(user_id: int | None, usernames: Mapping[int, str]) -> dict[str, Any] | None:
@@ -266,30 +274,103 @@ class JobFactsViewSet(viewsets.GenericViewSet):
         return response
 
 
+def _segment_times(entry: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalise the two timestamps a round or the trailing bucket carries."""
+    return {
+        "started_at": _as_utc(entry["started_at"]),
+        # Preserved as None when the segment is still open - see JobRoundSerializer.
+        "ended_at": _as_utc(entry["ended_at"]),
+        "worker_seconds": entry["worker_seconds"],
+        "reviewer_seconds": entry["reviewer_seconds"],
+    }
+
+
+def _build_rounds_payload(
+    job: Job, decomposition: Mapping[str, Any], usernames: Mapping[int, str]
+) -> dict[str, Any]:
+    """Merge one job's Postgres identity with its ClickHouse round decomposition."""
+    task = job.segment.task
+    project = task.project
+
+    reviewers = [_user_ref(user_id, usernames) for user_id in decomposition["reviewer_user_ids"]]
+    trailing = decomposition["trailing"]
+
+    return {
+        "job_id": job.id,
+        "task_id": task.id,
+        "task_name": task.name,
+        "project_id": project.id if project is not None else None,
+        "project_name": project.name if project is not None else None,
+        "assignee": _user_ref(job.assignee_id, usernames),
+        "stage": job.stage,
+        "state": job.state,
+        "accepted_at": _as_utc(decomposition["accepted_at"]),
+        "reviewer": reviewers[0] if reviewers else None,
+        "reviewers": reviewers,
+        "reviewer_source": decomposition["reviewer_source"],
+        "rounds": [
+            {"round": entry["round"], "phase": entry["phase"], **_segment_times(entry)}
+            for entry in decomposition["rounds"]
+        ],
+        "trailing": _segment_times(trailing) if trailing is not None else None,
+        "totals": decomposition["totals"],
+    }
+
+
 @extend_schema(exclude=True)
 class JobRoundsViewSet(viewsets.ViewSet):
     """
     Round-by-round breakdown of a single job's timeline.
 
-    U1 ships the routing and permission wiring only; the response body is a
-    placeholder until the ClickHouse query layer lands.
+    The drilldown opens this once per job, so the whole timeline is read in one scan (see
+    queries/job_rounds.py) and folded in Python.
     """
 
-    serializer_class = None
+    serializer_class = JobRoundsSerializer
+    # Without this attribute PolicyEnforcer raises AssertionError, which surfaces
+    # as HTTP 500 on every request instead of a permission decision.
     iam_permission_class = ProductionStatsPermission
+    # ImageLab manages privileges with global Django groups only; there is no organization
+    # axis for OrganizationFilterBackend to filter on.
+    iam_organization_field = None
     lookup_value_regex = r"\d+"
 
+    @method_decorator(never_cache)
+    @handle_clickhouse_exceptions
     def retrieve(self, request: ExtendedRequest, pk: str) -> Response:
+        # Postgres first. The row is needed three times over: as the object the permission
+        # check is made against, as the identity half of the response, and for
+        # `created_date` - the lower bound that keeps the timeline scan off the full
+        # `cvat.events` table, whose only sort key is `timestamp`.
+        job = (
+            Job.objects.select_related("assignee", "segment__task__project")
+            .filter(id=int(pk))
+            .first()
+        )
+
         # PolicyEnforcer.has_permission() returns True unconditionally for detail
         # routes and defers to has_object_permission(), which DRF only invokes
         # from check_object_permissions(). A non-model view set that never calls
         # it is therefore completely unguarded, so call it explicitly - the same
         # thing RequestViewSet.retrieve() does for its non-model detail route.
-        # TODO(U4): pass the Job instance here once it is looked up (404 on miss).
-        self.check_object_permissions(request, None)
+        #
+        # Deliberately *before* the 404, unlike RequestViewSet: this policy is admin-only
+        # and object-independent, so answering 404 first would turn the route into an
+        # existence oracle for job ids that any authenticated user could probe.
+        self.check_object_permissions(request, job)
 
-        # TODO(U4): return the real rounds and the post-acceptance remainder.
-        return Response(
-            {"job_id": int(pk), "rounds": [], "trailing": None},
-            status=status.HTTP_200_OK,
-        )
+        if job is None:
+            raise NotFound(f"There is no job with id {pk}")
+
+        decomposition = job_rounds.fetch_job_rounds(job_id=job.id, history_start=job.created_date)
+
+        # The assignee is already in memory; only the reviewers cost a query, and only one
+        # however many rounds the job went through.
+        usernames: dict[int, str] = {}
+        if job.assignee_id is not None:
+            usernames[job.assignee_id] = job.assignee.username
+        _fetch_usernames(decomposition["reviewer_user_ids"], usernames)
+
+        payload = _build_rounds_payload(job, decomposition, usernames)
+
+        return Response(JobRoundsSerializer(payload).data, status=status.HTTP_200_OK)

@@ -26,12 +26,21 @@ from cvat.apps.engine.models import (
     Task,
 )
 from cvat.apps.engine.tests.utils import ApiTestBase, logging_disabled
+from cvat.apps.production_stats.queries import UPDATE_JOB_SCOPE, WORKING_TIME_SCOPE
 from cvat.apps.production_stats.queries.clickhouse import ClickHouseError
 from cvat.apps.production_stats.serializers import MAX_PERIOD
 
 JOB_FACTS_PATH = "/api/production_stats/job_facts"
-JOB_ROUNDS_PATH = "/api/production_stats/job_rounds/1"
-ALL_PATHS = (JOB_FACTS_PATH, JOB_ROUNDS_PATH)
+JOB_ROUNDS_PATH = "/api/production_stats/job_rounds"
+
+# An id no fixture creates. The rounds route reads Postgres before anything else, so a
+# test that wants a miss has to name an id that really is absent.
+MISSING_JOB_ID = 10_000_000
+
+
+def job_rounds_path(job_id: int) -> str:
+    return f"{JOB_ROUNDS_PATH}/{job_id}"
+
 
 UTC = timezone.utc
 PERIOD_START = datetime(2026, 8, 3, tzinfo=UTC)
@@ -51,9 +60,9 @@ class FakeClickHouse:
     Stands in for the ClickHouse executor.
 
     Statements are routed by a distinctive fragment of each one rather than by call order:
-    the view issues five queries and reordering them must not silently rewire the fixture.
-    An unrecognised statement is a failure rather than an empty result - the latter is what
-    turns a renamed column into a green test with no rows.
+    the two views issue six statements between them, and reordering them must not silently
+    rewire the fixture. An unrecognised statement is a failure rather than an empty result -
+    the latter is what turns a renamed column into a green test with no rows.
     """
 
     def __init__(
@@ -62,18 +71,25 @@ class FakeClickHouse:
         jobs: Sequence[tuple[int, int | None]] = (),
         lifecycle: Sequence[Mapping[str, Any]] = (),
         working_time: Sequence[Mapping[str, Any]] = (),
+        timeline: Sequence[Mapping[str, Any]] = (),
         daily: Sequence[Mapping[str, Any]] = (),
         last_seen: Mapping[str, Any] | None = None,
     ):
         self.jobs = list(jobs)
         self.lifecycle = list(lifecycle)
         self.working_time = list(working_time)
+        self.timeline = list(timeline)
         self.daily = list(daily)
         self.last_seen = last_seen
         self.statements: list[tuple[str, dict[str, Any]]] = []
 
     def __call__(self, sql: str, parameters: Mapping[str, Any]) -> list[dict[str, Any]]:
         self.statements.append((sql, dict(parameters)))
+
+        if "scope IN ('update:job', 'send:working_time')" in sql:
+            # The rounds scan is already scoped to one job by its `job_id` parameter, and
+            # each fixture is built for the job under test.
+            return [dict(row) for row in self.timeline]
 
         if "SELECT DISTINCT job_id" in sql:
             project_id = parameters.get("project_id")
@@ -98,6 +114,61 @@ class FakeClickHouse:
             return [dict(self.last_seen)] if self.last_seen else [{"last_seen": None, "events": 0}]
 
         raise AssertionError(f"unexpected statement: {sql}")
+
+
+def transition(timestamp: datetime, obj_name: str, obj_val: str, user_id: int) -> dict[str, Any]:
+    """An `update:job` row: the changed field in obj_name, its new value in obj_val."""
+    return {
+        "timestamp": timestamp,
+        "scope": UPDATE_JOB_SCOPE,
+        "obj_name": obj_name,
+        "obj_val": obj_val,
+        "user_id": user_id,
+        "duration": 0,
+    }
+
+
+def working(timestamp: datetime, user_id: int, duration_ms: int) -> dict[str, Any]:
+    """A `send:working_time` row. `duration` is integer milliseconds."""
+    return {
+        "timestamp": timestamp,
+        "scope": WORKING_TIME_SCOPE,
+        "obj_name": None,
+        "obj_val": None,
+        "user_id": user_id,
+        "duration": duration_ms,
+    }
+
+
+def create_job(
+    *,
+    project: Project,
+    task_name: str,
+    start_frame: int = 0,
+    stop_frame: int = 9,
+    assignee: User | None = None,
+    stage: StageChoice = StageChoice.ANNOTATION,
+    state: StateChoice = StateChoice.NEW,
+    frames: Sequence[int] | None = None,
+) -> Job:
+    """A real Postgres job. Both endpoints read their identity half from these rows."""
+    data = Data.objects.create(size=10, start_frame=0, stop_frame=9, image_quality=70)
+    task = Task.objects.create(name=task_name, project=project, data=data, mode="annotation")
+    segment = Segment.objects.create(
+        task=task,
+        start_frame=start_frame,
+        stop_frame=stop_frame,
+        type=SegmentType.SPECIFIC_FRAMES if frames else SegmentType.RANGE,
+        frames=list(frames or []),
+    )
+
+    return Job.objects.create(
+        segment=segment,
+        assignee=assignee,
+        stage=stage.value,
+        state=state.value,
+        type=JobType.ANNOTATION.value,
+    )
 
 
 def create_db_users(cls: type[ApiTestBase]) -> None:
@@ -129,13 +200,20 @@ class ProductionStatsPermissionTest(ApiTestBase):
     def setUpTestData(cls):
         create_db_users(cls)
 
+        # The rounds route is a detail route that reads Postgres first, so the happy path
+        # needs a job that really exists.
+        cls.job = create_job(
+            project=Project.objects.create(name="Permissions"), task_name="permissions"
+        )
+        cls.paths = (JOB_FACTS_PATH, job_rounds_path(cls.job.id))
+
     def _get(self, path: str, user: User | None):
         query_params = PERIOD if path == JOB_FACTS_PATH else None
         with mock.patch(RUN_QUERY, FakeClickHouse()):
             return self._get_request(path, user=user, query_params=query_params)
 
     def test_admin_can_read_production_stats(self):
-        for path in ALL_PATHS:
+        for path in self.paths:
             with self.subTest(path=path):
                 response = self._get(path, user=self.admin)
                 self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -146,27 +224,42 @@ class ProductionStatsPermissionTest(ApiTestBase):
         self.assertIn("results", response.json())
 
     def test_job_rounds_returns_a_rounds_payload(self):
-        response = self._get(JOB_ROUNDS_PATH, user=self.admin)
+        response = self._get(job_rounds_path(self.job.id), user=self.admin)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn("rounds", response.json())
 
     def test_regular_user_cannot_read_production_stats(self):
-        for path in ALL_PATHS:
+        for path in self.paths:
             with self.subTest(path=path):
                 response = self._get(path, user=self.user)
                 self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_worker_cannot_read_production_stats(self):
-        for path in ALL_PATHS:
+        for path in self.paths:
             with self.subTest(path=path):
                 response = self._get(path, user=self.worker)
                 self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_anonymous_user_cannot_read_production_stats(self):
-        for path in ALL_PATHS:
+        for path in self.paths:
             with self.subTest(path=path):
                 response = self._get(path, user=None)
                 self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_a_non_admin_cannot_probe_which_job_ids_exist(self):
+        # The permission check runs before the 404 on purpose: were it the other way round,
+        # any logged-in user could tell an existing job from a missing one by the status
+        # code, even though the policy denies them the contents either way.
+        for user in (self.user, self.worker):
+            with self.subTest(user=user.username):
+                self.assertEqual(
+                    self._get(job_rounds_path(self.job.id), user=user).status_code,
+                    self._get(job_rounds_path(MISSING_JOB_ID), user=user).status_code,
+                )
+                self.assertEqual(
+                    self._get(job_rounds_path(MISSING_JOB_ID), user=user).status_code,
+                    status.HTTP_403_FORBIDDEN,
+                )
 
 
 class JobFactsTest(ApiTestBase):
@@ -190,7 +283,7 @@ class JobFactsTest(ApiTestBase):
         cls.project_beta = Project.objects.create(name="Beta")
 
         # A plain range segment: 5 frames out of a 10 frame task.
-        cls.job_alpha = cls._create_job(
+        cls.job_alpha = create_job(
             project=cls.project_alpha,
             task_name="alpha-range",
             start_frame=0,
@@ -202,7 +295,7 @@ class JobFactsTest(ApiTestBase):
 
         # A specific-frames segment spanning the whole task: stop_frame - start_frame + 1
         # would say 10, the real frame set holds 3.
-        cls.job_specific = cls._create_job(
+        cls.job_specific = create_job(
             project=cls.project_alpha,
             task_name="alpha-specific",
             start_frame=0,
@@ -214,7 +307,7 @@ class JobFactsTest(ApiTestBase):
         )
 
         # Another project, and nobody assigned to it.
-        cls.job_beta = cls._create_job(
+        cls.job_beta = create_job(
             project=cls.project_beta,
             task_name="beta-range",
             start_frame=0,
@@ -226,37 +319,6 @@ class JobFactsTest(ApiTestBase):
 
         # A job id ClickHouse still remembers after its task cascaded away in Postgres.
         cls.deleted_job_id = cls.job_beta.id + 10_000
-
-    @classmethod
-    def _create_job(
-        cls,
-        *,
-        project: Project,
-        task_name: str,
-        start_frame: int,
-        stop_frame: int,
-        assignee: User | None,
-        stage: StageChoice,
-        state: StateChoice,
-        frames: Sequence[int] | None = None,
-    ) -> Job:
-        data = Data.objects.create(size=10, start_frame=0, stop_frame=9, image_quality=70)
-        task = Task.objects.create(name=task_name, project=project, data=data, mode="annotation")
-        segment = Segment.objects.create(
-            task=task,
-            start_frame=start_frame,
-            stop_frame=stop_frame,
-            type=SegmentType.SPECIFIC_FRAMES if frames else SegmentType.RANGE,
-            frames=list(frames or []),
-        )
-
-        return Job.objects.create(
-            segment=segment,
-            assignee=assignee,
-            stage=stage.value,
-            state=state.value,
-            type=JobType.ANNOTATION.value,
-        )
 
     # ---------------------------------------------------------------- fixtures
 
@@ -563,4 +625,294 @@ class JobFactsTest(ApiTestBase):
             len(every_row.captured_queries),
             len(single_row.captured_queries),
             "username resolution must not scale with the number of rows",
+        )
+
+
+class JobRoundsTest(ApiTestBase):
+    """
+    The round decomposition of a single job.
+
+    ClickHouse is faked (see FakeClickHouse); Postgres is real, because the endpoint takes
+    three things from it - the identity half of the response, the object the permission
+    check is made against, and the `created_date` that bounds the timeline scan.
+    """
+
+    T1 = datetime(2026, 8, 18, 1, tzinfo=UTC)  # annotation opens
+    T2 = datetime(2026, 8, 18, 5, tzinfo=UTC)  # submitted for review
+    T3 = datetime(2026, 8, 18, 6, tzinfo=UTC)  # rejected
+    T4 = datetime(2026, 8, 18, 8, tzinfo=UTC)  # resubmitted
+    T5 = datetime(2026, 8, 18, 9, tzinfo=UTC)  # accepted
+    T6 = datetime(2026, 8, 19, 1, tzinfo=UTC)  # reverted to annotation
+
+    @classmethod
+    def setUpTestData(cls):
+        create_db_users(cls)
+
+        cls.annotator = User.objects.create_user(username="annotator", password="annotator")
+        cls.reviewer = User.objects.create_user(username="reviewer", password="reviewer")
+        cls.second_reviewer = User.objects.create_user(username="second", password="second")
+
+        cls.project = Project.objects.create(name="Rounds")
+        cls.job = create_job(
+            project=cls.project,
+            task_name="rounds",
+            assignee=cls.annotator,
+            stage=StageChoice.ACCEPTANCE,
+            state=StateChoice.COMPLETED,
+        )
+
+    # ---------------------------------------------------------------- fixtures
+
+    def _one_rejection(self) -> list[dict[str, Any]]:
+        """annotation -> review -> rework -> re-review, then acceptance."""
+        return [
+            transition(self.T1, "state", "in progress", self.annotator.id),
+            working(self.T1 + timedelta(minutes=30), self.annotator.id, 600_000),
+            transition(self.T2, "state", "completed", self.annotator.id),
+            working(self.T2 + timedelta(minutes=10), self.reviewer.id, 300_000),
+            transition(self.T3, "state", "rejected", self.reviewer.id),
+            working(self.T3 + timedelta(minutes=10), self.annotator.id, 120_000),
+            transition(self.T4, "state", "completed", self.annotator.id),
+            working(self.T4 + timedelta(minutes=10), self.reviewer.id, 60_000),
+            transition(self.T5, "stage", "acceptance", self.reviewer.id),
+        ]
+
+    def _two_rejections(self) -> list[dict[str, Any]]:
+        """A second rejection, so the fold has to open a third round."""
+        second_rejection = self.T4 + timedelta(minutes=30)
+        second_resubmit = self.T4 + timedelta(minutes=45)
+
+        return self._one_rejection()[:-1] + [
+            transition(second_rejection, "state", "rejected", self.reviewer.id),
+            working(second_rejection + timedelta(minutes=5), self.annotator.id, 30_000),
+            transition(second_resubmit, "state", "completed", self.annotator.id),
+            transition(self.T5, "stage", "acceptance", self.reviewer.id),
+        ]
+
+    # ----------------------------------------------------------------- helpers
+
+    def _get(self, fake: Any, *, job_id: int | None = None, user: User | None = None):
+        path = job_rounds_path(self.job.id if job_id is None else job_id)
+
+        with mock.patch(RUN_QUERY, fake):
+            return self._get_request(path, user=user or self.admin)
+
+    def _payload(self, timeline: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+        response = self._get(FakeClickHouse(timeline=timeline))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        return response.json()
+
+    @staticmethod
+    def _iso(value: datetime) -> str:
+        return value.isoformat().replace("+00:00", "Z")
+
+    # ------------------------------------------------------------------- tests
+
+    def test_a_rejected_job_comes_back_as_annotation_review_rework_rereview(self):
+        payload = self._payload(self._one_rejection())
+
+        self.assertEqual(
+            [(entry["round"], entry["phase"]) for entry in payload["rounds"]],
+            [(1, "annotation"), (1, "review"), (2, "annotation"), (2, "review")],
+        )
+        self.assertEqual(
+            [(entry["started_at"], entry["ended_at"]) for entry in payload["rounds"]],
+            [
+                (self._iso(self.T1), self._iso(self.T2)),
+                (self._iso(self.T2), self._iso(self.T3)),
+                (self._iso(self.T3), self._iso(self.T4)),
+                (self._iso(self.T4), self._iso(self.T5)),
+            ],
+        )
+        self.assertEqual(
+            [(entry["worker_seconds"], entry["reviewer_seconds"]) for entry in payload["rounds"]],
+            [(600.0, 0.0), (0.0, 300.0), (120.0, 0.0), (0.0, 60.0)],
+        )
+
+    def test_a_second_rejection_opens_a_third_round(self):
+        payload = self._payload(self._two_rejections())
+
+        self.assertEqual(
+            [(entry["round"], entry["phase"]) for entry in payload["rounds"]],
+            [
+                (1, "annotation"),
+                (1, "review"),
+                (2, "annotation"),
+                (2, "review"),
+                (3, "annotation"),
+                (3, "review"),
+            ],
+        )
+
+    def test_a_job_that_never_started_is_a_200_with_no_rounds(self):
+        # No `state -> in progress` anywhere: somebody opened the job and booked time, but
+        # the state machine never moved. The screen shows this as "no work recorded", which
+        # it can only do if it is distinguishable from a failed lookup.
+        payload = self._payload([working(self.T1, self.annotator.id, 60_000)])
+
+        self.assertEqual(payload["rounds"], [])
+        self.assertIsNone(payload["trailing"])
+        self.assertIsNone(payload["accepted_at"])
+        self.assertEqual(payload["totals"], {"worker_seconds": 60.0, "reviewer_seconds": 0.0})
+
+    def test_an_unknown_job_id_is_a_404(self):
+        fake = FakeClickHouse(timeline=self._one_rejection())
+
+        response = self._get(fake, job_id=MISSING_JOB_ID)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        # Postgres decides the miss; the analytics store is never consulted.
+        self.assertEqual(fake.statements, [])
+
+    def test_activity_after_the_first_acceptance_is_reported_as_trailing(self):
+        # Three jobs in the production dump were reverted to `annotation` after acceptance
+        # and worked on again. That time belongs to no round, and hiding it would leave the
+        # round times mysteriously short of the job total.
+        payload = self._payload(
+            self._one_rejection()
+            + [
+                transition(self.T6, "stage", "annotation", self.annotator.id),
+                working(self.T6 + timedelta(minutes=5), self.annotator.id, 90_000),
+            ]
+        )
+
+        self.assertEqual(len(payload["rounds"]), 4)
+        self.assertEqual(payload["rounds"][-1]["ended_at"], self._iso(self.T5))
+        self.assertEqual(payload["accepted_at"], self._iso(self.T5))
+
+        self.assertEqual(payload["trailing"]["started_at"], self._iso(self.T5))
+        self.assertIsNone(payload["trailing"]["ended_at"])
+        self.assertEqual(payload["trailing"]["worker_seconds"], 90.0)
+
+        in_rounds = sum(
+            entry["worker_seconds"] + entry["reviewer_seconds"] for entry in payload["rounds"]
+        )
+        self.assertEqual(in_rounds, 1080.0)
+        self.assertEqual(
+            payload["totals"]["worker_seconds"] + payload["totals"]["reviewer_seconds"],
+            in_rounds + payload["trailing"]["worker_seconds"],
+        )
+
+    def test_the_final_round_of_an_in_flight_job_has_no_end(self):
+        # Never "now": the drilldown has to be reproducible, and two page loads of the same
+        # job must not disagree.
+        payload = self._payload(
+            [
+                transition(self.T1, "state", "in progress", self.annotator.id),
+                working(self.T1 + timedelta(minutes=30), self.annotator.id, 600_000),
+                transition(self.T2, "state", "completed", self.annotator.id),
+            ]
+        )
+
+        self.assertIsNone(payload["rounds"][-1]["ended_at"])
+        self.assertIsNone(payload["accepted_at"])
+        self.assertIsNone(payload["trailing"])
+
+    def test_on_a_never_accepted_job_the_rejecter_is_the_reviewer(self):
+        payload = self._payload(
+            [
+                transition(self.T1, "state", "in progress", self.annotator.id),
+                transition(self.T2, "state", "completed", self.annotator.id),
+                working(self.T2 + timedelta(minutes=10), self.reviewer.id, 300_000),
+                transition(self.T3, "state", "rejected", self.reviewer.id),
+            ]
+        )
+
+        self.assertEqual(payload["reviewer_source"], "rejection")
+        self.assertEqual(payload["reviewer"], {"id": self.reviewer.id, "username": "reviewer"})
+        self.assertEqual(payload["rounds"][1]["reviewer_seconds"], 300.0)
+
+    def test_on_an_accepted_job_the_assignees_own_rejection_is_ignored(self):
+        # Treating any rejecter as a reviewer moved ~567 hours of annotation into the review
+        # axis of the production dump, because annotators flip their own job to `rejected`.
+        payload = self._payload(
+            [
+                transition(self.T1, "state", "in progress", self.annotator.id),
+                working(self.T1 + timedelta(minutes=30), self.annotator.id, 600_000),
+                transition(self.T2, "state", "rejected", self.annotator.id),
+                transition(self.T3, "state", "completed", self.annotator.id),
+                transition(self.T5, "stage", "acceptance", self.reviewer.id),
+            ]
+        )
+
+        self.assertEqual(payload["reviewer_source"], "acceptance")
+        self.assertEqual(payload["reviewers"], [{"id": self.reviewer.id, "username": "reviewer"}])
+        self.assertEqual(payload["totals"], {"worker_seconds": 600.0, "reviewer_seconds": 0.0})
+
+    def test_the_response_carries_the_jobs_postgres_identity(self):
+        payload = self._payload(self._one_rejection())
+
+        self.assertEqual(payload["job_id"], self.job.id)
+        self.assertEqual(payload["task_id"], self.job.segment.task_id)
+        self.assertEqual(payload["task_name"], "rounds")
+        self.assertEqual(payload["project_id"], self.project.id)
+        self.assertEqual(payload["project_name"], "Rounds")
+        self.assertEqual(payload["assignee"], {"id": self.annotator.id, "username": "annotator"})
+        self.assertEqual(payload["stage"], "acceptance")
+        self.assertEqual(payload["state"], "completed")
+
+    def test_the_timeline_is_read_once_and_bounded_by_the_jobs_creation_date(self):
+        # `cvat.events` is ordered by `timestamp` alone, so without this lower bound the
+        # drilldown would scan the whole table every time somebody opens a job.
+        fake = FakeClickHouse(timeline=self._one_rejection())
+
+        self._get(fake)
+
+        self.assertEqual(len(fake.statements), 1)
+        sql, parameters = fake.statements[0]
+        self.assertIn("timestamp >=", sql)
+        self.assertEqual(
+            parameters,
+            {
+                "job_id": self.job.id,
+                "history_start": (
+                    Job.objects.get(id=self.job.id)
+                    .created_date.astimezone(UTC)
+                    .replace(tzinfo=None)
+                ),
+            },
+        )
+
+    def test_clickhouse_failure_is_a_503_without_a_stack_trace(self):
+        def explode(sql, parameters):
+            raise ClickHouseError("connection refused to clickhouse:8123")
+
+        with logging_disabled():
+            response = self._get(explode)
+
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        body = response.content.decode()
+        self.assertNotIn("Traceback", body)
+        self.assertNotIn("connection refused", body)
+
+    def test_usernames_are_resolved_in_one_query_regardless_of_round_count(self):
+        # A second accepter: `reviewers` carries everyone who ever accepted, so this job
+        # names two accounts the assignee lookup does not already cover.
+        two_reviewers = self._two_rejections() + [
+            transition(self.T6, "stage", "acceptance", self.second_reviewer.id)
+        ]
+
+        # Warm up: the first request through this route pays one-off costs (content types,
+        # the session backend) that would otherwise land on whichever measurement runs first.
+        self._payload(self._one_rejection())
+
+        with CaptureQueriesContext(connection) as small:
+            short = self._payload(self._one_rejection())
+
+        with CaptureQueriesContext(connection) as large:
+            long = self._payload(two_reviewers)
+
+        # Guard against a vacuous comparison: the second job really does carry more rounds
+        # and more distinct accounts to resolve.
+        self.assertEqual(len(short["rounds"]), 4)
+        self.assertEqual(len(long["rounds"]), 6)
+        self.assertEqual(len(short["reviewers"]), 1)
+        self.assertEqual(len(long["reviewers"]), 2)
+
+        self.assertEqual(
+            len(large.captured_queries),
+            len(small.captured_queries),
+            "username resolution must not scale with the number of rounds",
         )
