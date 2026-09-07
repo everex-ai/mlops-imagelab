@@ -11,6 +11,7 @@ from unittest import mock
 
 from django.contrib.auth.models import Group, User
 from django.db import connection
+from django.test import SimpleTestCase
 from django.test.utils import CaptureQueriesContext
 from rest_framework import status
 
@@ -27,11 +28,21 @@ from cvat.apps.engine.models import (
 )
 from cvat.apps.engine.tests.utils import ApiTestBase, logging_disabled
 from cvat.apps.production_stats.queries import UPDATE_JOB_SCOPE, WORKING_TIME_SCOPE
+from cvat.apps.production_stats.queries import clickhouse as clickhouse_client
 from cvat.apps.production_stats.queries.clickhouse import ClickHouseError
 from cvat.apps.production_stats.serializers import MAX_PERIOD
+from cvat.apps.production_stats.tests.test_query_builders import (
+    PRODUCTION_STATS_LOCATION,
+    nginx_read_timeout,
+)
 
 JOB_FACTS_PATH = "/api/production_stats/job_facts"
 JOB_ROUNDS_PATH = "/api/production_stats/job_rounds"
+
+# The two stage-2 statements, named by a fragment that appears in one of them and nowhere
+# else, so a test can pick out what was bound to each.
+LIFECYCLE_SCAN = "accepter_user_ids"
+WORKING_TIME_SCAN = "AS working_ms"
 
 # An id no fixture creates. The rounds route reads Postgres before anything else, so a
 # test that wants a miss has to name an id that really is absent.
@@ -114,6 +125,19 @@ class FakeClickHouse:
             return [dict(self.last_seen)] if self.last_seen else [{"last_seen": None, "events": 0}]
 
         raise AssertionError(f"unexpected statement: {sql}")
+
+    def parameters_for(self, fragment: str) -> dict[str, Any]:
+        """
+        What was bound to the first statement containing ``fragment``.
+
+        The fixture rows are returned whatever the period or the history bound says, so a
+        statement's parameters are the only place a wrong bound is visible at all.
+        """
+        for sql, parameters in self.statements:
+            if fragment in sql:
+                return parameters
+
+        raise AssertionError(f"no statement contained {fragment!r}")
 
 
 def transition(timestamp: datetime, obj_name: str, obj_val: str, user_id: int) -> dict[str, Any]:
@@ -564,6 +588,124 @@ class JobFactsTest(ApiTestBase):
         # No frame count means no fabricated frame shares either.
         self.assertEqual([element["frames"] for element in row["days"]], [None])
 
+    def test_stage_two_is_never_bounded_later_than_the_window_stage_one_used(self):
+        # Every surviving job here was created after `period_start` - the fixtures are made
+        # now and the window is in the past - so a bound taken from those rows alone starts
+        # *after* the window stage 1 qualified jobs on. The job whose Postgres row is gone
+        # contributes no `created_date` of its own, and its acceptance and its working time
+        # sit early in the period: with the tighter bound stage 2 would scan straight past
+        # both, and the row would come back stripped of the evidence it was selected for.
+        self.assertTrue(
+            all(job.created_date > PERIOD_START for job in Job.objects.all()),
+            "the fixture no longer reproduces the case under test",
+        )
+
+        fake = self._fake(
+            jobs=self._all_jobs() + [(self.deleted_job_id, self.project_beta.id)],
+            lifecycle=self._lifecycle()
+            + [
+                {
+                    "job_id": self.deleted_job_id,
+                    "accepted_at": datetime(2026, 8, 4, 5, tzinfo=UTC),
+                    "accepter_user_ids": [self.reviewer.id],
+                    "rejecter_user_ids": [],
+                }
+            ],
+            working_time=self._working_time()
+            + [
+                {
+                    "job_id": self.deleted_job_id,
+                    "user_id": self.annotator.id,
+                    "day": "2026-08-04",
+                    "working_ms": 300_000,
+                }
+            ],
+        )
+
+        self._read(fake=fake)
+
+        for scan in (LIFECYCLE_SCAN, WORKING_TIME_SCAN):
+            with self.subTest(scan=scan):
+                self.assertEqual(
+                    fake.parameters_for(scan)["history_start"],
+                    PERIOD_START.replace(tzinfo=None),
+                )
+
+    def test_stage_twos_bound_still_widens_to_a_job_older_than_the_window(self):
+        # The bound only ever moves earlier: a job created before the window still pulls it
+        # back to its own creation, because its history starts there.
+        older = PERIOD_START - timedelta(days=30)
+        # `created_date` is auto_now_add, so the fixture's real creation time can only be
+        # rewritten with an UPDATE.
+        Job.objects.filter(id=self.job_alpha.id).update(created_date=older)
+
+        fake = self._fake()
+        self._read(fake=fake)
+
+        for scan in (LIFECYCLE_SCAN, WORKING_TIME_SCAN):
+            with self.subTest(scan=scan):
+                self.assertEqual(
+                    fake.parameters_for(scan)["history_start"], older.replace(tzinfo=None)
+                )
+
+    def test_a_job_accepted_by_its_own_assignee_keeps_its_annotation_time(self):
+        # The assignee is a Postgres fact, so this is also the test that the view threads
+        # it into the query layer: without it the accepter is their own reviewer, every
+        # second they worked is tagged `review`, and the whole frame count follows.
+        lifecycle = [dict(row) for row in self._lifecycle()]
+        lifecycle[0]["accepter_user_ids"] = [self.annotator.id]
+        working_time = [
+            row
+            for row in self._working_time()
+            if not (row["job_id"] == self.job_alpha.id and row["user_id"] == self.reviewer.id)
+        ]
+
+        row = self._row(
+            self._read(fake=self._fake(lifecycle=lifecycle, working_time=working_time)),
+            self.job_alpha.id,
+        )
+
+        self.assertEqual([element["role"] for element in row["days"]], ["annotation"])
+        # All five frames on the annotation axis, and no review element to put them on.
+        self.assertEqual([element["frames"] for element in row["days"]], [5.0])
+        self.assertEqual(
+            row["estimated_worker"], {"id": self.annotator.id, "username": "annotator"}
+        )
+        # Identity is unchanged: they are still displayed as whoever accepted it.
+        self.assertEqual(row["reviewer"], {"id": self.annotator.id, "username": "annotator"})
+
+    def test_a_second_reviewer_who_only_rejected_is_reported_as_review_time(self):
+        lifecycle = [dict(row) for row in self._lifecycle()]
+        lifecycle[0]["rejecter_user_ids"] = [self.outsider.id]
+        working_time = self._working_time() + [
+            {
+                "job_id": self.job_alpha.id,
+                "user_id": self.outsider.id,
+                "day": "2026-08-11",
+                "working_ms": 900_000,
+            }
+        ]
+
+        row = self._row(
+            self._read(fake=self._fake(lifecycle=lifecycle, working_time=working_time)),
+            self.job_alpha.id,
+        )
+        roles = {element["user_id"]: element["role"] for element in row["days"]}
+
+        self.assertEqual(roles[self.outsider.id], "review")
+        # The same person the non-assignee total was already excluding - the two answers
+        # now come from one set instead of disagreeing silently.
+        self.assertEqual(row["non_assignee_seconds"], 0.0)
+
+    def test_the_list_handler_issues_the_statement_count_the_timeout_budget_assumes(self):
+        # The per-statement ClickHouse deadline is the request budget divided by this
+        # number (see queries/clickhouse.py), so a sixth statement would overrun nginx.
+        fake = self._fake()
+
+        self._read(fake=fake)
+
+        self.assertEqual(len(fake.statements), clickhouse_client.MAX_SEQUENTIAL_QUERIES)
+
     def test_response_is_a_single_page(self):
         response = self._read()
         payload = response.json()
@@ -625,6 +767,53 @@ class JobFactsTest(ApiTestBase):
             len(every_row.captured_queries),
             len(single_row.captured_queries),
             "username resolution must not scale with the number of rows",
+        )
+
+
+class ClickHouseDeadlineTest(SimpleTestCase):
+    """
+    The innermost component must not have the longest deadline.
+
+    clickhouse_connect defaults to 10s to connect and 300s to read. nginx allows 120s
+    upstream for these two routes and Beacon gives up on ImageLab after 90, so on the
+    library defaults both proxies hang up while the query runs on, and the failure the
+    operator sees never names ClickHouse.
+    """
+
+    def _client_kwargs(self) -> dict[str, Any]:
+        with mock.patch("clickhouse_connect.get_client") as get_client:
+            with clickhouse_client.get_client():
+                pass
+
+        return get_client.call_args.kwargs
+
+    def test_the_client_is_opened_with_explicit_timeouts(self):
+        kwargs = self._client_kwargs()
+
+        self.assertEqual(kwargs["connect_timeout"], clickhouse_client.CONNECT_TIMEOUT)
+        self.assertEqual(kwargs["send_receive_timeout"], clickhouse_client.SEND_RECEIVE_TIMEOUT)
+
+    def test_the_server_is_told_to_abandon_the_query_too(self):
+        # A client-side timeout only drops the socket. Without max_execution_time the query
+        # keeps running on a store that is already struggling, so every slow request leaves
+        # orphaned work behind it.
+        settings_sent = self._client_kwargs()["settings"]
+
+        self.assertEqual(settings_sent["max_execution_time"], clickhouse_client.MAX_EXECUTION_TIME)
+        self.assertLessEqual(
+            clickhouse_client.MAX_EXECUTION_TIME, clickhouse_client.SEND_RECEIVE_TIMEOUT
+        )
+
+    def test_the_worst_case_request_stays_inside_the_proxy_read_timeout(self):
+        worst_case = clickhouse_client.MAX_SEQUENTIAL_QUERIES * (
+            clickhouse_client.CONNECT_TIMEOUT + clickhouse_client.SEND_RECEIVE_TIMEOUT
+        )
+
+        self.assertLess(worst_case, clickhouse_client.PROXY_READ_TIMEOUT)
+        # And the budget is pinned to what nginx actually grants these routes, so raising
+        # either number on its own cannot silently cross the proxy.
+        self.assertEqual(
+            nginx_read_timeout(PRODUCTION_STATS_LOCATION), clickhouse_client.PROXY_READ_TIMEOUT
         )
 
 
@@ -839,6 +1028,55 @@ class JobRoundsTest(ApiTestBase):
         self.assertEqual(payload["reviewer_source"], "acceptance")
         self.assertEqual(payload["reviewers"], [{"id": self.reviewer.id, "username": "reviewer"}])
         self.assertEqual(payload["totals"], {"worker_seconds": 600.0, "reviewer_seconds": 0.0})
+
+    def test_a_job_accepted_by_its_own_assignee_keeps_its_annotation_time(self):
+        # The assignee is a Postgres fact ClickHouse does not have, so this is also the test
+        # that the view threads it into the query layer: without it the accepter is their
+        # own reviewer, and every second of a job nobody else ever touched is review time.
+        payload = self._payload(
+            [
+                transition(self.T1, "state", "in progress", self.annotator.id),
+                working(self.T1 + timedelta(minutes=30), self.annotator.id, 600_000),
+                transition(self.T2, "state", "completed", self.annotator.id),
+                working(self.T2 + timedelta(minutes=10), self.annotator.id, 300_000),
+                transition(self.T5, "stage", "acceptance", self.annotator.id),
+            ]
+        )
+
+        # Identity is unchanged: they are still displayed as whoever accepted it.
+        self.assertEqual(payload["reviewer_source"], "acceptance")
+        self.assertEqual(payload["reviewer"], {"id": self.annotator.id, "username": "annotator"})
+
+        self.assertEqual(
+            [(entry["worker_seconds"], entry["reviewer_seconds"]) for entry in payload["rounds"]],
+            [(600.0, 0.0), (300.0, 0.0)],
+        )
+        self.assertEqual(payload["totals"], {"worker_seconds": 900.0, "reviewer_seconds": 0.0})
+
+    def test_a_second_reviewer_who_only_rejected_is_reported_as_review_time(self):
+        # `reviewers` is the accepters, so the person who sent this job back never appears
+        # there. Cutting the split on that set booked their fifteen minutes to the worker
+        # side - the annotator's own axis - of the round they spent rejecting it.
+        payload = self._payload(
+            [
+                transition(self.T1, "state", "in progress", self.annotator.id),
+                working(self.T1 + timedelta(minutes=30), self.annotator.id, 600_000),
+                transition(self.T2, "state", "completed", self.annotator.id),
+                working(self.T2 + timedelta(minutes=10), self.second_reviewer.id, 900_000),
+                transition(self.T3, "state", "rejected", self.second_reviewer.id),
+                working(self.T3 + timedelta(minutes=10), self.annotator.id, 120_000),
+                transition(self.T4, "state", "completed", self.annotator.id),
+                working(self.T4 + timedelta(minutes=10), self.reviewer.id, 60_000),
+                transition(self.T5, "stage", "acceptance", self.reviewer.id),
+            ]
+        )
+
+        self.assertEqual(payload["reviewers"], [{"id": self.reviewer.id, "username": "reviewer"}])
+        self.assertEqual(
+            [(entry["worker_seconds"], entry["reviewer_seconds"]) for entry in payload["rounds"]],
+            [(600.0, 0.0), (0.0, 900.0), (120.0, 0.0), (0.0, 60.0)],
+        )
+        self.assertEqual(payload["totals"], {"worker_seconds": 720.0, "reviewer_seconds": 960.0})
 
     def test_the_response_carries_the_jobs_postgres_identity(self):
         payload = self._payload(self._one_rejection())

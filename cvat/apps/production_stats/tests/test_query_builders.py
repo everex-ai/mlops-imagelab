@@ -15,6 +15,7 @@ or the network.
 import re
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest import mock
 from zoneinfo import ZoneInfo
 
@@ -29,6 +30,7 @@ from cvat.apps.production_stats.queries import (
     freshness,
     job_facts,
     job_rounds,
+    resolve_review_role_ids,
     resolve_reviewers,
     to_utc_naive,
 )
@@ -49,6 +51,28 @@ SECOND_REVIEWER = 78
 OUTSIDER = 99
 
 PLACEHOLDER_RE = re.compile(r"\{(\w+):([^{}]+)\}")
+
+# The nginx config the two endpoints are served through. Not a query builder, but it is
+# part of the same deadline contract: the ClickHouse client timeouts are derived from what
+# this file grants these routes (see queries/clickhouse.py).
+NGINX_CONF = Path(__file__).resolve().parents[3] / "nginx.conf"
+PRODUCTION_STATS_LOCATION = "/api/production_stats/"
+
+# `location <prefix> { ... }`. No location block in this file nests another one.
+LOCATION_RE = re.compile(r"location\s+(\S+)\s*\{([^{}]*)\}")
+READ_TIMEOUT_RE = re.compile(r"proxy_read_timeout\s+(\d+)s;")
+
+
+def nginx_locations():
+    """Every ``location`` block of cvat/nginx.conf, keyed by its prefix."""
+    return dict(LOCATION_RE.findall(NGINX_CONF.read_text()))
+
+
+def nginx_read_timeout(prefix):
+    """One block's ``proxy_read_timeout`` in seconds, or None when it sets none."""
+    match = READ_TIMEOUT_RE.search(nginx_locations()[prefix])
+
+    return int(match.group(1)) if match else None
 
 
 def _all_queries():
@@ -501,6 +525,91 @@ class ReviewerIdentityTest(unittest.TestCase):
         self.assertEqual({element["role"] for element in fact["days"]}, {ROLE_REVIEW})
 
 
+class ReviewAxisTest(unittest.TestCase):
+    """
+    Whose working time belongs on the review axis - a different question from who reviewed.
+
+    ``resolve_reviewers`` answers identity: acceptance-primary, rejection as a fallback,
+    and it is what the response displays. The axis is "accepted or rejected this job, and
+    is not its assignee". Deriving the second from the first misfiled time both ways.
+    """
+
+    def _fact(self, *, accepters, rejecters, working_time, assignee=ASSIGNEE):
+        return job_facts.build_facts(
+            [JOB_ID],
+            [_lifecycle_row(JOB_ID, accepter_user_ids=accepters, rejecter_user_ids=rejecters)],
+            working_time,
+            {JOB_ID: assignee},
+        )[JOB_ID]
+
+    def test_the_axis_and_the_identity_answer_different_questions(self):
+        # An assignee accepting their own job is the reviewer for display purposes and
+        # nothing more; a rejecter of an accepted job is on the axis without ever being
+        # the displayed reviewer.
+        self.assertEqual(resolve_review_role_ids([ASSIGNEE], [], ASSIGNEE), [])
+        self.assertEqual(resolve_reviewers([ASSIGNEE], []), ([ASSIGNEE], REVIEWER_FROM_ACCEPTANCE))
+
+        self.assertEqual(
+            resolve_review_role_ids([REVIEWER], [SECOND_REVIEWER], ASSIGNEE),
+            [REVIEWER, SECOND_REVIEWER],
+        )
+        self.assertEqual(resolve_reviewers([REVIEWER], [SECOND_REVIEWER])[0], [REVIEWER])
+
+    def test_a_job_accepted_by_its_own_assignee_keeps_its_annotation_time(self):
+        fact = self._fact(
+            accepters=[ASSIGNEE],
+            rejecters=[],
+            working_time=[_working_time_row(JOB_ID, ASSIGNEE, "2026-08-18", 3_600_000)],
+        )
+
+        # Identity is untouched - they really are the account that accepted it.
+        self.assertEqual(fact["reviewer_user_ids"], [ASSIGNEE])
+        self.assertEqual(fact["reviewer_source"], REVIEWER_FROM_ACCEPTANCE)
+
+        # Their hours are annotation, so the frames land on the annotation axis and the
+        # review axis stays empty instead of collecting the whole job.
+        distributed = job_facts.distribute_frames(fact["days"], 100)
+        self.assertEqual([element["role"] for element in distributed], [ROLE_ANNOTATION])
+        self.assertAlmostEqual(
+            sum(element["frames"] for element in distributed if element["role"] == ROLE_ANNOTATION),
+            100.0,
+            places=3,
+        )
+        self.assertEqual([e for e in distributed if e["role"] == ROLE_REVIEW], [])
+
+        # And the estimated-worker cross-check still has something to say about the job.
+        self.assertEqual(fact["estimated_worker_user_id"], ASSIGNEE)
+
+    def test_a_reviewer_who_only_rejected_an_accepted_job_is_on_the_review_axis(self):
+        fact = self._fact(
+            accepters=[REVIEWER],
+            rejecters=[SECOND_REVIEWER],
+            working_time=[
+                _working_time_row(JOB_ID, ASSIGNEE, "2026-08-18", 3_600_000),
+                _working_time_row(JOB_ID, REVIEWER, "2026-08-20", 600_000),
+                _working_time_row(JOB_ID, SECOND_REVIEWER, "2026-08-20", 900_000),
+                _working_time_row(JOB_ID, OUTSIDER, "2026-08-21", 120_000),
+            ],
+        )
+        roles = {element["user_id"]: element["role"] for element in fact["days"]}
+
+        self.assertEqual(
+            roles,
+            {
+                ASSIGNEE: ROLE_ANNOTATION,
+                REVIEWER: ROLE_REVIEW,
+                SECOND_REVIEWER: ROLE_REVIEW,
+                OUTSIDER: ROLE_ANNOTATION,
+            },
+        )
+        # The displayed reviewer is still the accepter alone.
+        self.assertEqual(fact["reviewer_user_ids"], [REVIEWER])
+
+        # The non-assignee total is built from the same set, so the rejecter's 900 seconds
+        # stay out of it: only the outsider's time is unattributed.
+        self.assertAlmostEqual(job_facts.non_assignee_seconds(fact, ASSIGNEE), 120.0, places=3)
+
+
 class NonAssigneeTotalTest(unittest.TestCase):
     def _fact(self):
         return job_facts.build_facts(
@@ -714,6 +823,98 @@ class RoundDecompositionTest(unittest.TestCase):
         self.assertEqual(result["job_id"], JOB_ID)
 
 
+class RoundReviewAxisTest(unittest.TestCase):
+    """
+    Whose seconds a round puts on the review side - not the same question as who reviewed.
+
+    ``resolve_reviewers`` answers identity: acceptance-primary, and it is what ``reviewer``
+    / ``reviewers`` / ``reviewer_source`` display. The axis is "accepted or rejected this
+    job, and is not its assignee". Cutting the split on identity misfiled time both ways,
+    so both directions are pinned here, along with the identity fields staying put.
+    """
+
+    T1 = datetime(2026, 8, 18, 1, 0, tzinfo=UTC)
+    T2 = datetime(2026, 8, 18, 5, 0, tzinfo=UTC)
+    T3 = datetime(2026, 8, 18, 6, 0, tzinfo=UTC)
+    T4 = datetime(2026, 8, 18, 8, 0, tzinfo=UTC)
+    T5 = datetime(2026, 8, 18, 9, 0, tzinfo=UTC)
+
+    def _self_accepted_timeline(self):
+        """One person start to finish: the assignee submits and accepts their own job."""
+        return [
+            _transition(self.T1, "state", "in progress", ASSIGNEE),
+            _working(self.T1 + timedelta(minutes=30), ASSIGNEE, 600_000),
+            _transition(self.T2, "state", "completed", ASSIGNEE),
+            _working(self.T2 + timedelta(minutes=10), ASSIGNEE, 300_000),
+            _transition(self.T5, "stage", "acceptance", ASSIGNEE),
+            _working(self.T5 + timedelta(minutes=5), ASSIGNEE, 90_000),
+        ]
+
+    def _rejected_by_a_second_reviewer_timeline(self):
+        """Accepted by one reviewer, but sent back once by a different one."""
+        return [
+            _transition(self.T1, "state", "in progress", ASSIGNEE),
+            _working(self.T1 + timedelta(minutes=30), ASSIGNEE, 600_000),
+            _transition(self.T2, "state", "completed", ASSIGNEE),
+            _working(self.T2 + timedelta(minutes=10), SECOND_REVIEWER, 900_000),
+            _transition(self.T3, "state", "rejected", SECOND_REVIEWER),
+            _working(self.T3 + timedelta(minutes=10), ASSIGNEE, 120_000),
+            _transition(self.T4, "state", "completed", ASSIGNEE),
+            _working(self.T4 + timedelta(minutes=10), REVIEWER, 60_000),
+            _transition(self.T5, "stage", "acceptance", REVIEWER),
+        ]
+
+    def test_a_job_accepted_by_its_own_assignee_keeps_its_annotation_time(self):
+        result = job_rounds.decompose_rounds(JOB_ID, self._self_accepted_timeline(), ASSIGNEE)
+
+        # Identity is untouched by the split: they really are the account that accepted it.
+        self.assertEqual(result["reviewer_user_ids"], [ASSIGNEE])
+        self.assertEqual(result["reviewer_source"], REVIEWER_FROM_ACCEPTANCE)
+
+        self.assertEqual(
+            [(entry["worker_seconds"], entry["reviewer_seconds"]) for entry in result["rounds"]],
+            [(600.0, 0.0), (300.0, 0.0)],
+        )
+        self.assertEqual(
+            (result["trailing"]["worker_seconds"], result["trailing"]["reviewer_seconds"]),
+            (90.0, 0.0),
+        )
+        self.assertEqual(result["totals"], {"worker_seconds": 990.0, "reviewer_seconds": 0.0})
+
+        # Nobody is on the axis - a person cannot review themselves onto it.
+        self.assertEqual(result["review_role_user_ids"], [])
+
+    def test_a_reviewer_who_only_rejected_an_accepted_job_is_on_the_review_axis(self):
+        result = job_rounds.decompose_rounds(
+            JOB_ID, self._rejected_by_a_second_reviewer_timeline(), ASSIGNEE
+        )
+
+        # The displayed reviewer is still the accepter alone - accepters win identity.
+        self.assertEqual(result["reviewer_user_ids"], [REVIEWER])
+        self.assertEqual(result["reviewer_source"], REVIEWER_FROM_ACCEPTANCE)
+
+        # The rejecter's fifteen minutes are review time, not the annotator's.
+        self.assertEqual(
+            [(entry["worker_seconds"], entry["reviewer_seconds"]) for entry in result["rounds"]],
+            [(600.0, 0.0), (0.0, 900.0), (120.0, 0.0), (0.0, 60.0)],
+        )
+        self.assertEqual(result["totals"], {"worker_seconds": 720.0, "reviewer_seconds": 960.0})
+
+        # Both of them reviewed something, so both are on the axis.
+        self.assertEqual(result["review_role_user_ids"], [REVIEWER, SECOND_REVIEWER])
+
+    def test_with_no_assignee_the_axis_falls_back_to_the_reviewer_identity(self):
+        # Nothing in a timeline says who the job belongs to, and on an accepted job a
+        # rejection is as likely to be the annotator's own mis-click as a second reviewer's
+        # verdict - only the assignee tells them apart. A caller that cannot supply one
+        # therefore gets the identity set, which is what this function answered before the
+        # assignee was threaded in: never better, but never worse either.
+        result = job_rounds.decompose_rounds(JOB_ID, self._rejected_by_a_second_reviewer_timeline())
+
+        self.assertEqual(result["review_role_user_ids"], [REVIEWER])
+        self.assertAlmostEqual(result["rounds"][1]["worker_seconds"], 900.0, places=3)
+
+
 class FreshnessTest(unittest.TestCase):
     def test_daily_presence_and_last_seen_come_back_together(self):
         collected_at = datetime(2026, 8, 19, 8, 30, tzinfo=UTC)
@@ -804,6 +1005,39 @@ class ExecutorInjectionTest(unittest.TestCase):
             job_facts.fetch_job_ids(period_start=PERIOD_START, period_end=PERIOD_END)
 
         resolve_default.assert_called_once()
+
+
+class NginxRoutingTest(unittest.TestCase):
+    """
+    The longer upstream read timeout belongs to these two endpoints, not to all of CVAT.
+
+    The ClickHouse aggregations behind /api/production_stats/ need more than nginx's 60s
+    default; nothing else in this API does. Granting it in the catch-all doubled the
+    upstream read timeout of every route in the server for the sake of two of them.
+    """
+
+    def test_production_stats_has_its_own_location_block(self):
+        self.assertIn(PRODUCTION_STATS_LOCATION, nginx_locations())
+        self.assertEqual(nginx_read_timeout(PRODUCTION_STATS_LOCATION), 120)
+
+    def test_the_catch_all_keeps_the_nginx_default_read_timeout(self):
+        self.assertIsNone(nginx_read_timeout("/"))
+
+    def test_the_dedicated_block_proxies_exactly_like_the_catch_all(self):
+        # A location block inherits nothing from the sibling it was split out of, so every
+        # directive the catch-all carries has to be repeated here - otherwise these two
+        # routes would quietly lose their forwarded headers, their buffering or their
+        # upstream.
+        locations = nginx_locations()
+        dedicated = locations[PRODUCTION_STATS_LOCATION]
+
+        for line in locations["/"].splitlines():
+            directive = line.strip()
+            if not directive or directive.startswith("#"):
+                continue
+
+            with self.subTest(directive=directive):
+                self.assertIn(directive, dedicated)
 
 
 if __name__ == "__main__":

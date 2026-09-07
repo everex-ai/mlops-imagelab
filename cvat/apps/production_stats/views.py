@@ -238,16 +238,22 @@ class JobFactsViewSet(viewsets.GenericViewSet):
         jobs = _fetch_jobs(job_ids)
 
         # Stage 2's lower bound exists purely to prune partitions - `cvat.events` is ordered
-        # by `timestamp` alone - and never changes the derived values, because neither a
-        # transition nor a working-time event can predate the job's creation. Jobs whose
-        # Postgres row is gone contribute no bound of their own; their history is clipped at
-        # the oldest surviving job, which is acceptable because those rows are diagnostic.
-        history_start = min(
-            (job.created_date for job in jobs.values()),
-            default=period_start,
-        )
+        # by `timestamp` alone - and must never clip evidence. Including `period_start`
+        # guarantees the bound is never later than the window stage 1 qualified these jobs
+        # on: a job whose Postgres row is gone contributes no `created_date`, and without
+        # that term a batch of jobs all created after `period_start` would push the bound
+        # past that job's in-window acceptance and working time and drop them from stage 2
+        # entirely. Every surviving `created_date` can only widen it further back, and per
+        # fetch_job_facts() widening this bound changes performance, never results.
+        history_start = min([period_start, *(job.created_date for job in jobs.values())])
 
-        facts = job_facts.fetch_job_facts(job_ids=job_ids, history_start=history_start)
+        facts = job_facts.fetch_job_facts(
+            job_ids=job_ids,
+            history_start=history_start,
+            # ClickHouse does not know who a job is assigned to, and the review axis is
+            # defined relative to the assignee; `jobs` is already in memory.
+            assignee_by_job={job_id: job.assignee_id for job_id, job in jobs.items()},
+        )
         usernames = _resolve_usernames(jobs, facts)
 
         rows = [
@@ -338,10 +344,11 @@ class JobRoundsViewSet(viewsets.ViewSet):
     @method_decorator(never_cache)
     @handle_clickhouse_exceptions
     def retrieve(self, request: ExtendedRequest, pk: str) -> Response:
-        # Postgres first. The row is needed three times over: as the object the permission
-        # check is made against, as the identity half of the response, and for
-        # `created_date` - the lower bound that keeps the timeline scan off the full
-        # `cvat.events` table, whose only sort key is `timestamp`.
+        # Postgres first. The row is needed four times over: as the object the permission
+        # check is made against, as the identity half of the response, for `created_date` -
+        # the lower bound that keeps the timeline scan off the full `cvat.events` table,
+        # whose only sort key is `timestamp` - and for the assignee the review axis is
+        # defined against.
         job = (
             Job.objects.select_related("assignee", "segment__task__project")
             .filter(id=int(pk))
@@ -362,7 +369,14 @@ class JobRoundsViewSet(viewsets.ViewSet):
         if job is None:
             raise NotFound(f"There is no job with id {pk}")
 
-        decomposition = job_rounds.fetch_job_rounds(job_id=job.id, history_start=job.created_date)
+        decomposition = job_rounds.fetch_job_rounds(
+            job_id=job.id,
+            history_start=job.created_date,
+            # ClickHouse does not know who a job is assigned to, and the review axis is
+            # defined relative to the assignee; the row is already in memory. The same
+            # thread JobFactsViewSet.list() makes with `assignee_by_job`.
+            assignee_user_id=job.assignee_id,
+        )
 
         # The assignee is already in memory; only the reviewers cost a query, and only one
         # however many rounds the job went through.

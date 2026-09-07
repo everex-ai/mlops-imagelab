@@ -24,6 +24,14 @@ revert all occur in the dump), so termination is pinned to the first acceptance 
 everything after it goes into the trailing bucket instead of inventing more rounds. The
 final round of a job still in flight is emitted with a null end - filling it with "now"
 would make two page loads disagree.
+
+Working time is split on the review *axis*, not on reviewer identity - the same two
+questions job_facts keeps apart. Identity (``resolve_reviewers``) is acceptance-primary and
+is what ``reviewer``/``reviewers``/``reviewer_source`` display; the axis
+(``resolve_review_role_ids``) is "accepted or rejected this job, and is not its assignee"
+and is what every ``worker_seconds``/``reviewer_seconds`` pair is cut on. The assignee is a
+Postgres fact ClickHouse does not have, so the view threads it in rather than this module
+querying for it.
 """
 
 from __future__ import annotations
@@ -47,6 +55,7 @@ from cvat.apps.production_stats.queries import (
     QueryExecutor,
     default_executor,
     ms_to_seconds,
+    resolve_review_role_ids,
     resolve_reviewers,
     to_utc_naive,
 )
@@ -96,8 +105,18 @@ def build_job_timeline_scan(*, job_id: int, history_start: datetime) -> Query:
     )
 
 
-def decompose_rounds(job_id: int, rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
-    """Turn one job's raw timeline into rounds, a trailing bucket and job totals."""
+def decompose_rounds(
+    job_id: int,
+    rows: Iterable[Mapping[str, Any]],
+    assignee_user_id: int | None = None,
+) -> dict[str, Any]:
+    """
+    Turn one job's raw timeline into rounds, a trailing bucket and job totals.
+
+    ``assignee_user_id`` is the job's Postgres assignee, threaded in by the view exactly the
+    way job_facts takes ``assignee_by_job``: ClickHouse does not know who a job is assigned
+    to, and the review axis is defined relative to it.
+    """
     transitions = []
     working = []
     for row in rows:
@@ -120,8 +139,24 @@ def decompose_rounds(job_id: int, rows: Iterable[Mapping[str, Any]]) -> dict[str
         and row.get("obj_name") == STATE_FIELD
         and row.get("obj_val") == STATE_REJECTED
     }
+    # Two different questions, two different sets - see resolve_review_role_ids.
+    # `reviewers` is "who reviewed this job", the identity the response displays;
+    # `review_role_ids` is "whose seconds belong on the review side", which every split
+    # below consumes. Deriving the second from the first reported a self-accepted job's
+    # whole annotation time as reviewer_seconds, and booked a second reviewer who only
+    # rejected as worker_seconds - the annotator's own axis.
     reviewers, reviewer_source = resolve_reviewers(accepters, rejecters)
-    reviewer_ids = set(reviewers)
+
+    # With no assignee there is nobody to subtract, and admitting the rejecters would
+    # re-open the misattribution resolve_reviewers exists to prevent: on an *accepted* job
+    # a rejection is as likely to be the annotator's own mis-click (~567 hours of it in the
+    # dump) as a second reviewer sending the job back, and only the assignee tells them
+    # apart. So an unidentified assignee leaves the axis at the identity set, which is
+    # what this function answered before the caller learned to thread the assignee in.
+    if assignee_user_id is None:
+        review_role_ids = set(reviewers)
+    else:
+        review_role_ids = set(resolve_review_role_ids(accepters, rejecters, assignee_user_id))
 
     acceptance_times = [
         row["timestamp"]
@@ -131,12 +166,12 @@ def decompose_rounds(job_id: int, rows: Iterable[Mapping[str, Any]]) -> dict[str
     accepted_at = min(acceptance_times) if acceptance_times else None
 
     phases = _build_phases(transitions, working, accepted_at)
-    rounds = _group_rounds(phases, working, reviewer_ids)
+    rounds = _group_rounds(phases, working, review_role_ids)
 
     trailing = None
     if accepted_at is not None:
         after_acceptance = [row for row in working if row["timestamp"] >= accepted_at]
-        worker_ms, reviewer_ms = _split_working_time(after_acceptance, reviewer_ids)
+        worker_ms, reviewer_ms = _split_working_time(after_acceptance, review_role_ids)
         trailing = {
             "started_at": accepted_at,
             "ended_at": None,
@@ -144,12 +179,15 @@ def decompose_rounds(job_id: int, rows: Iterable[Mapping[str, Any]]) -> dict[str
             "reviewer_seconds": ms_to_seconds(reviewer_ms),
         }
 
-    total_worker_ms, total_reviewer_ms = _split_working_time(working, reviewer_ids)
+    total_worker_ms, total_reviewer_ms = _split_working_time(working, review_role_ids)
 
     return {
         "job_id": int(job_id),
         "reviewer_user_ids": reviewers,
         "reviewer_source": reviewer_source,
+        # Named as job_facts names it. Nothing in the response displays it - it is here so
+        # the set the seconds were actually cut on is inspectable next to the identity.
+        "review_role_user_ids": sorted(review_role_ids),
         "accepted_at": accepted_at,
         "rounds": rounds,
         "trailing": trailing,
@@ -241,7 +279,7 @@ def _build_phases(
 def _group_rounds(
     phases: Sequence[Mapping[str, Any]],
     working: Sequence[Mapping[str, Any]],
-    reviewer_ids: set[int],
+    review_role_ids: set[int],
 ) -> list[dict[str, Any]]:
     """Collapse phases onto (round, role) pairs the way §3b's final GROUP BY does."""
     grouped: dict[tuple[int, bool], dict[str, Any]] = {}
@@ -254,7 +292,7 @@ def _group_rounds(
             if row["timestamp"] >= phase["start"]
             and (phase["end"] is None or row["timestamp"] < phase["end"])
         ]
-        worker_ms, reviewer_ms = _split_working_time(events, reviewer_ids)
+        worker_ms, reviewer_ms = _split_working_time(events, review_role_ids)
 
         entry = grouped.get(key)
         if entry is None:
@@ -295,10 +333,13 @@ def _group_rounds(
 
 
 def _split_working_time(
-    events: Iterable[Mapping[str, Any]], reviewer_ids: set[int]
+    events: Iterable[Mapping[str, Any]], review_role_ids: set[int]
 ) -> tuple[int, int]:
     """
     Split working time into worker and reviewer milliseconds.
+
+    Cut on the review axis, never on reviewer identity - a job's own assignee accepting it
+    makes them its reviewer for display, and that must not empty the annotation side.
 
     §3b's caveat still applies: a 90-second batch can straddle a boundary, or somebody can
     genuinely open a job outside their phase, so a little time shows up on the other side.
@@ -308,7 +349,7 @@ def _split_working_time(
     for row in events:
         duration = int(row.get("duration") or 0)
         user_id = row.get("user_id")
-        if user_id is not None and int(user_id) in reviewer_ids:
+        if user_id is not None and int(user_id) in review_role_ids:
             reviewer_ms += duration
         else:
             worker_ms += duration
@@ -320,10 +361,15 @@ def fetch_job_rounds(
     *,
     job_id: int,
     history_start: datetime,
+    assignee_user_id: int | None = None,
     execute: QueryExecutor | None = None,
 ) -> dict[str, Any]:
-    """Read one job's timeline and decompose it. ``history_start`` is its ``created_date``."""
+    """
+    Read one job's timeline and decompose it. ``history_start`` is its ``created_date``.
+
+    ``assignee_user_id`` carries the Postgres assignee the review axis is defined against.
+    """
     execute = execute or default_executor()
     query = build_job_timeline_scan(job_id=job_id, history_start=history_start)
 
-    return decompose_rounds(job_id, execute(query.sql, query.parameters))
+    return decompose_rounds(job_id, execute(query.sql, query.parameters), assignee_user_id)

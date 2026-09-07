@@ -30,11 +30,40 @@ from cvat.apps.engine.log import ServerLogManager
 slogger = ServerLogManager(__name__)
 
 __all__ = [
+    "CONNECT_TIMEOUT",
     "ClickHouseError",
+    "MAX_EXECUTION_TIME",
+    "MAX_SEQUENTIAL_QUERIES",
+    "PROXY_READ_TIMEOUT",
+    "SEND_RECEIVE_TIMEOUT",
     "get_client",
     "handle_clickhouse_exceptions",
     "run_query",
 ]
+
+# The request budget, and the timeouts derived from it.
+#
+# Both endpoints sit behind nginx's `location /api/production_stats/` block, which allows a
+# 120 second upstream read; Beacon gives up on ImageLab after 90. The job facts list
+# handler issues five ClickHouse statements one after another (stage 1, the two stage 2
+# scans, and the two freshness probes), so the per-statement deadline has to be the budget
+# divided by that count: 5 x (3 + 20) = 115s worst case, still inside the proxy's 120.
+#
+# Without these the driver's own defaults apply - 10s to connect and 300s to read - which
+# gives the innermost component of the stack a deadline more than twice the proxy's and
+# more than three times the client's. That is exactly backwards: nginx and Beacon would
+# both have hung up while ClickHouse was still working, and nothing would ever surface the
+# real failure.
+PROXY_READ_TIMEOUT = 120
+MAX_SEQUENTIAL_QUERIES = 5
+CONNECT_TIMEOUT = 3
+SEND_RECEIVE_TIMEOUT = 20
+
+# The server-side half of the same deadline, one second inside the client's so ClickHouse
+# is the one that gives up first. A client-side timeout only drops the socket - without
+# this the query keeps running on a store that is already struggling, so every slow request
+# would leave orphaned work behind it.
+MAX_EXECUTION_TIME = SEND_RECEIVE_TIMEOUT - 1
 
 
 @contextmanager
@@ -48,6 +77,9 @@ def get_client() -> Iterator[Client]:
         port=clickhouse_settings["PORT"],
         username=clickhouse_settings["USER"],
         password=clickhouse_settings["PASSWORD"],
+        connect_timeout=CONNECT_TIMEOUT,
+        send_receive_timeout=SEND_RECEIVE_TIMEOUT,
+        settings={"max_execution_time": MAX_EXECUTION_TIME},
     ) as client:
         yield client
 

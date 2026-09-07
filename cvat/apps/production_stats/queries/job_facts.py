@@ -12,12 +12,16 @@ window" and "working time was recorded in the window".
 Stage 2 (:func:`build_job_lifecycle_scan` and :func:`build_working_time_scan`) computes
 every derived value for that id set - the day/role array, the reviewer, the rejecters, the
 per-user working time - with **no** period predicate. Its time predicate is a lower bound
-the caller reads from Postgres ``Job.created_date``; neither a transition nor a working
-time event can predate the job's creation, so that bound is safe and still prunes
+the caller derives from the period start and the surviving jobs' Postgres
+``created_date``; neither a transition nor a working time event can predate both the job's
+creation and the window stage 1 selected on, so that bound is safe and still prunes
 partitions.
 
-Nothing here knows about frames or assignees: both come from Postgres. The view layer
-calls :func:`distribute_frames` and :func:`non_assignee_seconds` once it has them.
+Frames and assignees are Postgres facts, not ClickHouse ones. Frames stay out of this
+module entirely - the view layer calls :func:`distribute_frames` once it has them. The
+assignee is threaded in as ``assignee_by_job`` because the review axis is defined relative
+to it (see :func:`~cvat.apps.production_stats.queries.resolve_review_role_ids`), and the
+view has already fetched those rows before stage 2 runs.
 """
 
 from __future__ import annotations
@@ -33,6 +37,7 @@ from cvat.apps.production_stats.queries import (
     QueryExecutor,
     default_executor,
     ms_to_seconds,
+    resolve_review_role_ids,
     resolve_reviewers,
     to_utc_naive,
 )
@@ -125,12 +130,12 @@ def build_job_id_scan(
 
 
 def build_job_lifecycle_scan(*, job_ids: Sequence[int], history_start: datetime) -> Query:
-    """Stage 2a. ``history_start`` is min(Job.created_date) over ``job_ids``, from Postgres."""
+    """Stage 2a. ``history_start`` is the caller's lower bound on the jobs' history."""
     return Query(JOB_LIFECYCLE_SCAN_SQL, _stage_two_parameters(job_ids, history_start))
 
 
 def build_working_time_scan(*, job_ids: Sequence[int], history_start: datetime) -> Query:
-    """Stage 2b. ``history_start`` is min(Job.created_date) over ``job_ids``, from Postgres."""
+    """Stage 2b. ``history_start`` is the caller's lower bound on the jobs' history."""
     return Query(WORKING_TIME_SCAN_SQL, _stage_two_parameters(job_ids, history_start))
 
 
@@ -158,6 +163,7 @@ def empty_fact(job_id: int) -> dict[str, Any]:
         "rejecter_user_ids": [],
         "reviewer_user_ids": [],
         "reviewer_source": None,
+        "review_role_user_ids": [],
         "days": [],
         "working_ms_by_user": {},
         "estimated_worker_user_id": None,
@@ -168,16 +174,23 @@ def build_facts(
     job_ids: Sequence[int],
     lifecycle_rows: Iterable[Mapping[str, Any]],
     working_time_rows: Iterable[Mapping[str, Any]],
+    assignee_by_job: Mapping[int, int | None] | None = None,
 ) -> dict[int, dict[str, Any]]:
     """
     Fold the two stage-2 result sets into one fact per requested job id.
 
     Every requested id gets an entry, even when it has no events at all, so the view layer
     can merge Postgres rows without guarding every lookup.
+
+    ``assignee_by_job`` is the one Postgres fact this fold needs: the review axis is
+    "accepted or rejected, and not the assignee" (see resolve_review_role_ids), and
+    ClickHouse does not know who a job is assigned to. It is threaded in rather than
+    looked up here - the view has already fetched those rows. Jobs missing from the
+    mapping (their Postgres row is gone) simply have no assignee to exclude.
     """
     facts = {int(job_id): empty_fact(job_id) for job_id in job_ids}
 
-    _apply_lifecycle(facts, lifecycle_rows)
+    _apply_lifecycle(facts, lifecycle_rows, assignee_by_job or {})
     _apply_working_time(facts, working_time_rows)
 
     for fact in facts.values():
@@ -189,14 +202,24 @@ def build_facts(
     return facts
 
 
-def _apply_lifecycle(facts: dict[int, dict[str, Any]], rows: Iterable[Mapping[str, Any]]) -> None:
+def _apply_lifecycle(
+    facts: dict[int, dict[str, Any]],
+    rows: Iterable[Mapping[str, Any]],
+    assignee_by_job: Mapping[int, int | None],
+) -> None:
     for row in rows:
         job_id = int(row["job_id"])
         fact = facts.setdefault(job_id, empty_fact(job_id))
 
         accepters = sorted({int(user_id) for user_id in row.get("accepter_user_ids") or ()})
         rejecters = sorted({int(user_id) for user_id in row.get("rejecter_user_ids") or ()})
+
+        # Two different questions, two different sets - see resolve_review_role_ids.
+        # `reviewer_user_ids` is "who reviewed this job", which the response displays;
+        # `review_role_user_ids` is "whose working time belongs on the review axis", which
+        # the role tagging and the non-assignee total both consume.
         reviewers, reviewer_source = resolve_reviewers(accepters, rejecters)
+        review_role_ids = resolve_review_role_ids(accepters, rejecters, assignee_by_job.get(job_id))
 
         fact.update(
             {
@@ -209,6 +232,7 @@ def _apply_lifecycle(facts: dict[int, dict[str, Any]], rows: Iterable[Mapping[st
                 "rejecter_user_ids": rejecters,
                 "reviewer_user_ids": reviewers,
                 "reviewer_source": reviewer_source,
+                "review_role_user_ids": review_role_ids,
             }
         )
 
@@ -224,8 +248,8 @@ def _apply_working_time(
         working_ms = int(row.get("working_ms") or 0)
 
         # The role is attached here rather than in SQL so that it uses exactly the same
-        # reviewer determination as the rounds endpoint does.
-        role = ROLE_REVIEW if user_id in fact["reviewer_user_ids"] else ROLE_ANNOTATION
+        # review-axis determination as non_assignee_seconds() below.
+        role = ROLE_REVIEW if user_id in fact["review_role_user_ids"] else ROLE_ANNOTATION
 
         fact["days"].append(
             {
@@ -245,15 +269,20 @@ def _apply_working_time(
 
 def _estimated_worker(fact: Mapping[str, Any]) -> int | None:
     """
-    The event-based guess at who annotated the job: the non-reviewer with the most working
-    time. §0 used argMax(user_name, ms); this keys on user_id. Ties break on the lowest id
-    so two calls never disagree.
+    The event-based guess at who annotated the job: the person with the most working time
+    that is not on the review axis. §0 used argMax(user_name, ms); this keys on user_id.
+    Ties break on the lowest id so two calls never disagree.
+
+    Keyed on the review axis rather than on reviewer identity for the same reason the day
+    rows are: on a job the assignee accepted themselves, identity makes them their own
+    reviewer, and this cross-check would go quiet on exactly the rows whose day entries
+    say ``annotation``.
     """
-    reviewers = set(fact["reviewer_user_ids"])
+    on_review_axis = set(fact["review_role_user_ids"])
     candidates = [
         (working_ms, -user_id)
         for user_id, working_ms in fact["working_ms_by_user"].items()
-        if user_id not in reviewers
+        if user_id not in on_review_axis
     ]
 
     if not candidates:
@@ -300,12 +329,13 @@ def non_assignee_seconds(fact: Mapping[str, Any], assignee_user_id: int | None) 
     """
     Working time on this job that belongs to nobody who is supposed to be on it.
 
-    Excluded: the assignee, the reviewers, and anyone who set ``state -> rejected``. The
-    last exclusion is the point - a reviewer who only rejected is not in the reviewer set
-    (that set is the accepters) and would otherwise be counted here, flagging a perfectly
-    ordinary job as attribution-suspect.
+    Excluded: the assignee and everyone on the review axis - that is, everyone who
+    accepted or rejected. The exclusion consumes exactly the set the day rows are tagged
+    from (see resolve_review_role_ids), so the two can no longer disagree about the same
+    person: before, someone who only rejected an accepted job was silently excluded here
+    while their hours were being booked as annotation over there.
     """
-    excluded = set(fact["reviewer_user_ids"]) | set(fact["rejecter_user_ids"])
+    excluded = set(fact["review_role_user_ids"])
     if assignee_user_id is not None:
         excluded.add(int(assignee_user_id))
 
@@ -338,14 +368,17 @@ def fetch_job_facts(
     *,
     job_ids: Sequence[int],
     history_start: datetime,
+    assignee_by_job: Mapping[int, int | None] | None = None,
     execute: QueryExecutor | None = None,
 ) -> dict[int, dict[str, Any]]:
     """
     Stage 2. Derived values for ``job_ids``, independent of the caller's period.
 
     ``history_start`` must be a lower bound on the jobs' history - pass
-    ``min(Job.created_date)`` over ``job_ids`` from Postgres. It exists only to prune
-    partitions; widening it changes performance, never results.
+    ``min(period_start, *Job.created_date)`` over ``job_ids`` from Postgres. It exists only
+    to prune partitions; widening it changes performance, never results.
+
+    ``assignee_by_job`` carries the Postgres assignees the review axis is defined against.
     """
     if not job_ids:
         return {}
@@ -358,4 +391,5 @@ def fetch_job_facts(
         job_ids,
         execute(lifecycle.sql, lifecycle.parameters),
         execute(working_time.sql, working_time.parameters),
+        assignee_by_job,
     )

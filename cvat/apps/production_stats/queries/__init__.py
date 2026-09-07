@@ -32,9 +32,13 @@ Five deliberate divergences from the source SQL:
    seconds *of the same role*. A combined denominator would make the review axis's
    per-image time meaningless. Consequence: the two roles' frame totals each sum to the
    job's frame count, so they must never be added together.
-5. Whoever set ``state -> rejected`` is excluded from the non-assignee working-time total.
-   Without that, a second reviewer who only rejected makes an ordinary job look
-   attribution-suspect.
+5. Reviewer *identity* and the review *axis* are two different questions, answered by two
+   functions. Identity (:func:`resolve_reviewers`) is acceptance-primary with a rejection
+   fallback and is what the response displays. The axis
+   (:func:`resolve_review_role_ids`) is "accepted or rejected this job, and is not its
+   assignee"; it decides both whose working time is tagged ``review`` and who is excluded
+   from the non-assignee total, so a second reviewer who only rejected can neither have
+   their hours booked as annotation nor make an ordinary job look attribution-suspect.
 
 Everything else is carried over unchanged in spirit: the reviewer is whoever performed
 ``stage -> acceptance`` (falling back to the rejecter only on jobs that were never
@@ -70,6 +74,7 @@ __all__ = [
     "WORKING_TIME_SCOPE",
     "default_executor",
     "ms_to_seconds",
+    "resolve_review_role_ids",
     "resolve_reviewers",
     "to_utc_naive",
 ]
@@ -175,3 +180,37 @@ def resolve_reviewers(
         return rejecters, REVIEWER_FROM_REJECTION
 
     return [], None
+
+
+def resolve_review_role_ids(
+    accepter_user_ids: Iterable[Any] | None,
+    rejecter_user_ids: Iterable[Any] | None,
+    assignee_user_id: Any | None = None,
+) -> list[int]:
+    """
+    Decide whose working time belongs on the **review** axis.
+
+    Deliberately not :func:`resolve_reviewers`. That function answers "who reviewed this
+    job" for display - acceptance-primary, rejection only as a fallback - and it is right
+    for that. This one answers a different question, and conflating the two caused two
+    misattributions:
+
+    * an assignee who accepted their own job became their own reviewer, so every second
+      they worked was tagged ``review``, the annotation axis came back empty, the frame
+      distribution put the whole job on the review side and the estimated-worker
+      cross-check went quiet;
+    * on a job that *was* accepted, a second reviewer who only rejected was absent from
+      the reviewer set and had their hours booked as annotation - while the non-assignee
+      total was already excluding them, so the same person was classified two ways by two
+      functions and neither cross-check said anything.
+
+    So the review axis is "accepted or rejected this job, and is not its assignee". The
+    assignee is a Postgres fact that ClickHouse does not have; the caller supplies it.
+    """
+    review_role_ids = {int(user_id) for user_id in accepter_user_ids or ()}
+    review_role_ids |= {int(user_id) for user_id in rejecter_user_ids or ()}
+
+    if assignee_user_id is not None:
+        review_role_ids.discard(int(assignee_user_id))
+
+    return sorted(review_role_ids)
