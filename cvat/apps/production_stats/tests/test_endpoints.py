@@ -626,6 +626,25 @@ class JobFactsTest(ApiTestBase):
         self.assertEqual(self._row(payload, self.job_alpha.id)["object_count"], 3)
         self.assertEqual(self._row(payload, self.job_specific.id)["object_count"], 1)
 
+    def test_object_count_stays_two_queries_regardless_of_job_count(self):
+        # The sibling username guarantee is pinned the same way (see
+        # test_usernames_are_resolved_in_one_query_regardless_of_row_count): the
+        # aggregate must not become one query per job as the id set grows.
+        add_annotations(self.job_alpha, shapes=2)
+        add_annotations(self.job_specific, shapes=2)
+        add_annotations(self.job_beta, shapes=2)
+
+        with CaptureQueriesContext(connection) as captured:
+            self._read()
+
+        counting = [
+            query
+            for query in captured.captured_queries
+            if 'engine_labeledshape' in query['sql']
+            or 'engine_labeledtrack' in query['sql']
+        ]
+        self.assertEqual(len(counting), 2, counting)
+
     def test_unassigned_job_is_listed_with_a_null_assignee(self):
         row = self._row(self._read(), self.job_beta.id)
 
