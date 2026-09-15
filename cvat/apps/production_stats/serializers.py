@@ -102,6 +102,10 @@ class JobFactSerializer(serializers.Serializer):
     state = serializers.CharField(allow_null=True)
     # Segment.frame_count, never stop_frame - start_frame + 1. Null on a deleted job.
     frame_count = serializers.IntegerField(allow_null=True)
+    # Top-level annotated objects in the job: shapes and tracks whose `parent` is null, so
+    # a 24-keypoint skeleton counts once rather than 25 times. `0` means the job really is
+    # empty; null means its Postgres row is gone, the same split `frame_count` draws.
+    object_count = serializers.IntegerField(allow_null=True)
     # Null on a job that has never reached the acceptance stage. Such jobs stay in the
     # list; the union window selects them on activity alone.
     accepted_at = serializers.DateTimeField(allow_null=True)

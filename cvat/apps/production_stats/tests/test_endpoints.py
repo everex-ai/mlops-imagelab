@@ -19,9 +19,13 @@ from cvat.apps.engine.models import (
     Data,
     Job,
     JobType,
+    Label,
+    LabeledShape,
+    LabeledTrack,
     Project,
     Segment,
     SegmentType,
+    ShapeType,
     StageChoice,
     StateChoice,
     Task,
@@ -193,6 +197,43 @@ def create_job(
         state=state.value,
         type=JobType.ANNOTATION.value,
     )
+
+
+def add_annotations(
+    job: Job,
+    *,
+    shapes: int = 0,
+    elements_per_shape: int = 0,
+    tracks: int = 0,
+    shape_type: str = ShapeType.SKELETON.value,
+) -> None:
+    """
+    Real annotation rows for a job.
+
+    ``elements_per_shape`` models a skeleton: the object itself is one row with
+    ``parent=None`` and each keypoint is another row pointing back at it. The count the
+    endpoint reports has to be the parents alone - this repo's projects use 24-keypoint
+    skeletons, so counting every row would inflate the number 25-fold.
+    """
+    label, _ = Label.objects.get_or_create(
+        project=job.segment.task.project, name="person", type="skeleton"
+    )
+
+    for index in range(shapes):
+        parent = LabeledShape.objects.create(
+            job=job, label=label, frame=index, type=shape_type
+        )
+        for element in range(elements_per_shape):
+            LabeledShape.objects.create(
+                job=job,
+                label=label,
+                frame=index,
+                type=ShapeType.POINTS.value,
+                parent=parent,
+            )
+
+    for index in range(tracks):
+        LabeledTrack.objects.create(job=job, label=label, frame=index)
 
 
 def create_db_users(cls: type[ApiTestBase]) -> None:
@@ -546,6 +587,45 @@ class JobFactsTest(ApiTestBase):
         # start_frame 0, stop_frame 9 - stop - start + 1 would say 10.
         self.assertEqual(row["frame_count"], 3)
 
+    def test_object_count_reports_top_level_shapes(self):
+        add_annotations(self.job_alpha, shapes=3)
+
+        row = self._row(self._read(), self.job_alpha.id)
+
+        self.assertEqual(row["object_count"], 3)
+
+    def test_skeleton_elements_are_not_counted_as_objects(self):
+        # One skeleton with 24 keypoints is one object, not 25.
+        add_annotations(self.job_alpha, shapes=2, elements_per_shape=24)
+
+        row = self._row(self._read(), self.job_alpha.id)
+
+        self.assertEqual(row["object_count"], 2)
+
+    def test_tracks_count_as_objects_too(self):
+        # Interpolated annotations live in their own table; leaving them out would report
+        # zero for a project that uses them and look like "nothing was labelled".
+        add_annotations(self.job_alpha, shapes=1, tracks=2)
+
+        row = self._row(self._read(), self.job_alpha.id)
+
+        self.assertEqual(row["object_count"], 3)
+
+    def test_job_without_annotations_reports_zero_objects(self):
+        # Zero is a real observation here - the job exists and holds nothing.
+        row = self._row(self._read(), self.job_alpha.id)
+
+        self.assertEqual(row["object_count"], 0)
+
+    def test_object_count_is_scoped_to_its_own_job(self):
+        add_annotations(self.job_alpha, shapes=3)
+        add_annotations(self.job_specific, shapes=1)
+
+        payload = self._read()
+
+        self.assertEqual(self._row(payload, self.job_alpha.id)["object_count"], 3)
+        self.assertEqual(self._row(payload, self.job_specific.id)["object_count"], 1)
+
     def test_unassigned_job_is_listed_with_a_null_assignee(self):
         row = self._row(self._read(), self.job_beta.id)
 
@@ -580,6 +660,9 @@ class JobFactsTest(ApiTestBase):
 
         self.assertTrue(row["deleted"])
         self.assertIsNone(row["frame_count"])
+        # Same rule as frame_count: the Postgres row is gone, so there is nothing to count.
+        # Zero would read as "this job held no objects", which is a different claim.
+        self.assertIsNone(row["object_count"])
         self.assertIsNone(row["task_id"])
         self.assertIsNone(row["project_id"])
         self.assertIsNone(row["assignee"])

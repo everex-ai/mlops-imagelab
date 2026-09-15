@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from django.contrib.auth.models import User
+from django.db.models import Count
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
 from drf_spectacular.utils import extend_schema
@@ -17,7 +18,7 @@ from rest_framework import status, viewsets
 from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 
-from cvat.apps.engine.models import Job
+from cvat.apps.engine.models import Job, LabeledShape, LabeledTrack
 from cvat.apps.engine.pagination import CustomPagination
 from cvat.apps.engine.types import ExtendedRequest
 from cvat.apps.production_stats.permissions import ProductionStatsPermission
@@ -87,6 +88,41 @@ def _fetch_jobs(job_ids: Sequence[int]) -> dict[int, Job]:
     return {job.id: job for job in queryset}
 
 
+def _fetch_object_counts(job_ids: Sequence[int]) -> dict[int, int]:
+    """
+    How many annotated objects each job holds.
+
+    The other Postgres half of a row, fetched the same way ``_fetch_jobs`` is: once for the
+    whole id set, never per row.
+
+    **Only top-level rows count.** A 24-keypoint skeleton is one object stored as a parent
+    row plus 24 element rows pointing back at it (``LabeledShape.parent``), so counting
+    every row would report 25 objects per person. ``parent__isnull=True`` keeps the
+    elements out.
+
+    Shapes and tracks are separate tables and a project uses one or the other, so both are
+    counted and summed. Leaving tracks out would report zero for an interpolated project
+    and read as "nothing was labelled" rather than "we did not look there".
+
+    The type is deliberately not filtered. Every project in this deployment labels
+    skeletons, so ``type='skeleton'`` and "every top-level shape" hold the same value
+    today - and not filtering means a project that starts mixing in other shapes is
+    counted rather than silently under-reported.
+    """
+    counts: dict[int, int] = {}
+
+    for model in (LabeledShape, LabeledTrack):
+        rows = (
+            model.objects.filter(job_id__in=list(job_ids), parent__isnull=True)
+            .values("job_id")
+            .annotate(total=Count("id"))
+        )
+        for row in rows:
+            counts[row["job_id"]] = counts.get(row["job_id"], 0) + row["total"]
+
+    return counts
+
+
 def _fetch_usernames(user_ids: Iterable[Any], resolved: dict[int, str]) -> dict[int, str]:
     """
     Fill in every username ``resolved`` is still missing, in a single query.
@@ -137,6 +173,7 @@ def _build_row(
     job: Job | None,
     fact: Mapping[str, Any],
     usernames: Mapping[int, str],
+    object_counts: Mapping[int, int],
 ) -> dict[str, Any]:
     """Merge one job's Postgres identity with its ClickHouse derived values."""
     task = job.segment.task if job is not None else None
@@ -146,6 +183,10 @@ def _build_row(
     # the frame count nor who the assignee is.
     frame_count = job.segment.frame_count if job is not None else None
     assignee_id = job.assignee_id if job is not None else None
+    # `0` and `None` say different things: a job that exists and holds nothing was really
+    # observed to be empty, while a job whose Postgres row is gone has nothing to count.
+    # `frame_count` above draws the same line.
+    object_count = object_counts.get(job_id, 0) if job is not None else None
 
     reviewers = [_user_ref(user_id, usernames) for user_id in fact["reviewer_user_ids"]]
 
@@ -160,6 +201,7 @@ def _build_row(
         "stage": job.stage if job is not None else None,
         "state": job.state if job is not None else None,
         "frame_count": frame_count,
+        "object_count": object_count,
         "accepted_at": _as_utc(fact["accepted_at"]),
         "reviewer": reviewers[0] if reviewers else None,
         "reviewers": reviewers,
@@ -236,6 +278,7 @@ class JobFactsViewSet(viewsets.GenericViewSet):
         )
 
         jobs = _fetch_jobs(job_ids)
+        object_counts = _fetch_object_counts(job_ids)
 
         # Stage 2's lower bound exists purely to prune partitions - `cvat.events` is ordered
         # by `timestamp` alone - and must never clip evidence. Including `period_start`
@@ -257,7 +300,8 @@ class JobFactsViewSet(viewsets.GenericViewSet):
         usernames = _resolve_usernames(jobs, facts)
 
         rows = [
-            _build_row(job_id, jobs.get(job_id), facts[job_id], usernames) for job_id in job_ids
+            _build_row(job_id, jobs.get(job_id), facts[job_id], usernames, object_counts)
+            for job_id in job_ids
         ]
 
         collection_freshness = _normalize_freshness(
