@@ -29,6 +29,8 @@ from cvat.apps.production_stats.serializers import (
     JobFactSerializer,
     JobFactsQuerySerializer,
     JobRoundsSerializer,
+    ObjectCountsQuerySerializer,
+    ProjectObjectCountSerializer,
 )
 
 # These view sets are deliberately excluded from the OpenAPI schema: CI
@@ -432,3 +434,115 @@ class JobRoundsViewSet(viewsets.ViewSet):
         payload = _build_rounds_payload(job, decomposition, usernames)
 
         return Response(JobRoundsSerializer(payload).data, status=status.HTTP_200_OK)
+
+
+def _fetch_project_object_counts(project_id: int | None) -> dict[int, dict[str, int]]:
+    """
+    Per-project object totals, straight from Postgres.
+
+    **This is the endpoint's reason to exist.** ``_fetch_object_counts`` above answers the
+    same question but only for the job ids stage 1 qualified, and stage 1 is a ClickHouse
+    scan of ``cvat.events``. Where that log no longer reaches, the id set comes back empty
+    and the project reports nothing - not "zero objects" but "we could not look". Annotation
+    rows have no such horizon, so grouping them by project answers the question for every
+    project the deployment has ever had, however old.
+
+    Three statements, whatever the project count: one per annotation table plus one for the
+    job totals. Never one per project - that is what a caller looping over projects would
+    do, and the reason the route takes an optional filter instead of requiring one.
+
+    ``parent__isnull=True`` keeps skeleton keypoints out, and shapes and tracks are summed:
+    the same two rules ``_fetch_object_counts`` documents, so a project inside the event
+    log's horizon reports the same total through either route.
+    """
+    counts: dict[int, dict[str, int]] = {}
+
+    def row_for(project: int) -> dict[str, int]:
+        return counts.setdefault(
+            project, {"project_id": project, "total_objects": 0, "job_count": 0}
+        )
+
+    # A job is counted as annotated once, however many of the two tables it draws from.
+    # Summing two independent DISTINCT counts in SQL would count such a job twice.
+    annotated_jobs: dict[int, set[int]] = {}
+
+    for model in (LabeledShape, LabeledTrack):
+        rows = model.objects.filter(parent__isnull=True)
+        if project_id is not None:
+            rows = rows.filter(job__segment__task__project_id=project_id)
+
+        rows = (
+            rows.values("job__segment__task__project_id", "job_id")
+            .annotate(total=Count("id"))
+            .order_by()
+        )
+
+        for row in rows:
+            project = row["job__segment__task__project_id"]
+            # A job whose task has no project cannot be attributed to one.
+            if project is None:
+                continue
+            row_for(project)["total_objects"] += row["total"]
+            annotated_jobs.setdefault(project, set()).add(row["job_id"])
+
+    jobs = Job.objects.all()
+    if project_id is not None:
+        jobs = jobs.filter(segment__task__project_id=project_id)
+
+    job_totals = jobs.values("segment__task__project_id").annotate(total=Count("id")).order_by()
+
+    for row in job_totals:
+        project = row["segment__task__project_id"]
+        if project is None:
+            continue
+        row_for(project)["job_count"] = row["total"]
+
+    for project, row in counts.items():
+        row["jobs_with_objects"] = len(annotated_jobs.get(project, ()))
+
+    return counts
+
+
+@extend_schema(exclude=True)
+class ObjectCountsViewSet(viewsets.GenericViewSet):
+    """
+    Per-project annotated object totals, with no reporting period.
+
+    Beacon's difficulty columns need two numbers that come from different places: working
+    time, which only the event log knows and which therefore stops at that log's horizon,
+    and object counts, which Postgres holds forever. Serving the second through job facts
+    tied them to the first - a project finished before the horizon reported no objects even
+    though every annotation row was still there. This route is the half that has no reason
+    to expire.
+
+    The whole result set comes back in one response - see SingleResponsePagination.
+    """
+
+    serializer_class = ProjectObjectCountSerializer
+    pagination_class = SingleResponsePagination
+    # Without this attribute PolicyEnforcer raises AssertionError, which surfaces
+    # as HTTP 500 on every request instead of a permission decision.
+    iam_permission_class = ProductionStatsPermission
+    # ImageLab manages privileges with global Django groups only; there is no organization
+    # axis for OrganizationFilterBackend to filter on.
+    iam_organization_field = None
+
+    def get_queryset(self):
+        # Not a model view set: the rows are a Postgres aggregate folded in Python, the
+        # same shape JobFactsViewSet returns.
+        return None
+
+    @method_decorator(never_cache)
+    def list(self, request: ExtendedRequest) -> Response:
+        params = ObjectCountsQuerySerializer(data=request.query_params)
+        params.is_valid(raise_exception=True)
+
+        counts = _fetch_project_object_counts(params.validated_data.get("project_id"))
+
+        # Sorted so the payload is stable across calls; dict order here follows whatever
+        # order the two aggregates happened to return.
+        rows = [counts[project] for project in sorted(counts)]
+
+        page = self.paginate_queryset(rows)
+        serializer = ProjectObjectCountSerializer(page, many=True)
+        return self.get_paginated_response(serializer.data)

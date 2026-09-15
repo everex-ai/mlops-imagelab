@@ -227,3 +227,39 @@ class JobRoundsSerializer(serializers.Serializer):
     # Null when the job was never accepted, so there is no "after acceptance" yet.
     trailing = TrailingActivitySerializer(allow_null=True)
     totals = JobTotalsSerializer()
+
+
+class ObjectCountsQuerySerializer(serializers.Serializer):
+    """
+    Query parameters accepted by the object counts list route.
+
+    **No period.** Unlike the job facts route, nothing here reads `cvat.events`, so there
+    is no scan to bound and no window to declare. That absence is the whole point of the
+    endpoint: annotation rows live in Postgres and survive regardless of how far back the
+    event log still reaches, so a project whose labelling finished before the log's horizon
+    still has a real, countable object total.
+    """
+
+    # Optional for the same reason job facts makes it optional, and because the unfiltered
+    # call is the cheap one here: the aggregate is grouped in Postgres either way, so
+    # fetching every project costs the same three statements as fetching one.
+    project_id = serializers.IntegerField(required=False, min_value=1)
+
+
+class ProjectObjectCountSerializer(serializers.Serializer):
+    """How many annotated objects a project holds, and over how many jobs."""
+
+    project_id = serializers.IntegerField()
+
+    # Top-level rows only, shapes and tracks summed - the same rule `object_count` follows
+    # on a job facts row, so the two are directly comparable for a project whose work is
+    # still inside the event log's horizon.
+    total_objects = serializers.IntegerField()
+
+    # Every job the project holds, annotated or not.
+    job_count = serializers.IntegerField()
+
+    # The jobs that actually carry at least one object. Beacon divides by this rather than
+    # by `job_count` to answer "how heavy is a job here": a project half of whose jobs are
+    # not started yet would otherwise report a difficulty diluted by the untouched half.
+    jobs_with_objects = serializers.IntegerField()

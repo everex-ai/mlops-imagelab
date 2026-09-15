@@ -10,6 +10,11 @@ from cvat.apps.production_stats import views
 router = routers.DefaultRouter(trailing_slash=False)
 router.register("job_facts", views.JobFactsViewSet, basename="production_stats_job_facts")
 router.register("job_rounds", views.JobRoundsViewSet, basename="production_stats_job_rounds")
+router.register(
+    "object_counts",
+    views.ObjectCountsViewSet,
+    basename="production_stats_object_counts",
+)
 
 urlpatterns = [
     # The "api/" prefix is added by cvat/urls.py.
