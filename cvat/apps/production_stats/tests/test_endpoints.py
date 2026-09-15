@@ -42,6 +42,7 @@ from cvat.apps.production_stats.tests.test_query_builders import (
 
 JOB_FACTS_PATH = "/api/production_stats/job_facts"
 JOB_ROUNDS_PATH = "/api/production_stats/job_rounds"
+OBJECT_COUNTS_PATH = "/api/production_stats/object_counts"
 
 # The two stage-2 statements, named by a fragment that appears in one of them and nowhere
 # else, so a test can pick out what was bound to each.
@@ -270,7 +271,7 @@ class ProductionStatsPermissionTest(ApiTestBase):
         cls.job = create_job(
             project=Project.objects.create(name="Permissions"), task_name="permissions"
         )
-        cls.paths = (JOB_FACTS_PATH, job_rounds_path(cls.job.id))
+        cls.paths = (JOB_FACTS_PATH, job_rounds_path(cls.job.id), OBJECT_COUNTS_PATH)
 
     def _get(self, path: str, user: User | None):
         query_params = PERIOD if path == JOB_FACTS_PATH else None
@@ -1256,3 +1257,141 @@ class JobRoundsTest(ApiTestBase):
             len(small.captured_queries),
             "username resolution must not scale with the number of rounds",
         )
+
+
+class ObjectCountsTest(ApiTestBase):
+    """
+    Object totals that outlive the event log.
+
+    The whole point of this route is that it never touches ClickHouse, so these tests do
+    not fake one - if a statement ever creeps in that needs it, they fail loudly rather
+    than silently reading a stub.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        create_db_users(cls)
+
+        cls.project = Project.objects.create(name="Wrist flexion")
+        cls.other = Project.objects.create(name="Something else")
+
+        cls.job_a = create_job(project=cls.project, task_name="alpha")
+        cls.job_b = create_job(project=cls.project, task_name="beta")
+        cls.job_elsewhere = create_job(project=cls.other, task_name="gamma")
+
+    def _read(self, **query_params) -> dict[str, Any]:
+        response = self._get_request(
+            OBJECT_COUNTS_PATH, user=self.admin, query_params=query_params or None
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        return response.json()
+
+    def _row(self, payload: dict[str, Any], project_id: int) -> dict[str, Any]:
+        rows = [row for row in payload["results"] if row["project_id"] == project_id]
+        self.assertEqual(len(rows), 1, payload)
+        return rows[0]
+
+    def test_objects_are_summed_across_the_projects_jobs(self):
+        add_annotations(self.job_a, shapes=3)
+        add_annotations(self.job_b, shapes=2)
+
+        row = self._row(self._read(), self.project.id)
+
+        self.assertEqual(row["total_objects"], 5)
+
+    def test_skeleton_elements_are_not_counted(self):
+        # The same rule job facts follows: one 24-keypoint skeleton is one object, not 25.
+        add_annotations(self.job_a, shapes=2, elements_per_shape=24)
+
+        self.assertEqual(self._row(self._read(), self.project.id)["total_objects"], 2)
+
+    def test_tracks_are_counted_too(self):
+        add_annotations(self.job_a, shapes=1, tracks=2)
+
+        self.assertEqual(self._row(self._read(), self.project.id)["total_objects"], 3)
+
+    def test_a_job_drawing_on_both_tables_is_one_annotated_job(self):
+        # Shapes and tracks are counted by two separate statements. Adding two independent
+        # DISTINCT job counts would report this single job twice.
+        add_annotations(self.job_a, shapes=1, tracks=1)
+
+        row = self._row(self._read(), self.project.id)
+
+        self.assertEqual(row["total_objects"], 2)
+        self.assertEqual(row["jobs_with_objects"], 1)
+
+    def test_untouched_jobs_count_in_the_total_but_not_in_the_annotated_half(self):
+        # This is the pair Beacon divides by. `job_count` says how big the project is;
+        # `jobs_with_objects` says how much of it has been looked at. Dividing objects by
+        # the first would report a project half-started as half as difficult.
+        add_annotations(self.job_a, shapes=4)
+
+        row = self._row(self._read(), self.project.id)
+
+        self.assertEqual(row["job_count"], 2)
+        self.assertEqual(row["jobs_with_objects"], 1)
+
+    def test_counts_do_not_leak_across_projects(self):
+        add_annotations(self.job_a, shapes=3)
+        add_annotations(self.job_elsewhere, shapes=7)
+
+        payload = self._read()
+
+        self.assertEqual(self._row(payload, self.project.id)["total_objects"], 3)
+        self.assertEqual(self._row(payload, self.other.id)["total_objects"], 7)
+
+    def test_project_filter_returns_only_that_project(self):
+        add_annotations(self.job_a, shapes=3)
+        add_annotations(self.job_elsewhere, shapes=7)
+
+        payload = self._read(project_id=self.project.id)
+
+        self.assertEqual([row["project_id"] for row in payload["results"]], [self.project.id])
+
+    def test_a_project_with_no_annotations_reports_zero_rather_than_vanishing(self):
+        # Zero is a real observation: the jobs exist and hold nothing. Dropping the row
+        # would be indistinguishable from "we could not look", which is the very confusion
+        # this endpoint exists to end.
+        row = self._row(self._read(), self.project.id)
+
+        self.assertEqual(row["total_objects"], 0)
+        self.assertEqual(row["jobs_with_objects"], 0)
+        self.assertEqual(row["job_count"], 2)
+
+    def test_rows_come_back_sorted_by_project(self):
+        payload = self._read()
+
+        ids = [row["project_id"] for row in payload["results"]]
+        self.assertEqual(ids, sorted(ids))
+
+    def test_the_aggregate_stays_three_queries_regardless_of_project_count(self):
+        # The reason the route takes an optional filter instead of requiring one: a caller
+        # looping over projects would issue three statements per project. Whatever the
+        # deployment grows to, this must stay flat.
+        for index in range(5):
+            project = Project.objects.create(name=f"Extra {index}")
+            job = create_job(project=project, task_name=f"extra-{index}")
+            add_annotations(job, shapes=2)
+
+        with CaptureQueriesContext(connection) as captured:
+            self._read()
+
+        aggregates = [
+            query
+            for query in captured.captured_queries
+            if "engine_labeledshape" in query["sql"]
+            or "engine_labeledtrack" in query["sql"]
+            or ("engine_job" in query["sql"] and "COUNT" in query["sql"].upper())
+        ]
+        self.assertEqual(len(aggregates), 3, aggregates)
+
+    def test_the_route_takes_no_period(self):
+        # A period would reintroduce the horizon this endpoint exists to escape. An unknown
+        # parameter is ignored rather than rejected, so assert on the behaviour that
+        # matters: the answer does not change.
+        add_annotations(self.job_a, shapes=3)
+
+        unbounded = self._row(self._read(), self.project.id)
+        with_period = self._row(self._read(**PERIOD), self.project.id)
+
+        self.assertEqual(unbounded, with_period)
