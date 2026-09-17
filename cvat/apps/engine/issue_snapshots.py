@@ -91,6 +91,24 @@ def _serialize_shape(shape) -> dict:
     return obj
 
 
+def serialize_frame(materialized) -> dict:
+    """One dataset_manager frame -> the snapshot frame payload. Shared by issue
+    snapshots (one frame) and job snapshots (every frame) so both stay the same
+    shape for a viewer."""
+    return {
+        "frame": materialized.idx,  # task-relative
+        "abs_frame": materialized.frame,
+        "name": materialized.name,
+        "width": materialized.width,
+        "height": materialized.height,
+        "objects": [
+            _serialize_shape(shape)
+            for shape in materialized.labeled_shapes
+            if shape.type not in _EXCLUDED_SHAPE_TYPES
+        ],
+    }
+
+
 def build_snapshot_data(db_job, frame: int) -> dict:
     """Return the densified, filtered per-frame view for ``frame`` (task-relative)
     of ``db_job``. Raises ValueError if ``frame`` is outside the job's segment, or
@@ -144,15 +162,7 @@ def build_snapshot_data(db_job, frame: int) -> dict:
     for materialized in job_data.group_by_frame(include_empty=True):
         if materialized.idx != frame:
             continue
-        data["abs_frame"] = materialized.frame
-        data["name"] = materialized.name
-        data["width"] = materialized.width
-        data["height"] = materialized.height
-        data["objects"] = [
-            _serialize_shape(shape)
-            for shape in materialized.labeled_shapes
-            if shape.type not in _EXCLUDED_SHAPE_TYPES
-        ]
+        data = serialize_frame(materialized)
         break
 
     return data

@@ -16,7 +16,7 @@ from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from cvat.apps.engine import models
-from cvat.apps.engine.job_snapshots import classify_job_transition
+from cvat.apps.engine.job_snapshots import capture_job_snapshot, classify_job_transition
 from cvat.apps.engine.models import (
     JobAnnotationSnapshot,
     JobAnnotationSnapshotFrame,
@@ -123,3 +123,122 @@ class ClassifyJobTransitionTest(SimpleTestCase):
         ):
             with self.subTest(old=old, new=new):
                 self.assertIsNone(self._classify(old, new))
+
+
+def _capture(job, **overrides):
+    kwargs = dict(
+        job_id=job.id,
+        trigger=JobSnapshotTrigger.SUBMITTED,
+        from_stage="annotation",
+        from_state="in progress",
+        to_stage="annotation",
+        to_state="completed",
+        actor_id=None,
+        transitioned_at=timezone.now(),
+    )
+    kwargs.update(overrides)
+    return capture_job_snapshot(**kwargs)
+
+
+class CaptureJobSnapshotTest(TestCase):
+    def test_every_frame_is_stored_including_empty_ones(self):
+        _, job, labels = _make_job(size=3, label_names=("person",))
+        models.LabeledShape.objects.create(
+            job=job,
+            label=labels["person"],
+            frame=1,
+            type="points",
+            points=[10.0, 20.0],
+            occluded=False,
+            outside=False,
+            z_order=0,
+            group=0,
+            rotation=0.0,
+            source="manual",
+        )
+        snap = _capture(job)
+        self.assertEqual(snap.frame_count, 3)
+        self.assertEqual(
+            list(snap.frames.order_by("frame").values_list("frame", flat=True)), [0, 1, 2]
+        )
+        self.assertEqual(snap.frames.get(frame=0).data["objects"], [])
+        self.assertEqual(snap.frames.get(frame=1).data["objects"][0]["points"], [10.0, 20.0])
+
+    def test_frame_payload_matches_issue_snapshot_shape(self):
+        _, job, _ = _make_job(size=1)
+        snap = _capture(job)
+        self.assertEqual(
+            set(snap.frames.get(frame=0).data),
+            {"frame", "abs_frame", "name", "width", "height", "objects"},
+        )
+
+    def test_transition_metadata_is_stored(self):
+        _, job, _ = _make_job()
+        user = models.User.objects.create_user(username="rev", password="x")
+        at = timezone.now()
+        snap = _capture(
+            job,
+            trigger=JobSnapshotTrigger.REJECTED,
+            from_state="completed",
+            to_state="rejected",
+            actor_id=user.id,
+            transitioned_at=at,
+        )
+        self.assertEqual(
+            (snap.trigger, snap.from_state, snap.to_state, snap.actor_id, snap.transitioned_at),
+            ("rejected", "completed", "rejected", user.id, at),
+        )
+
+    def test_the_geometry_is_frozen_at_capture_time(self):
+        _, job, labels = _make_job(size=1, label_names=("person",))
+        shape = models.LabeledShape.objects.create(
+            job=job,
+            label=labels["person"],
+            frame=0,
+            type="points",
+            points=[1.0, 1.0],
+            occluded=False,
+            outside=False,
+            z_order=0,
+            group=0,
+            rotation=0.0,
+            source="manual",
+        )
+        snap = _capture(job)
+        models.LabeledShape.objects.filter(pk=shape.pk).update(points=[9.0, 9.0])
+        self.assertEqual(snap.frames.get(frame=0).data["objects"][0]["points"], [1.0, 1.0])
+
+    def test_mask_is_excluded(self):
+        _, job, labels = _make_job(size=1, label_names=("region",))
+        models.LabeledShape.objects.create(
+            job=job,
+            label=labels["region"],
+            frame=0,
+            type="mask",
+            points=[0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+            occluded=False,
+            outside=False,
+            z_order=0,
+            group=0,
+            rotation=0.0,
+            source="manual",
+        )
+        self.assertEqual(_capture(job).frames.get(frame=0).data["objects"], [])
+
+    def test_deleted_job_is_noop(self):
+        # The worker runs after commit; the job may be gone by then.
+        _, job, _ = _make_job()
+        job_id = job.id
+        job.delete()
+        result = capture_job_snapshot(
+            job_id=job_id,
+            trigger=JobSnapshotTrigger.SUBMITTED,
+            from_stage="annotation",
+            from_state="in progress",
+            to_stage="annotation",
+            to_state="completed",
+            actor_id=None,
+            transitioned_at=timezone.now(),
+        )
+        self.assertIsNone(result)
+        self.assertEqual(JobAnnotationSnapshot.objects.count(), 0)
