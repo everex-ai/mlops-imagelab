@@ -46,8 +46,13 @@ class JobSnapshotsApiTest(ApiTestBase):
     @staticmethod
     def _snapshot(job, trigger, at, *, frames):
         snap = JobAnnotationSnapshot.objects.create(
-            job=job, trigger=trigger, from_stage="annotation", from_state="in progress",
-            to_stage="annotation", to_state="completed", transitioned_at=at,
+            job=job,
+            trigger=trigger,
+            from_stage="annotation",
+            from_state="in progress",
+            to_stage="annotation",
+            to_state="completed",
+            transitioned_at=at,
             frame_count=frames,
         )
         JobAnnotationSnapshotFrame.objects.bulk_create(
@@ -75,7 +80,8 @@ class JobSnapshotsApiTest(ApiTestBase):
 
     def test_retrieve_returns_the_requested_frame_range(self):
         response = self._get_request(
-            f"{SNAPSHOTS}/{self.submitted.id}", self.admin,
+            f"{SNAPSHOTS}/{self.submitted.id}",
+            self.admin,
             query_params={"frame_from": 1, "frame_to": 2},
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -83,7 +89,8 @@ class JobSnapshotsApiTest(ApiTestBase):
 
     def test_retrieve_rejects_ranges_over_the_cap(self):
         response = self._get_request(
-            f"{SNAPSHOTS}/{self.submitted.id}", self.admin,
+            f"{SNAPSHOTS}/{self.submitted.id}",
+            self.admin,
             query_params={"frame_from": 0, "frame_to": 20},
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

@@ -131,9 +131,7 @@ def run_job_snapshot_capture(**capture_kwargs) -> None:
     try:
         capture_job_snapshot(**capture_kwargs)
     except Exception:  # noqa: BLE001 - capture must never escalate
-        logger.exception(
-            "Failed to capture job snapshot for job %s", capture_kwargs.get("job_id")
-        )
+        logger.exception("Failed to capture job snapshot for job %s", capture_kwargs.get("job_id"))
 
 
 def enqueue_job_snapshot(**capture_kwargs) -> None:
@@ -148,9 +146,7 @@ def enqueue_job_snapshot(**capture_kwargs) -> None:
         queue = django_rq.get_queue(settings.CVAT_QUEUES.NOTIFICATIONS.value)
         queue.enqueue(run_job_snapshot_capture, kwargs=capture_kwargs)
     except Exception:  # noqa: BLE001 - enqueue must not break the job transition
-        logger.exception(
-            "Failed to enqueue job snapshot for job %s", capture_kwargs.get("job_id")
-        )
+        logger.exception("Failed to enqueue job snapshot for job %s", capture_kwargs.get("job_id"))
 
 
 _PENDING_ATTR = "_pending_job_snapshot"

@@ -18,9 +18,7 @@ router.register(
 router.register(
     "job_snapshots", job_history.JobSnapshotsViewSet, basename="production_stats_job_snapshots"
 )
-router.register(
-    "job_issues", job_history.JobIssuesViewSet, basename="production_stats_job_issues"
-)
+router.register("job_issues", job_history.JobIssuesViewSet, basename="production_stats_job_issues")
 
 urlpatterns = [
     # The "api/" prefix is added by cvat/urls.py.
