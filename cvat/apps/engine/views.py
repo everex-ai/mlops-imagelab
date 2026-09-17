@@ -79,6 +79,7 @@ from cvat.apps.engine.models import (
     Data,
     FrameQuality,
     Issue,
+    IssueResolutionChange,
     IssueSnapshotTrigger,
     Job,
     JobType,
@@ -2186,11 +2187,20 @@ class IssueViewSet(viewsets.GenericViewSet, mixins.ListModelMixin,
     def perform_update(self, serializer):
         was_resolved = serializer.instance.resolved
         super().perform_update(serializer)
+        is_resolved = serializer.instance.resolved
+        if was_resolved != is_resolved:
+            # Kept per issue: the `update:issue` event carries no issue id
+            # (see IssueResolutionChange). Same transaction as the update.
+            IssueResolutionChange.objects.create(
+                issue=serializer.instance,
+                resolved=is_resolved,
+                actor=self.request.user,
+            )
         # A reopen (resolved true -> false) re-flags the frame: the current
         # geometry is the rejected fix — another ephemeral "bad" state worth
         # capturing as a further `before`. Resolves are not captured (the good
         # state is durable and read live at export).
-        if was_resolved and not serializer.instance.resolved:
+        if was_resolved and not is_resolved:
             schedule_issue_snapshot(serializer.instance.id, IssueSnapshotTrigger.BEFORE)
 
 @extend_schema(tags=['comments'])
