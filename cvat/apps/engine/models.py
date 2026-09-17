@@ -1328,6 +1328,65 @@ class IssueAnnotationSnapshot(TimestampedModel):
     data = models.JSONField()
 
 
+class JobSnapshotTrigger(TextChoices):
+    """The round boundary that froze a job snapshot.
+
+    Boundaries are the transitions production actually uses (checked against
+    `production_stats/job_rounds` on live jobs): work stays in stage `annotation`
+    and moves by *state*; only acceptance changes the stage.
+    """
+
+    SUBMITTED = "submitted", "submitted"  # state -> completed
+    REJECTED = "rejected", "rejected"  # state completed -> rejected / in progress
+    ACCEPTED = "accepted", "accepted"  # stage -> acceptance
+
+
+class JobAnnotationSnapshot(TimestampedModel):
+    """Frozen densified geometry of a whole job at one round boundary.
+
+    CVAT keeps only the current annotation state, and annotation change events
+    drop coordinates, so without this row the geometry a reviewer rejected is
+    gone the moment the annotator fixes it. One row per boundary; the per-frame
+    geometry lives in `JobAnnotationSnapshotFrame` so a viewer can read a frame
+    range without loading the whole job.
+
+    `transitioned_at` is when the job crossed the boundary; `created_date` is
+    when the async worker captured it (seconds later). Match rounds on the former.
+    """
+
+    job = models.ForeignKey(
+        Job, related_name="annotation_snapshots", on_delete=models.CASCADE
+    )
+    trigger = models.CharField(max_length=16, choices=JobSnapshotTrigger.choices)
+    from_stage = models.CharField(max_length=32)
+    from_state = models.CharField(max_length=32)
+    to_stage = models.CharField(max_length=32)
+    to_state = models.CharField(max_length=32)
+    actor = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    transitioned_at = models.DateTimeField()
+    frame_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        indexes = [models.Index(fields=["job", "transitioned_at"])]
+
+
+class JobAnnotationSnapshotFrame(models.Model):
+    snapshot = models.ForeignKey(
+        JobAnnotationSnapshot, related_name="frames", on_delete=models.CASCADE
+    )
+    frame = models.PositiveIntegerField()  # task-relative, same as Issue.frame
+    data = models.JSONField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["snapshot", "frame"], name="unique_job_snapshot_frame"
+            )
+        ]
+
+
 class CloudProviderChoice(TextChoices):
     AMAZON_S3 = "AWS_S3_BUCKET", "Amazon S3"
     AZURE_BLOB_STORAGE = "AZURE_CONTAINER", "Azure Blob Storage"
