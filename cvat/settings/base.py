@@ -272,6 +272,7 @@ class CVAT_QUEUES(Enum):
     AUTO_ANNOTATION = "annotation"
     WEBHOOKS = "webhooks"
     NOTIFICATIONS = "notifications"
+    SNAPSHOTS = "snapshots"
     QUALITY_REPORTS = "quality_reports"
     CLEANING = "cleaning"
     CHUNKS = "chunks"
@@ -317,6 +318,12 @@ RQ_QUEUES = {
         "DEFAULT_TIMEOUT": "1h",
     },
     CVAT_QUEUES.NOTIFICATIONS.value: {
+        **REDIS_INMEM_SETTINGS,
+        "DEFAULT_TIMEOUT": "1h",
+    },
+    # Job round-boundary captures (engine/job_snapshots.py). Kept off the
+    # notifications queue: a whole-job capture would delay issue captures there.
+    CVAT_QUEUES.SNAPSHOTS.value: {
         **REDIS_INMEM_SETTINGS,
         "DEFAULT_TIMEOUT": "1h",
     },

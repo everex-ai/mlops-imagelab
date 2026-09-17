@@ -22,14 +22,17 @@ from django.utils import timezone
 from cvat.apps.engine import models
 from cvat.apps.engine.job_snapshots import (
     _PENDING_ATTR,
+    build_job_snapshot_frames,
     capture_job_snapshot,
     classify_job_transition,
     enqueue_job_snapshot,
+    record_job_snapshot,
     run_job_snapshot_capture,
 )
 from cvat.apps.engine.models import (
     JobAnnotationSnapshot,
     JobAnnotationSnapshotFrame,
+    JobSnapshotStatus,
     JobSnapshotTrigger,
 )
 from cvat.apps.engine.tests.test_issue_snapshots_capture import _make_job
@@ -135,7 +138,7 @@ class ClassifyJobTransitionTest(SimpleTestCase):
                 self.assertIsNone(self._classify(old, new))
 
 
-def _capture(job, **overrides):
+def _boundary(job, **overrides):
     kwargs = dict(
         job_id=job.id,
         trigger=JobSnapshotTrigger.SUBMITTED,
@@ -147,7 +150,12 @@ def _capture(job, **overrides):
         transitioned_at=timezone.now(),
     )
     kwargs.update(overrides)
-    return capture_job_snapshot(**kwargs)
+    return kwargs
+
+
+def _capture(job, **overrides):
+    snapshot = record_job_snapshot(**_boundary(job, **overrides))
+    return capture_job_snapshot(snapshot.id)
 
 
 class CaptureJobSnapshotTest(TestCase):
@@ -235,37 +243,57 @@ class CaptureJobSnapshotTest(TestCase):
         )
         self.assertEqual(_capture(job).frames.get(frame=0).data["objects"], [])
 
+    def test_capture_marks_the_snapshot_captured(self):
+        _, job, _ = _make_job(size=2)
+        snapshot = record_job_snapshot(**_boundary(job))
+        self.assertEqual((snapshot.status, snapshot.captured_at), ("pending", None))
+        self.assertEqual(snapshot.frames.count(), 0)
+
+        captured = capture_job_snapshot(snapshot.id)
+        self.assertEqual((captured.status, captured.frame_count), ("captured", 2))
+        self.assertIsNotNone(captured.captured_at)
+
+    def test_a_snapshot_that_is_not_pending_is_left_alone(self):
+        _, job, _ = _make_job(size=2)
+        for status in (JobSnapshotStatus.CAPTURED, JobSnapshotStatus.FAILED):
+            with self.subTest(status=status):
+                snapshot = record_job_snapshot(**_boundary(job))
+                JobAnnotationSnapshot.objects.filter(pk=snapshot.pk).update(status=status)
+                self.assertEqual(capture_job_snapshot(snapshot.id).status, status)
+                self.assertEqual(snapshot.frames.count(), 0)
+
+    def test_the_worker_reads_in_one_repeatable_read_transaction(self):
+        # Tests run inside a transaction, where the isolation level can no longer
+        # be set; the worker's capture is the outermost transaction.
+        _, job, _ = _make_job(size=1)
+        with (
+            mock.patch("cvat.apps.engine.job_snapshots._in_transaction", return_value=False),
+            mock.patch(
+                "cvat.apps.engine.job_snapshots.transaction_with_repeatable_read",
+                side_effect=transaction.atomic,
+            ) as repeatable_read,
+        ):
+            self.assertEqual(len(build_job_snapshot_frames(job)), 1)
+        repeatable_read.assert_called_once_with()
+
     def test_deleted_job_is_noop(self):
-        # The worker runs after commit; the job may be gone by then.
+        # The transition commits first; the job may be gone by then.
         _, job, _ = _make_job()
-        job_id = job.id
+        boundary = _boundary(job)
         job.delete()
-        result = capture_job_snapshot(
-            job_id=job_id,
-            trigger=JobSnapshotTrigger.SUBMITTED,
-            from_stage="annotation",
-            from_state="in progress",
-            to_stage="annotation",
-            to_state="completed",
-            actor_id=None,
-            transitioned_at=timezone.now(),
-        )
-        self.assertIsNone(result)
+        self.assertIsNone(record_job_snapshot(**boundary))
         self.assertEqual(JobAnnotationSnapshot.objects.count(), 0)
+
+    def test_job_deleted_before_the_worker_runs_is_noop(self):
+        _, job, _ = _make_job()
+        snapshot = record_job_snapshot(**_boundary(job))
+        job.delete()
+        self.assertIsNone(capture_job_snapshot(snapshot.id))
 
     def test_unknown_trigger_raises(self):
         _, job, _ = _make_job()
         with self.assertRaises(ValueError):
-            capture_job_snapshot(
-                job_id=job.id,
-                trigger="not-a-trigger",
-                from_stage="annotation",
-                from_state="in progress",
-                to_stage="annotation",
-                to_state="completed",
-                actor_id=None,
-                transitioned_at=timezone.now(),
-            )
+            record_job_snapshot(**_boundary(job, trigger="not-a-trigger"))
         self.assertEqual(JobAnnotationSnapshot.objects.count(), 0)
 
 
@@ -358,7 +386,8 @@ class JobSnapshotHookTest(TestCase):
         enq.assert_not_called()
 
     def test_enqueue_failure_does_not_break_the_save(self):
-        # R20: a Redis outage must never fail the reviewer's transition.
+        # R20: a Redis outage must never fail the reviewer's transition, and the
+        # boundary it lost must stay visible as failed.
         _, job, _ = _make_job()
         models.Job.objects.filter(pk=job.pk).update(state="in progress")
         job.refresh_from_db()
@@ -368,20 +397,46 @@ class JobSnapshotHookTest(TestCase):
                 job.save()
         job.refresh_from_db()
         self.assertEqual(job.state, "completed")
+        snapshot = JobAnnotationSnapshot.objects.get(job=job)
+        self.assertEqual((snapshot.trigger, snapshot.status), ("submitted", "failed"))
 
-    def test_worker_isolates_capture_failures(self):
+    def test_record_failure_does_not_break_the_save(self):
+        _, job, _ = _make_job()
+        models.Job.objects.filter(pk=job.pk).update(state="in progress")
+        job.refresh_from_db()
         with mock.patch(
-            "cvat.apps.engine.job_snapshots.capture_job_snapshot",
+            "cvat.apps.engine.job_snapshots.record_job_snapshot",
+            side_effect=RuntimeError("db hiccup"),
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                job.state = "completed"
+                job.save()
+        job.refresh_from_db()
+        self.assertEqual(job.state, "completed")
+
+    def test_worker_records_capture_failures(self):
+        _, job, _ = _make_job(size=2)
+        snapshot = record_job_snapshot(**_boundary(job))
+        with mock.patch(
+            "cvat.apps.engine.job_snapshots.build_job_snapshot_frames",
             side_effect=RuntimeError("boom"),
         ):
-            self.assertIsNone(run_job_snapshot_capture(job_id=1, trigger="submitted"))
+            self.assertIsNone(run_job_snapshot_capture(snapshot.id))
+        snapshot.refresh_from_db()
+        self.assertEqual((snapshot.status, snapshot.frames.count()), ("failed", 0))
+
+    def test_captures_use_their_own_queue(self):
+        _, job, _ = _make_job()
+        with mock.patch(_JOB_GET_QUEUE) as get_queue:
+            enqueue_job_snapshot(**_boundary(job))
+        get_queue.assert_called_once_with(settings.CVAT_QUEUES.SNAPSHOTS.value)
 
     def test_end_to_end_transition_persists_snapshot(self):
         # Route through RQ's real enqueue/parse_args (is_async=False runs the job
         # in-process instead of pushing it to a worker) so a kwargs-passing bug
         # like RQ reserving `job_id` for itself would fail this test, not just
         # get logged-and-swallowed as in production.
-        real_queue = django_rq.get_queue(settings.CVAT_QUEUES.NOTIFICATIONS.value, is_async=False)
+        real_queue = django_rq.get_queue(settings.CVAT_QUEUES.SNAPSHOTS.value, is_async=False)
         _, job, _ = _make_job(size=2)
         models.Job.objects.filter(pk=job.pk).update(state="in progress")
         job.refresh_from_db()
@@ -390,7 +445,9 @@ class JobSnapshotHookTest(TestCase):
                 job.state = "completed"
                 job.save()
         snap = JobAnnotationSnapshot.objects.get(job=job)
-        self.assertEqual((snap.trigger, snap.frame_count), ("submitted", 2))
+        self.assertEqual(
+            (snap.trigger, snap.status, snap.frame_count), ("submitted", "captured", 2)
+        )
 
         # A second transition on the same job must produce a second snapshot
         # (R21): if the two enqueue calls collided on one RQ job id, this would

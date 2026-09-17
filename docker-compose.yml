@@ -137,6 +137,23 @@ services:
     networks:
       - cvat_everex
 
+  cvat_worker_snapshots_everex:
+    container_name: cvat_worker_snapshots_everex
+    image: cvat/server:${CVAT_VERSION:-v2.52.0}
+    restart: always
+    depends_on: *backend-deps
+    environment:
+      <<: *backend-env
+      NUMPROCS: 1
+    command: run worker snapshots
+    volumes:
+      - cvat_data:/home/django/data
+      - cvat_share:/home/django/share:ro
+      - cvat_keys:/home/django/keys
+      - cvat_logs:/home/django/logs
+    networks:
+      - cvat_everex
+
   cvat_worker_import_everex:
     container_name: cvat_worker_import_everex
     image: cvat/server:${CVAT_VERSION:-v2.52.0}

@@ -88,7 +88,11 @@ class JobSnapshotsViewSet(viewsets.ViewSet):
                         "to_state": s.to_state,
                         "actor": _user_ref(s.actor),
                         "transitioned_at": s.transitioned_at,
-                        "captured_at": s.created_date,
+                        # pending: capture not finished (still pending long after
+                        # transitioned_at means it was lost); failed: capture raised.
+                        # Only captured snapshots have frames.
+                        "status": s.status,
+                        "captured_at": s.captured_at,
                         "frame_count": s.frame_count,
                     }
                     for s in snapshots
@@ -121,6 +125,7 @@ class JobSnapshotsViewSet(viewsets.ViewSet):
                 "job_id": snapshot.job_id,
                 "trigger": snapshot.trigger,
                 "transitioned_at": snapshot.transitioned_at,
+                "status": snapshot.status,
                 "frames": [f.data for f in frames],
             }
         )
