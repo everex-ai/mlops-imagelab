@@ -109,11 +109,9 @@ def serialize_frame(materialized) -> dict:
     }
 
 
-def build_snapshot_data(db_job, frame: int) -> dict:
-    """Return the densified, filtered per-frame view for ``frame`` (task-relative)
-    of ``db_job``. Raises ValueError if ``frame`` is outside the job's segment, or
-    is inside it but deleted/excluded (ground-truth / specific-frames job) — in
-    both cases there is no annotation state worth capturing."""
+def load_job_data(db_job, *, included_frames=None):
+    """Load ``db_job``'s annotations into a ``JobData`` view, optionally limited to
+    ``included_frames``. Shared by the issue and job snapshot captures."""
     # Imported lazily: dataset_manager is heavy and pulls in datumaro; keeping the
     # import inside the call avoids paying that cost on every web-process start and
     # sidesteps any import ordering concerns with engine.models.
@@ -129,13 +127,21 @@ def build_snapshot_data(db_job, frame: int) -> dict:
     annotation = JobAnnotation(pk=db_job.id, db_job=db_job)
     annotation.init_from_db()
 
-    job_data = JobData(
+    return JobData(
         annotation_ir=annotation.ir_data,
         db_job=db_job,
         host="",
         use_server_track_ids=True,
-        included_frames={frame},
+        included_frames=included_frames,
     )
+
+
+def build_snapshot_data(db_job, frame: int) -> dict:
+    """Return the densified, filtered per-frame view for ``frame`` (task-relative)
+    of ``db_job``. Raises ValueError if ``frame`` is outside the job's segment, or
+    is inside it but deleted/excluded (ground-truth / specific-frames job) — in
+    both cases there is no annotation state worth capturing."""
+    job_data = load_job_data(db_job, included_frames={frame})
 
     if frame not in job_data.rel_range:
         raise ValueError(

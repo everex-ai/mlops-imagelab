@@ -178,6 +178,7 @@ class JobIssuesViewSet(viewsets.ViewSet):
                         ],
                         "resolution_changes": [
                             {
+                                "id": r.id,
                                 "resolved": r.resolved,
                                 "actor": _user_ref(r.actor),
                                 "changed_at": r.changed_at,

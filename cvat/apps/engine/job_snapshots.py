@@ -27,7 +27,7 @@ from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from django.utils import timezone
 
-from cvat.apps.engine.issue_snapshots import serialize_frame
+from cvat.apps.engine.issue_snapshots import load_job_data, serialize_frame
 from cvat.apps.engine.models import (
     Job,
     JobAnnotationSnapshot,
@@ -65,18 +65,7 @@ def build_job_snapshot_frames(db_job: Job) -> list[dict]:
     """Every included frame of the job, densified (tracks interpolated), in the
     same payload shape as issue snapshots. Empty frames are kept: "no keypoints"
     and "not recorded" must stay distinguishable (R24)."""
-    from cvat.apps.dataset_manager.bindings import JobData
-    from cvat.apps.dataset_manager.task import JobAnnotation
-
-    db_job = JobAnnotation.add_prefetch_info(Job.objects.filter(pk=db_job.id)).get()
-    annotation = JobAnnotation(pk=db_job.id, db_job=db_job)
-    annotation.init_from_db()
-    job_data = JobData(
-        annotation_ir=annotation.ir_data,
-        db_job=db_job,
-        host="",
-        use_server_track_ids=True,
-    )
+    job_data = load_job_data(db_job)
     return [serialize_frame(m) for m in job_data.group_by_frame(include_empty=True)]
 
 

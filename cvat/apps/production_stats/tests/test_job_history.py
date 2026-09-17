@@ -95,6 +95,14 @@ class JobSnapshotsApiTest(ApiTestBase):
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    def test_retrieve_rejects_a_reversed_range(self):
+        response = self._get_request(
+            f"{SNAPSHOTS}/{self.submitted.id}",
+            self.admin,
+            query_params={"frame_from": 2, "frame_to": 1},
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
     def test_retrieve_missing_snapshot_is_404(self):
         response = self._get_request(
             f"{SNAPSHOTS}/99999999", self.admin, query_params={"frame_from": 0, "frame_to": 0}
@@ -152,6 +160,14 @@ class JobIssuesApiTest(ApiTestBase):
         self.assertEqual((issue["frame"], issue["position"]), (2, [10.0, 20.0]))
         self.assertEqual(issue["comments"][0]["message"], "무릎이 낮음")
         self.assertEqual([c["resolved"] for c in issue["resolution_changes"]], [True, False, True])
+        self.assertEqual(
+            [c["id"] for c in issue["resolution_changes"]],
+            list(
+                IssueResolutionChange.objects.filter(issue=self.issue)
+                .order_by("changed_at", "id")
+                .values_list("id", flat=True)
+            ),
+        )
         self.assertEqual(sorted(s["trigger"] for s in issue["snapshots"]), ["after", "before"])
 
     def test_an_issue_without_history_has_empty_lists_not_missing_keys(self):

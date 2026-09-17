@@ -253,6 +253,21 @@ class CaptureJobSnapshotTest(TestCase):
         self.assertIsNone(result)
         self.assertEqual(JobAnnotationSnapshot.objects.count(), 0)
 
+    def test_unknown_trigger_raises(self):
+        _, job, _ = _make_job()
+        with self.assertRaises(ValueError):
+            capture_job_snapshot(
+                job_id=job.id,
+                trigger="not-a-trigger",
+                from_stage="annotation",
+                from_state="in progress",
+                to_stage="annotation",
+                to_state="completed",
+                actor_id=None,
+                transitioned_at=timezone.now(),
+            )
+        self.assertEqual(JobAnnotationSnapshot.objects.count(), 0)
+
 
 _ENQUEUE_JOB = "cvat.apps.engine.job_snapshots.enqueue_job_snapshot"
 _JOB_GET_QUEUE = "cvat.apps.engine.job_snapshots.django_rq.get_queue"
@@ -281,6 +296,16 @@ class JobSnapshotHookTest(TestCase):
             (kwargs["job_id"], kwargs["trigger"], kwargs["from_state"], kwargs["to_state"]),
             (job.id, JobSnapshotTrigger.SUBMITTED, "in progress", "completed"),
         )
+
+    def test_actor_is_the_requesting_user(self):
+        # Requests set crum's current user; the hook must carry it to the capture.
+        _, job, _ = _make_job()
+        models.Job.objects.filter(pk=job.pk).update(state="in progress")
+        job.refresh_from_db()
+        actor = models.User.objects.create_user(username="reviewer", password="x")
+        with mock.patch("cvat.apps.engine.job_snapshots.get_current_user", return_value=actor):
+            enq = self._transition(job, state="completed")
+        self.assertEqual(enq.call_args.kwargs["actor_id"], actor.id)
 
     def test_reject_and_accept_schedule_snapshots(self):
         _, job, _ = _make_job()
