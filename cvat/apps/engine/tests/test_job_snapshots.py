@@ -12,10 +12,11 @@ viewer-requirements.md (KD1, KD2).
 """
 
 from django.db import IntegrityError, transaction
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from cvat.apps.engine import models
+from cvat.apps.engine.job_snapshots import classify_job_transition
 from cvat.apps.engine.models import (
     JobAnnotationSnapshot,
     JobAnnotationSnapshotFrame,
@@ -78,3 +79,47 @@ class JobAnnotationSnapshotModelTest(TestCase):
         user.delete()
         snap.refresh_from_db()
         self.assertIsNone(snap.actor_id)
+
+
+class ClassifyJobTransitionTest(SimpleTestCase):
+    """Boundaries observed on production jobs 74236, 77315, 78299 (2026-09-17)."""
+
+    def _classify(self, old, new):
+        return classify_job_transition(
+            old_stage=old[0], old_state=old[1], new_stage=new[0], new_state=new[1]
+        )
+
+    def test_submit_is_state_to_completed(self):
+        for old_state in ("new", "in progress", "rejected"):
+            with self.subTest(old_state=old_state):
+                self.assertEqual(
+                    self._classify(("annotation", old_state), ("annotation", "completed")),
+                    JobSnapshotTrigger.SUBMITTED,
+                )
+
+    def test_reject_is_completed_to_rejected_or_in_progress(self):
+        for new_state in ("rejected", "in progress"):
+            with self.subTest(new_state=new_state):
+                self.assertEqual(
+                    self._classify(("annotation", "completed"), ("annotation", new_state)),
+                    JobSnapshotTrigger.REJECTED,
+                )
+
+    def test_accept_is_stage_to_acceptance_whatever_the_state(self):
+        # JobWriteSerializer resets state to `new` when only the stage is sent.
+        for new_state in ("new", "completed"):
+            with self.subTest(new_state=new_state):
+                self.assertEqual(
+                    self._classify(("annotation", "completed"), ("acceptance", new_state)),
+                    JobSnapshotTrigger.ACCEPTED,
+                )
+
+    def test_non_boundaries(self):
+        for old, new in (
+            (("annotation", "new"), ("annotation", "in progress")),  # started work
+            (("annotation", "completed"), ("annotation", "completed")),  # no change
+            (("acceptance", "completed"), ("acceptance", "completed")),
+            (("annotation", "completed"), ("validation", "new")),  # stage unused here
+        ):
+            with self.subTest(old=old, new=new):
+                self.assertIsNone(self._classify(old, new))
