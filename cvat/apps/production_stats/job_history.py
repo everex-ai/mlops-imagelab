@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from django.db.models import Prefetch
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
 from drf_spectacular.utils import extend_schema
@@ -21,7 +22,13 @@ from rest_framework import serializers, viewsets
 from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 
-from cvat.apps.engine.models import JobAnnotationSnapshot
+from cvat.apps.engine.models import (
+    Comment,
+    Issue,
+    IssueAnnotationSnapshot,
+    IssueResolutionChange,
+    JobAnnotationSnapshot,
+)
 from cvat.apps.engine.types import ExtendedRequest
 from cvat.apps.production_stats.permissions import ProductionStatsPermission
 
@@ -115,5 +122,81 @@ class JobSnapshotsViewSet(viewsets.ViewSet):
                 "trigger": snapshot.trigger,
                 "transitioned_at": snapshot.transitioned_at,
                 "frames": [f.data for f in frames],
+            }
+        )
+
+
+@extend_schema(exclude=True)
+class JobIssuesViewSet(viewsets.ViewSet):
+    iam_permission_class = ProductionStatsPermission
+    iam_organization_field = None
+
+    @method_decorator(never_cache)
+    def list(self, request: ExtendedRequest) -> Response:
+        query = JobIdQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        job_id = query.validated_data["job_id"]
+
+        issues = (
+            Issue.objects.filter(job_id=job_id)
+            .select_related("owner")
+            .prefetch_related(
+                Prefetch(
+                    "comments",
+                    queryset=Comment.objects.select_related("owner").order_by("created_date", "id"),
+                ),
+                Prefetch(
+                    "resolution_changes",
+                    queryset=IssueResolutionChange.objects.select_related("actor"),
+                ),
+                Prefetch(
+                    "annotation_snapshots",
+                    queryset=IssueAnnotationSnapshot.objects.order_by("created_date", "id"),
+                ),
+            )
+            .order_by("id")
+        )
+        return Response(
+            {
+                "job_id": job_id,
+                "issues": [
+                    {
+                        "id": issue.id,
+                        "frame": issue.frame,
+                        "position": list(issue.position),
+                        "resolved": issue.resolved,
+                        "created_at": issue.created_date,
+                        "owner": _user_ref(issue.owner),
+                        "comments": [
+                            {
+                                "id": c.id,
+                                "owner": _user_ref(c.owner),
+                                "message": c.message,
+                                "created_at": c.created_date,
+                            }
+                            for c in issue.comments.all()
+                        ],
+                        "resolution_changes": [
+                            {
+                                "resolved": r.resolved,
+                                "actor": _user_ref(r.actor),
+                                "changed_at": r.changed_at,
+                            }
+                            for r in issue.resolution_changes.all()
+                        ],
+                        "snapshots": [
+                            {
+                                # Raw string on purpose: a short-lived build stored
+                                # `after`, which IssueSnapshotTrigger no longer lists.
+                                "id": s.id,
+                                "trigger": s.trigger,
+                                "created_at": s.created_date,
+                                "data": s.data,
+                            }
+                            for s in issue.annotation_snapshots.all()
+                        ],
+                    }
+                    for issue in issues
+                ],
             }
         )
