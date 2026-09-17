@@ -159,6 +159,7 @@ def remember_job_transition(sender, instance: Job, update_fields=None, **kwargs)
     Classification must happen here (the old values are gone after save) but the
     enqueue waits for post_save + commit, so the worker reads committed state.
     """
+    instance.__dict__.pop(_PENDING_ATTR, None)
     if instance.pk is None:
         return
     if update_fields and set(update_fields) <= {"updated_date", "assignee_updated_date"}:

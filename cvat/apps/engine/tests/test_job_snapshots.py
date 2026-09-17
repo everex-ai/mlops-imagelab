@@ -21,6 +21,7 @@ from django.utils import timezone
 
 from cvat.apps.engine import models
 from cvat.apps.engine.job_snapshots import (
+    _PENDING_ATTR,
     capture_job_snapshot,
     classify_job_transition,
     enqueue_job_snapshot,
@@ -300,6 +301,23 @@ class JobSnapshotHookTest(TestCase):
         _, job, _ = _make_job()
         self._transition(job, state="in progress").assert_not_called()
         self._transition(job).assert_not_called()  # plain re-save
+
+    def test_stale_pending_payload_is_dropped_on_a_non_boundary_save(self):
+        # If a boundary save runs pre_save and then fails before post_save,
+        # the pending payload must not survive to be enqueued by a later,
+        # unrelated save of the same instance.
+        _, job, _ = _make_job()
+        job.__dict__[_PENDING_ATTR] = dict(
+            job_id=job.pk,
+            trigger=JobSnapshotTrigger.SUBMITTED.value,
+            from_stage="annotation",
+            from_state="in progress",
+            to_stage="annotation",
+            to_state="completed",
+            actor_id=None,
+            transitioned_at=timezone.now(),
+        )
+        self._transition(job).assert_not_called()  # plain re-save, no field changes
 
     def test_job_creation_schedules_nothing(self):
         with mock.patch(_ENQUEUE_JOB) as enq:
