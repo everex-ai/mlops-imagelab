@@ -13,6 +13,8 @@ viewer-requirements.md (KD1, KD2).
 
 from unittest import mock
 
+import django_rq
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
@@ -255,11 +257,6 @@ _ENQUEUE_JOB = "cvat.apps.engine.job_snapshots.enqueue_job_snapshot"
 _JOB_GET_QUEUE = "cvat.apps.engine.job_snapshots.django_rq.get_queue"
 
 
-class _SyncQueue:
-    def enqueue(self, func, *args, **kwargs):
-        return func(*args, **kwargs)
-
-
 class JobSnapshotHookTest(TestCase):
     """Every path that changes stage/state goes through Job.save(), so the hook
     lives on the model signals (JobWriteSerializer.update and consensus merging)."""
@@ -337,12 +334,30 @@ class JobSnapshotHookTest(TestCase):
             self.assertIsNone(run_job_snapshot_capture(job_id=1, trigger="submitted"))
 
     def test_end_to_end_transition_persists_snapshot(self):
+        # Route through RQ's real enqueue/parse_args (is_async=False runs the job
+        # in-process instead of pushing it to a worker) so a kwargs-passing bug
+        # like RQ reserving `job_id` for itself would fail this test, not just
+        # get logged-and-swallowed as in production.
+        real_queue = django_rq.get_queue(settings.CVAT_QUEUES.NOTIFICATIONS.value, is_async=False)
         _, job, _ = _make_job(size=2)
         models.Job.objects.filter(pk=job.pk).update(state="in progress")
         job.refresh_from_db()
-        with mock.patch(_JOB_GET_QUEUE, return_value=_SyncQueue()):
+        with mock.patch(_JOB_GET_QUEUE, return_value=real_queue):
             with self.captureOnCommitCallbacks(execute=True):
                 job.state = "completed"
                 job.save()
         snap = JobAnnotationSnapshot.objects.get(job=job)
         self.assertEqual((snap.trigger, snap.frame_count), ("submitted", 2))
+
+        # A second transition on the same job must produce a second snapshot
+        # (R21): if the two enqueue calls collided on one RQ job id, this would
+        # either raise or silently drop the second capture.
+        with mock.patch(_JOB_GET_QUEUE, return_value=real_queue):
+            with self.captureOnCommitCallbacks(execute=True):
+                job.state = "rejected"
+                job.save()
+        self.assertEqual(job.annotation_snapshots.count(), 2)
+        self.assertEqual(
+            list(job.annotation_snapshots.order_by("id").values_list("trigger", flat=True)),
+            ["submitted", "rejected"],
+        )

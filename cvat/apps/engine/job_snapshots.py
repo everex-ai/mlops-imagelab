@@ -137,10 +137,16 @@ def run_job_snapshot_capture(**capture_kwargs) -> None:
 
 
 def enqueue_job_snapshot(**capture_kwargs) -> None:
-    """Enqueue on the notifications queue (utils worker). Failures are swallowed (R20)."""
+    """Enqueue on the notifications queue (utils worker). Failures are swallowed (R20).
+
+    Must pass kwargs via RQ's explicit `kwargs=` form, not `**capture_kwargs`: RQ
+    reserves `job_id` in its own call signature (it's the RQ job's id, not ours),
+    so splatting our `job_id` straight in gets captured and stripped by RQ instead
+    of reaching `run_job_snapshot_capture`.
+    """
     try:
         queue = django_rq.get_queue(settings.CVAT_QUEUES.NOTIFICATIONS.value)
-        queue.enqueue(run_job_snapshot_capture, **capture_kwargs)
+        queue.enqueue(run_job_snapshot_capture, kwargs=capture_kwargs)
     except Exception:  # noqa: BLE001 - enqueue must not break the job transition
         logger.exception(
             "Failed to enqueue job snapshot for job %s", capture_kwargs.get("job_id")
