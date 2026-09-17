@@ -19,7 +19,13 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+import django_rq
+from crum import get_current_user
+from django.conf import settings
 from django.db import transaction
+from django.db.models.signals import post_save, pre_save
+from django.dispatch import receiver
+from django.utils import timezone
 
 from cvat.apps.engine.issue_snapshots import serialize_frame
 from cvat.apps.engine.models import (
@@ -118,3 +124,74 @@ def capture_job_snapshot(
         len(frames),
     )
     return snapshot
+
+
+def run_job_snapshot_capture(**capture_kwargs) -> None:
+    """RQ worker entry point. Isolates every failure (R20)."""
+    try:
+        capture_job_snapshot(**capture_kwargs)
+    except Exception:  # noqa: BLE001 - capture must never escalate
+        logger.exception(
+            "Failed to capture job snapshot for job %s", capture_kwargs.get("job_id")
+        )
+
+
+def enqueue_job_snapshot(**capture_kwargs) -> None:
+    """Enqueue on the notifications queue (utils worker). Failures are swallowed (R20)."""
+    try:
+        queue = django_rq.get_queue(settings.CVAT_QUEUES.NOTIFICATIONS.value)
+        queue.enqueue(run_job_snapshot_capture, **capture_kwargs)
+    except Exception:  # noqa: BLE001 - enqueue must not break the job transition
+        logger.exception(
+            "Failed to enqueue job snapshot for job %s", capture_kwargs.get("job_id")
+        )
+
+
+_PENDING_ATTR = "_pending_job_snapshot"
+
+
+@receiver(pre_save, sender=Job)
+def remember_job_transition(sender, instance: Job, update_fields=None, **kwargs):
+    """Compare against the stored row before it is overwritten.
+
+    Classification must happen here (the old values are gone after save) but the
+    enqueue waits for post_save + commit, so the worker reads committed state.
+    """
+    if instance.pk is None:
+        return
+    if update_fields and set(update_fields) <= {"updated_date", "assignee_updated_date"}:
+        return
+    old = Job.objects.filter(pk=instance.pk).values("stage", "state").first()
+    if old is None:
+        return
+    trigger = classify_job_transition(
+        old_stage=old["stage"],
+        old_state=old["state"],
+        new_stage=instance.stage,
+        new_state=instance.state,
+    )
+    if trigger is None:
+        return
+    user = get_current_user()
+    setattr(
+        instance,
+        _PENDING_ATTR,
+        dict(
+            job_id=instance.pk,
+            trigger=trigger.value,
+            from_stage=old["stage"],
+            from_state=old["state"],
+            to_stage=instance.stage,
+            to_state=instance.state,
+            actor_id=getattr(user, "id", None),
+            transitioned_at=timezone.now(),
+        ),
+    )
+
+
+@receiver(post_save, sender=Job)
+def schedule_job_snapshot(sender, instance: Job, created: bool, **kwargs):
+    capture_kwargs = instance.__dict__.pop(_PENDING_ATTR, None)
+    if created or capture_kwargs is None:
+        return
+    transaction.on_commit(lambda: enqueue_job_snapshot(**capture_kwargs), robust=True)

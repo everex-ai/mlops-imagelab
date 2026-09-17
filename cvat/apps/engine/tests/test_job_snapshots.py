@@ -11,12 +11,19 @@ coordinates. See label_supporter docs/brainstorms/2026-09-17-imagelab-job-detail
 viewer-requirements.md (KD1, KD2).
 """
 
+from unittest import mock
+
 from django.db import IntegrityError, transaction
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
 from cvat.apps.engine import models
-from cvat.apps.engine.job_snapshots import capture_job_snapshot, classify_job_transition
+from cvat.apps.engine.job_snapshots import (
+    capture_job_snapshot,
+    classify_job_transition,
+    enqueue_job_snapshot,
+    run_job_snapshot_capture,
+)
 from cvat.apps.engine.models import (
     JobAnnotationSnapshot,
     JobAnnotationSnapshotFrame,
@@ -242,3 +249,100 @@ class CaptureJobSnapshotTest(TestCase):
         )
         self.assertIsNone(result)
         self.assertEqual(JobAnnotationSnapshot.objects.count(), 0)
+
+
+_ENQUEUE_JOB = "cvat.apps.engine.job_snapshots.enqueue_job_snapshot"
+_JOB_GET_QUEUE = "cvat.apps.engine.job_snapshots.django_rq.get_queue"
+
+
+class _SyncQueue:
+    def enqueue(self, func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+
+class JobSnapshotHookTest(TestCase):
+    """Every path that changes stage/state goes through Job.save(), so the hook
+    lives on the model signals (JobWriteSerializer.update and consensus merging)."""
+
+    def _transition(self, job, **fields):
+        with mock.patch(_ENQUEUE_JOB) as enq:
+            with self.captureOnCommitCallbacks(execute=True):
+                for name, value in fields.items():
+                    setattr(job, name, value)
+                job.save()
+        return enq
+
+    def test_submit_schedules_a_snapshot(self):
+        _, job, _ = _make_job()
+        models.Job.objects.filter(pk=job.pk).update(state="in progress")
+        job.refresh_from_db()
+        enq = self._transition(job, state="completed")
+        enq.assert_called_once()
+        kwargs = enq.call_args.kwargs
+        self.assertEqual(
+            (kwargs["job_id"], kwargs["trigger"], kwargs["from_state"], kwargs["to_state"]),
+            (job.id, JobSnapshotTrigger.SUBMITTED, "in progress", "completed"),
+        )
+
+    def test_reject_and_accept_schedule_snapshots(self):
+        _, job, _ = _make_job()
+        models.Job.objects.filter(pk=job.pk).update(state="completed")
+        job.refresh_from_db()
+        self.assertEqual(
+            self._transition(job, state="rejected").call_args.kwargs["trigger"],
+            JobSnapshotTrigger.REJECTED,
+        )
+        models.Job.objects.filter(pk=job.pk).update(state="completed")
+        job.refresh_from_db()
+        self.assertEqual(
+            self._transition(job, stage="acceptance").call_args.kwargs["trigger"],
+            JobSnapshotTrigger.ACCEPTED,
+        )
+
+    def test_non_boundary_saves_schedule_nothing(self):
+        _, job, _ = _make_job()
+        self._transition(job, state="in progress").assert_not_called()
+        self._transition(job).assert_not_called()  # plain re-save
+
+    def test_job_creation_schedules_nothing(self):
+        with mock.patch(_ENQUEUE_JOB) as enq:
+            with self.captureOnCommitCallbacks(execute=True):
+                _make_job()
+        enq.assert_not_called()
+
+    def test_updated_date_touch_schedules_nothing(self):
+        _, job, _ = _make_job()
+        with mock.patch(_ENQUEUE_JOB) as enq:
+            with self.captureOnCommitCallbacks(execute=True):
+                job.touch()
+        enq.assert_not_called()
+
+    def test_enqueue_failure_does_not_break_the_save(self):
+        # R20: a Redis outage must never fail the reviewer's transition.
+        _, job, _ = _make_job()
+        models.Job.objects.filter(pk=job.pk).update(state="in progress")
+        job.refresh_from_db()
+        with mock.patch(_JOB_GET_QUEUE, side_effect=ConnectionError("no redis")):
+            with self.captureOnCommitCallbacks(execute=True):
+                job.state = "completed"
+                job.save()
+        job.refresh_from_db()
+        self.assertEqual(job.state, "completed")
+
+    def test_worker_isolates_capture_failures(self):
+        with mock.patch(
+            "cvat.apps.engine.job_snapshots.capture_job_snapshot",
+            side_effect=RuntimeError("boom"),
+        ):
+            self.assertIsNone(run_job_snapshot_capture(job_id=1, trigger="submitted"))
+
+    def test_end_to_end_transition_persists_snapshot(self):
+        _, job, _ = _make_job(size=2)
+        models.Job.objects.filter(pk=job.pk).update(state="in progress")
+        job.refresh_from_db()
+        with mock.patch(_JOB_GET_QUEUE, return_value=_SyncQueue()):
+            with self.captureOnCommitCallbacks(execute=True):
+                job.state = "completed"
+                job.save()
+        snap = JobAnnotationSnapshot.objects.get(job=job)
+        self.assertEqual((snap.trigger, snap.frame_count), ("submitted", 2))
