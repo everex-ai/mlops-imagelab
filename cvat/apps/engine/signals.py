@@ -12,9 +12,8 @@ from django.db.models.signals import m2m_changed, post_delete, post_save, pre_sa
 from django.dispatch import receiver
 from rest_framework.exceptions import ValidationError
 
-from .models import Asset, CloudStorage, Data, Job, JobType, Profile, Project, StatusChoice, Task
-
 from . import job_snapshots  # noqa: F401 - registers the job snapshot receivers
+from .models import Asset, CloudStorage, Data, Job, JobType, Profile, Project, StatusChoice, Task
 
 # TODO: need to log any problems reported by shutil.rmtree when the new
 # analytics feature is available. Now the log system can write information

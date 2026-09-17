@@ -9,9 +9,9 @@ cannot (see the model docstring). Written synchronously in
 `IssueViewSet.perform_update`.
 """
 
+import django.db.models.deletion
 from django.conf import settings
 from django.db import migrations, models
-import django.db.models.deletion
 
 
 class Migration(migrations.Migration):
