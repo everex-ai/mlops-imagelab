@@ -1387,6 +1387,28 @@ class JobAnnotationSnapshotFrame(models.Model):
         ]
 
 
+class IssueResolutionChange(models.Model):
+    """One resolve (True) or reopen (False) of an issue.
+
+    `Issue` keeps only the current `resolved` flag, and the `update:issue` event
+    for it carries no issue id, so "was this issue resolved at time T" cannot be
+    answered per issue from either. Written synchronously in
+    `IssueViewSet.perform_update`.
+    """
+
+    issue = models.ForeignKey(
+        Issue, related_name="resolution_changes", on_delete=models.CASCADE
+    )
+    resolved = models.BooleanField()
+    actor = models.ForeignKey(
+        User, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    changed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["changed_at", "id"]
+
+
 class CloudProviderChoice(TextChoices):
     AMAZON_S3 = "AWS_S3_BUCKET", "Amazon S3"
     AZURE_BLOB_STORAGE = "AZURE_CONTAINER", "Azure Blob Storage"
