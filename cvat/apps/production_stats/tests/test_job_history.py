@@ -44,7 +44,7 @@ class JobSnapshotsApiTest(ApiTestBase):
         cls._snapshot(cls.other_job, "submitted", now, frames=1)
 
     @staticmethod
-    def _snapshot(job, trigger, at, *, frames):
+    def _snapshot(job, trigger, at, *, frames, status="captured"):
         snap = JobAnnotationSnapshot.objects.create(
             job=job,
             trigger=trigger,
@@ -53,6 +53,8 @@ class JobSnapshotsApiTest(ApiTestBase):
             to_stage="annotation",
             to_state="completed",
             transitioned_at=at,
+            status=status,
+            captured_at=at + timedelta(seconds=5) if status == "captured" else None,
             frame_count=frames,
         )
         JobAnnotationSnapshotFrame.objects.bulk_create(
@@ -73,6 +75,22 @@ class JobSnapshotsApiTest(ApiTestBase):
         )
         self.assertEqual(body["snapshots"][0]["frame_count"], 3)
         self.assertNotIn("frames", body["snapshots"][0])
+
+    def test_list_shows_boundaries_whose_capture_did_not_finish(self):
+        at = timezone.now()
+        pending = self._snapshot(self.other_job, "rejected", at, frames=0, status="pending")
+        failed = self._snapshot(self.other_job, "accepted", at, frames=0, status="failed")
+        response = self._get_request(
+            SNAPSHOTS, self.admin, query_params={"job_id": self.other_job.id}
+        )
+        rows = {s["id"]: s for s in response.json()["snapshots"]}
+        self.assertEqual(
+            [(rows[s.id]["status"], rows[s.id]["captured_at"]) for s in (pending, failed)],
+            [("pending", None), ("failed", None)],
+        )
+        self.assertEqual(
+            next(s for s in rows.values() if s["trigger"] == "submitted")["status"], "captured"
+        )
 
     def test_list_requires_job_id(self):
         response = self._get_request(SNAPSHOTS, self.admin)

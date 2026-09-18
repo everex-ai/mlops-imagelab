@@ -32,10 +32,12 @@ from cvat.apps.engine.models import (
     Job,
     JobAnnotationSnapshot,
     JobAnnotationSnapshotFrame,
+    JobSnapshotStatus,
     JobSnapshotTrigger,
     StageChoice,
     StateChoice,
 )
+from cvat.apps.engine.utils import transaction_with_repeatable_read
 
 logger = logging.getLogger(__name__)
 
@@ -61,15 +63,34 @@ def classify_job_transition(
     return None
 
 
+def _consistent_read():
+    """One snapshot of the database for the whole capture read.
+
+    `init_from_db` reads tags, shapes and tracks in separate queries; an annotation
+    save landing between them would mix two states into one snapshot. Export uses
+    the same repeatable-read transaction. Postgres only accepts the isolation level
+    as a transaction's first statement, so inside an already open transaction
+    (tests, or a caller's atomic block) that transaction's isolation applies.
+    """
+    if _in_transaction():
+        return transaction.atomic()
+    return transaction_with_repeatable_read()
+
+
+def _in_transaction() -> bool:
+    return transaction.get_connection().in_atomic_block
+
+
 def build_job_snapshot_frames(db_job: Job) -> list[dict]:
     """Every included frame of the job, densified (tracks interpolated), in the
     same payload shape as issue snapshots. Empty frames are kept: "no keypoints"
     and "not recorded" must stay distinguishable (R24)."""
-    job_data = load_job_data(db_job)
-    return [serialize_frame(m) for m in job_data.group_by_frame(include_empty=True)]
+    with _consistent_read():
+        job_data = load_job_data(db_job)
+        return [serialize_frame(m) for m in job_data.group_by_frame(include_empty=True)]
 
 
-def capture_job_snapshot(
+def record_job_snapshot(
     *,
     job_id: int,
     trigger: str,
@@ -80,62 +101,102 @@ def capture_job_snapshot(
     actor_id: int | None,
     transitioned_at: datetime,
 ) -> JobAnnotationSnapshot | None:
-    """Capture and persist one job snapshot. Returns None if the job is gone."""
+    """Write the `pending` row for one boundary. Returns None if the job is gone."""
     if trigger not in JobSnapshotTrigger.values:
         raise ValueError(f"unknown job snapshot trigger {trigger!r}")
 
-    job = Job.objects.filter(pk=job_id).first()
-    if job is None:
+    if not Job.objects.filter(pk=job_id).exists():
         logger.info("Job %s no longer exists; skipping %s snapshot", job_id, trigger)
         return None
 
-    frames = build_job_snapshot_frames(job)
+    return JobAnnotationSnapshot.objects.create(
+        job_id=job_id,
+        trigger=trigger,
+        from_stage=from_stage,
+        from_state=from_state,
+        to_stage=to_stage,
+        to_state=to_state,
+        actor_id=actor_id,
+        transitioned_at=transitioned_at,
+        status=JobSnapshotStatus.PENDING,
+    )
+
+
+def capture_job_snapshot(snapshot_id: int) -> JobAnnotationSnapshot | None:
+    """Store the frames of a `pending` snapshot and mark it `captured`.
+
+    Returns None if the snapshot is gone (its job was deleted). A snapshot that is
+    no longer pending is left alone: its frames were already stored, or its
+    capture was given up on.
+    """
+    snapshot = JobAnnotationSnapshot.objects.select_related("job").filter(pk=snapshot_id).first()
+    if snapshot is None:
+        logger.info("Job snapshot %s no longer exists; skipping capture", snapshot_id)
+        return None
+    if snapshot.status != JobSnapshotStatus.PENDING:
+        logger.info("Job snapshot %s is already %s; skipping", snapshot_id, snapshot.status)
+        return snapshot
+
+    frames = build_job_snapshot_frames(snapshot.job)
     with transaction.atomic():
-        snapshot = JobAnnotationSnapshot.objects.create(
-            job=job,
-            trigger=trigger,
-            from_stage=from_stage,
-            from_state=from_state,
-            to_stage=to_stage,
-            to_state=to_state,
-            actor_id=actor_id,
-            transitioned_at=transitioned_at,
-            frame_count=len(frames),
-        )
         JobAnnotationSnapshotFrame.objects.bulk_create(
             JobAnnotationSnapshotFrame(snapshot=snapshot, frame=f["frame"], data=f) for f in frames
         )
+        JobAnnotationSnapshot.objects.filter(pk=snapshot_id).update(
+            status=JobSnapshotStatus.CAPTURED,
+            captured_at=timezone.now(),
+            frame_count=len(frames),
+        )
     logger.info(
         "Captured %s job snapshot %s for job %s (%d frames)",
-        trigger,
-        snapshot.id,
-        job_id,
+        snapshot.trigger,
+        snapshot_id,
+        snapshot.job_id,
         len(frames),
     )
+    snapshot.refresh_from_db()
     return snapshot
 
 
-def run_job_snapshot_capture(**capture_kwargs) -> None:
-    """RQ worker entry point. Isolates every failure (R20)."""
+def _mark_failed(snapshot_id: int) -> None:
     try:
-        capture_job_snapshot(**capture_kwargs)
+        JobAnnotationSnapshot.objects.filter(
+            pk=snapshot_id, status=JobSnapshotStatus.PENDING
+        ).update(status=JobSnapshotStatus.FAILED)
+    except Exception:  # noqa: BLE001 - the failure is already logged by the caller
+        logger.exception("Failed to mark job snapshot %s as failed", snapshot_id)
+
+
+def run_job_snapshot_capture(snapshot_id: int) -> None:
+    """RQ worker entry point. Isolates every failure (R20) and records it on the row."""
+    try:
+        capture_job_snapshot(snapshot_id)
     except Exception:  # noqa: BLE001 - capture must never escalate
-        logger.exception("Failed to capture job snapshot for job %s", capture_kwargs.get("job_id"))
+        logger.exception("Failed to capture job snapshot %s", snapshot_id)
+        _mark_failed(snapshot_id)
 
 
-def enqueue_job_snapshot(**capture_kwargs) -> None:
-    """Enqueue on the notifications queue (utils worker). Failures are swallowed (R20).
+def enqueue_job_snapshot(**boundary) -> None:
+    """Record the boundary, then enqueue its capture. Failures are swallowed (R20).
 
-    Must pass kwargs via RQ's explicit `kwargs=` form, not `**capture_kwargs`: RQ
-    reserves `job_id` in its own call signature (it's the RQ job's id, not ours),
-    so splatting our `job_id` straight in gets captured and stripped by RQ instead
-    of reaching `run_job_snapshot_capture`.
+    Captures go to their own `snapshots` queue and worker: a whole-job capture
+    takes seconds, and on the single-process notifications worker it would hold
+    back issue `before` captures, which must run before the annotator edits.
     """
     try:
-        queue = django_rq.get_queue(settings.CVAT_QUEUES.NOTIFICATIONS.value)
-        queue.enqueue(run_job_snapshot_capture, kwargs=capture_kwargs)
+        snapshot = record_job_snapshot(**boundary)
+    except Exception:  # noqa: BLE001 - recording must not break the job transition
+        logger.exception("Failed to record job snapshot for job %s", boundary.get("job_id"))
+        return
+    if snapshot is None:
+        return
+
+    try:
+        queue = django_rq.get_queue(settings.CVAT_QUEUES.SNAPSHOTS.value)
+        queue.enqueue(run_job_snapshot_capture, snapshot.id)
     except Exception:  # noqa: BLE001 - enqueue must not break the job transition
-        logger.exception("Failed to enqueue job snapshot for job %s", capture_kwargs.get("job_id"))
+        logger.exception("Failed to enqueue job snapshot %s", snapshot.id)
+        _mark_failed(snapshot.id)
 
 
 _PENDING_ATTR = "_pending_job_snapshot"

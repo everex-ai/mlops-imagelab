@@ -79,3 +79,11 @@ services:
         CVAT_CONFIGURATION: testing
     environment:
       DJANGO_SETTINGS_MODULE: cvat.settings.testing
+
+  cvat_worker_snapshots_everex:
+    build:
+      context: .
+      args:
+        CVAT_CONFIGURATION: testing
+    environment:
+      DJANGO_SETTINGS_MODULE: cvat.settings.testing

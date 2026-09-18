@@ -1341,6 +1341,19 @@ class JobSnapshotTrigger(TextChoices):
     ACCEPTED = "accepted", "accepted"  # stage -> acceptance
 
 
+class JobSnapshotStatus(TextChoices):
+    """Where a boundary's capture stands.
+
+    The row is written when the transition commits, before the async capture, so
+    a boundary whose capture was lost stays visible instead of looking like a
+    boundary that never happened.
+    """
+
+    PENDING = "pending", "pending"  # recorded, capture not finished
+    CAPTURED = "captured", "captured"
+    FAILED = "failed", "failed"
+
+
 class JobAnnotationSnapshot(TimestampedModel):
     """Frozen densified geometry of a whole job at one round boundary.
 
@@ -1350,8 +1363,10 @@ class JobAnnotationSnapshot(TimestampedModel):
     geometry lives in `JobAnnotationSnapshotFrame` so a viewer can read a frame
     range without loading the whole job.
 
-    `transitioned_at` is when the job crossed the boundary; `created_date` is
-    when the async worker captured it (seconds later). Match rounds on the former.
+    `transitioned_at` is when the job crossed the boundary; `captured_at` is when
+    the async worker stored the frames (seconds later). Match rounds on the former.
+    A row that stays `pending` long after `transitioned_at` lost its capture (the
+    in-memory queue was restarted).
     """
 
     job = models.ForeignKey(
@@ -1366,6 +1381,10 @@ class JobAnnotationSnapshot(TimestampedModel):
         User, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
     transitioned_at = models.DateTimeField()
+    status = models.CharField(
+        max_length=16, choices=JobSnapshotStatus.choices, default=JobSnapshotStatus.PENDING
+    )
+    captured_at = models.DateTimeField(null=True, blank=True)
     frame_count = models.PositiveIntegerField(default=0)
 
     class Meta:
