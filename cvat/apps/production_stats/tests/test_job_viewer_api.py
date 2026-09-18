@@ -13,6 +13,9 @@ production_stats. These tests talk to a real OPA instance.
 
 from __future__ import annotations
 
+from unittest import mock
+
+from django.db import transaction
 from django.db.migrations.recorder import MigrationRecorder
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
@@ -25,7 +28,7 @@ from cvat.apps.engine.models import Label, Project, Skeleton
 from cvat.apps.engine.tests.test_issue_snapshots_capture import _make_job
 from cvat.apps.engine.tests.utils import ApiTestBase
 from cvat.apps.production_stats.job_history import _job_labels, skeleton_edges
-from cvat.apps.production_stats.tests.test_endpoints import create_db_users
+from cvat.apps.production_stats.tests.test_endpoints import create_db_users, create_job
 
 OUTLINE = "/api/production_stats/job_outline"
 FRAMES = "/api/production_stats/job_frames"
@@ -171,6 +174,40 @@ class JobOutlineApiTest(ApiTestBase):
                     self._get_request(f"{OUTLINE}/99999999", user).status_code,
                     status.HTTP_403_FORBIDDEN,
                 )
+
+
+class JobOutlineSpecificFramesTest(ApiTestBase):
+    """A SPECIFIC_FRAMES segment's start_frame..stop_frame is a slot
+    allocation (ground-truth and consensus-replica jobs): most slots were
+    never one of segment.frame_set's frames, so they must not be reported as
+    `deleted_frames` even though they fall inside that range."""
+
+    @classmethod
+    def setUpTestData(cls):
+        create_db_users(cls)
+        project = Project.objects.create(name="GT Viewer")
+        cls.job = create_job(
+            project=project,
+            task_name="gt-viewer",
+            start_frame=0,
+            stop_frame=4,
+            frames=[0, 2, 4],  # frames 1 and 3 are never part of the job
+        )
+        data = cls.job.segment.task.data
+        for i in range(5):
+            models.Image.objects.create(
+                data=data, path=f"frame_{i:06d}.png", frame=i, width=100, height=100
+            )
+        # Frame 2 IS a job frame, but genuinely deleted since.
+        models.Data.objects.filter(pk=data.pk).update(deleted_frames=[2])
+
+    def test_a_non_member_frame_is_neither_shown_nor_deleted(self):
+        body = self._get_request(f"{OUTLINE}/{self.job.id}", self.admin).json()
+        self.assertEqual(body["frames"], [0, 4])
+        self.assertEqual(body["deleted_frames"], [2])  # genuinely deleted, not a non-member frame
+        seen = set(body["frames"]) | set(body["deleted_frames"])
+        self.assertNotIn(1, seen)  # inside start_frame..stop_frame, never a job frame
+        self.assertNotIn(3, seen)
 
 
 class JobFramesApiTest(ApiTestBase):
@@ -345,3 +382,19 @@ class JobFramesApiTest(ApiTestBase):
             self._frames(self.user, frame_from=0, frame_to=0).status_code,
             status.HTTP_403_FORBIDDEN,
         )
+
+    def test_the_read_uses_one_repeatable_read_transaction(self):
+        # Mirrors test_the_worker_reads_in_one_repeatable_read_transaction in
+        # test_job_snapshots.py: tests run inside a transaction, where the
+        # isolation level can no longer be set, so _in_transaction is forced to
+        # False to simulate this request being the outermost transaction.
+        with (
+            mock.patch("cvat.apps.engine.job_snapshots._in_transaction", return_value=False),
+            mock.patch(
+                "cvat.apps.engine.job_snapshots.transaction_with_repeatable_read",
+                side_effect=transaction.atomic,
+            ) as repeatable_read,
+        ):
+            response = self._frames(self.admin, frame_from=0, frame_to=0)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        repeatable_read.assert_called_once_with()

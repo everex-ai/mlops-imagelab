@@ -4,7 +4,9 @@
 
 """Read API over the job history ImageLab records for Beacon's job viewer:
 round-boundary snapshots (engine.JobAnnotationSnapshot) and issues with their
-comments, resolve/reopen history and issue snapshots.
+comments, resolve/reopen history and issue snapshots, plus the current-state
+endpoints (job_outline, job_frames) that read a job's live labels, frames and
+annotations.
 
 Admin-only through ProductionStatsPermission, excluded from the OpenAPI schema
 like the rest of production_stats.
@@ -25,6 +27,7 @@ from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 
 from cvat.apps.engine.issue_snapshots import load_job_data, serialize_frame
+from cvat.apps.engine.job_snapshots import consistent_read
 from cvat.apps.engine.models import (
     Comment,
     Issue,
@@ -33,6 +36,7 @@ from cvat.apps.engine.models import (
     Job,
     JobAnnotationSnapshot,
     Label,
+    SegmentType,
     Skeleton,
 )
 from cvat.apps.engine.types import ExtendedRequest
@@ -97,11 +101,10 @@ def _skeleton_svg(label: Label) -> str:
 
 
 def _job_labels(db_task) -> list[dict[str, Any]]:
-    # A task in a project uses the project's labels, as everywhere else in CVAT.
-    owner = {"project_id": db_task.project_id} if db_task.project_id else {"task_id": db_task.id}
+    # CVAT's own label rule (Task.get_labels / Job.get_labels): the project's
+    # labels when the task is in a project, else the task's own top-level labels.
     roots = (
-        Label.objects.filter(parent__isnull=True, **owner)
-        .select_related("skeleton")
+        db_task.get_labels()
         .prefetch_related(Prefetch("sublabels", queryset=Label.objects.order_by("id")))
         .order_by("id")
     )
@@ -127,22 +130,35 @@ def _job_labels(db_task) -> list[dict[str, Any]]:
 def _job_frames(db_job: Job) -> tuple[list[int], list[int]]:
     """Task-relative frame accounting for a job's segment: the frames it shows
     (its segment minus deleted and excluded frames) and the frames deleted or
-    excluded since - still inside the segment, but with no slot in `frames`.
+    disabled since - frames that actually belong to the job, but with no slot
+    in `frames`.
 
     A round's snapshot can hold a frame that was later deleted (R24: "no
     record" and "zero keypoints" must stay distinguishable); job_outline needs
-    to tell the viewer such a frame exists in the segment even though it can no
+    to tell the viewer such a frame exists in the job even though it can no
     longer be drawn live. Uses dataset_manager's own inclusion rule with an
-    empty annotation set, so nothing is loaded but the frame metadata."""
+    empty annotation set, so nothing is loaded but the frame metadata.
+
+    The candidate set for "deleted" is the frames the job actually has, not
+    every slot in start_frame..stop_frame: for a SPECIFIC_FRAMES segment
+    (ground-truth and consensus-replica jobs) that range is a slot allocation,
+    and most slots were never one of segment.frame_set's frames - counting them
+    as deleted would be wrong. A RANGE segment has no such gap, so the full
+    range is used as-is."""
     from cvat.apps.dataset_manager.annotation import AnnotationIR
     from cvat.apps.dataset_manager.bindings import JobData
+    from cvat.apps.engine.frame_provider import TaskFrameProvider
 
     db_task = db_job.segment.task
     job_data = JobData(annotation_ir=AnnotationIR(db_task.dimension), db_job=db_job, host="")
     included = job_data.get_included_frames()
     segment = db_job.segment
-    all_frames = range(segment.start_frame, segment.stop_frame + 1)
-    return sorted(included), sorted(frame for frame in all_frames if frame not in included)
+    if segment.type == SegmentType.SPECIFIC_FRAMES:
+        frame_provider = TaskFrameProvider(db_task)
+        candidates = {frame_provider.get_rel_frame_number(frame) for frame in segment.frame_set}
+    else:
+        candidates = set(range(segment.start_frame, segment.stop_frame + 1))
+    return sorted(included), sorted(candidates - included)
 
 
 _HISTORY_MIGRATIONS = {
@@ -399,13 +415,17 @@ class JobFramesViewSet(viewsets.ViewSet):
         frame_to = query.validated_data["frame_to"]
 
         # included_frames limits what group_by_frame yields; deleted and excluded
-        # frames stay out, as in a snapshot.
-        job_data = load_job_data(db_job, included_frames=range(frame_from, frame_to + 1))
+        # frames stay out, as in a snapshot. One repeatable-read transaction for
+        # the load and the serialization, so a save landing in between can't mix
+        # two states into one response (the same fix job_snapshots applies).
+        with consistent_read():
+            job_data = load_job_data(db_job, included_frames=range(frame_from, frame_to + 1))
+            frames = [serialize_frame(m) for m in job_data.group_by_frame(include_empty=True)]
         return Response(
             {
                 "job_id": db_job.id,
                 "frame_from": frame_from,
                 "frame_to": frame_to,
-                "frames": [serialize_frame(m) for m in job_data.group_by_frame(include_empty=True)],
+                "frames": frames,
             }
         )
