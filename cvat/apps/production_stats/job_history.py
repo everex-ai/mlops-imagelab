@@ -12,9 +12,9 @@ like the rest of production_stats.
 
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
 from typing import Any
 
+import defusedxml.ElementTree as ET
 from django.db.migrations.recorder import MigrationRecorder
 from django.db.models import Prefetch
 from django.utils.decorators import method_decorator
@@ -48,9 +48,14 @@ def skeleton_edges(svg: str, sublabel_names_by_id: dict[int, str]) -> list[list[
 
     Parses the svg the CVAT skeleton editor stores, the same format
     dataset_manager.bindings reads: circles map node ids to sublabels, lines
-    join node ids. Circles do not always carry data-label-name, so the label id
-    is the fallback. Anything unreadable yields no edges rather than an error:
-    the viewer still draws the points.
+    join node ids. The id is canonical and preferred: CVAT rewrites a circle's
+    data-label-name into data-label-id when a skeleton label is created or
+    updated (engine.serializers), and the export path regenerates every name
+    from the CURRENT label rows before parsing (dataset_manager.bindings) - a
+    surviving data-label-name can be a stale name from before a sublabel
+    rename. data-label-name is used only when the id is missing or names a
+    sublabel unknown to the caller's id-to-name map. Anything unreadable
+    yields no edges rather than an error: the viewer still draws the points.
     """
     if not svg:
         return []
@@ -64,9 +69,12 @@ def skeleton_edges(svg: str, sublabel_names_by_id: dict[int, str]) -> list[list[
         if element.tag != "circle":
             continue
         node = element.attrib.get("data-node-id")
-        name = element.attrib.get("data-label-name")
-        if name is None and element.attrib.get("data-label-id", "").isdigit():
-            name = sublabel_names_by_id.get(int(element.attrib["data-label-id"]))
+        name = None
+        label_id = element.attrib.get("data-label-id", "")
+        if label_id.isdigit():
+            name = sublabel_names_by_id.get(int(label_id))
+        if name is None:
+            name = element.attrib.get("data-label-name")
         if node is not None and name is not None:
             names[node] = name
 
@@ -116,16 +124,25 @@ def _job_labels(db_task) -> list[dict[str, Any]]:
     return labels
 
 
-def _visible_frames(db_job: Job) -> list[int]:
-    """Task-relative frames the job shows: its segment minus deleted and excluded
-    frames. Uses dataset_manager's own rule with an empty annotation set, so
-    nothing is loaded but the frame metadata."""
+def _job_frames(db_job: Job) -> tuple[list[int], list[int]]:
+    """Task-relative frame accounting for a job's segment: the frames it shows
+    (its segment minus deleted and excluded frames) and the frames deleted or
+    excluded since - still inside the segment, but with no slot in `frames`.
+
+    A round's snapshot can hold a frame that was later deleted (R24: "no
+    record" and "zero keypoints" must stay distinguishable); job_outline needs
+    to tell the viewer such a frame exists in the segment even though it can no
+    longer be drawn live. Uses dataset_manager's own inclusion rule with an
+    empty annotation set, so nothing is loaded but the frame metadata."""
     from cvat.apps.dataset_manager.annotation import AnnotationIR
     from cvat.apps.dataset_manager.bindings import JobData
 
     db_task = db_job.segment.task
     job_data = JobData(annotation_ir=AnnotationIR(db_task.dimension), db_job=db_job, host="")
-    return sorted(job_data.get_included_frames())
+    included = job_data.get_included_frames()
+    segment = db_job.segment
+    all_frames = range(segment.start_frame, segment.stop_frame + 1)
+    return sorted(included), sorted(frame for frame in all_frames if frame not in included)
 
 
 _HISTORY_MIGRATIONS = {
@@ -338,6 +355,8 @@ class JobOutlineViewSet(viewsets.ViewSet):
             raise NotFound()
 
         db_task = db_job.segment.task
+        segment = db_job.segment
+        frames, deleted_frames = _job_frames(db_job)
         return Response(
             {
                 "job_id": db_job.id,
@@ -347,7 +366,12 @@ class JobOutlineViewSet(viewsets.ViewSet):
                 "project_name": db_task.project.name if db_task.project_id else None,
                 "stage": db_job.stage,
                 "state": db_job.state,
-                "frames": _visible_frames(db_job),
+                "segment": {
+                    "start_frame": segment.start_frame,
+                    "stop_frame": segment.stop_frame,
+                },
+                "frames": frames,
+                "deleted_frames": deleted_frames,
                 "labels": _job_labels(db_task),
                 "history_since": _history_since(),
             }
