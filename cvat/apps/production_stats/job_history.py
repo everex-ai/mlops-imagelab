@@ -24,6 +24,7 @@ from rest_framework import serializers, viewsets
 from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 
+from cvat.apps.engine.issue_snapshots import load_job_data, serialize_frame
 from cvat.apps.engine.models import (
     Comment,
     Issue,
@@ -349,5 +350,38 @@ class JobOutlineViewSet(viewsets.ViewSet):
                 "frames": _visible_frames(db_job),
                 "labels": _job_labels(db_task),
                 "history_since": _history_since(),
+            }
+        )
+
+
+@extend_schema(exclude=True)
+class JobFramesViewSet(viewsets.ViewSet):
+    """Live annotations of a frame range, densified, in the snapshot frame shape."""
+
+    iam_permission_class = ProductionStatsPermission
+    iam_organization_field = None
+    lookup_value_regex = r"\d+"
+
+    @method_decorator(never_cache)
+    def retrieve(self, request: ExtendedRequest, pk: str) -> Response:
+        db_job = Job.objects.filter(pk=int(pk)).first()
+        self.check_object_permissions(request, db_job)
+        if db_job is None:
+            raise NotFound()
+
+        query = FrameRangeQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        frame_from = query.validated_data["frame_from"]
+        frame_to = query.validated_data["frame_to"]
+
+        # included_frames limits what group_by_frame yields; deleted and excluded
+        # frames stay out, as in a snapshot.
+        job_data = load_job_data(db_job, included_frames=range(frame_from, frame_to + 1))
+        return Response(
+            {
+                "job_id": db_job.id,
+                "frame_from": frame_from,
+                "frame_to": frame_to,
+                "frames": [serialize_frame(m) for m in job_data.group_by_frame(include_empty=True)],
             }
         )

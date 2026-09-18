@@ -22,6 +22,7 @@ router.register("job_issues", job_history.JobIssuesViewSet, basename="production
 router.register(
     "job_outline", job_history.JobOutlineViewSet, basename="production_stats_job_outline"
 )
+router.register("job_frames", job_history.JobFramesViewSet, basename="production_stats_job_frames")
 
 urlpatterns = [
     # The "api/" prefix is added by cvat/urls.py.

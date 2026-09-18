@@ -129,3 +129,71 @@ class JobOutlineApiTest(ApiTestBase):
                     self._get_request(f"{OUTLINE}/99999999", user).status_code,
                     status.HTTP_403_FORBIDDEN,
                 )
+
+
+class JobFramesApiTest(ApiTestBase):
+    @classmethod
+    def setUpTestData(cls):
+        create_db_users(cls)
+        cls.job, cls.labels = _viewer_job(size=4, deleted=(2,))
+        models.LabeledShape.objects.create(
+            job=cls.job,
+            label=cls.labels["ball"],
+            frame=1,
+            type="points",
+            points=[10.0, 20.0],
+            occluded=False,
+            outside=False,
+            z_order=0,
+            group=0,
+            rotation=0.0,
+            source="manual",
+        )
+
+    def _frames(self, user, **params):
+        return self._get_request(f"{FRAMES}/{self.job.id}", user, query_params=params)
+
+    def test_live_frames_use_the_snapshot_payload_shape(self):
+        response = self._frames(self.admin, frame_from=0, frame_to=3)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        body = response.json()
+        self.assertEqual((body["frame_from"], body["frame_to"]), (0, 3))
+        self.assertEqual([f["frame"] for f in body["frames"]], [0, 1, 3])  # 2 is deleted
+        frame1 = next(f for f in body["frames"] if f["frame"] == 1)
+        self.assertEqual(set(frame1), {"frame", "abs_frame", "name", "width", "height", "objects"})
+        self.assertEqual(
+            (frame1["objects"][0]["label"], frame1["objects"][0]["points"]),
+            ("ball", [10.0, 20.0]),
+        )
+
+    def test_a_frame_without_objects_is_listed_empty(self):
+        body = self._frames(self.admin, frame_from=0, frame_to=0).json()
+        self.assertEqual([(f["frame"], f["objects"]) for f in body["frames"]], [(0, [])])
+
+    def test_only_the_requested_range_is_returned(self):
+        body = self._frames(self.admin, frame_from=1, frame_to=1).json()
+        self.assertEqual([f["frame"] for f in body["frames"]], [1])
+
+    def test_range_is_validated(self):
+        for params in (
+            {"frame_from": 0, "frame_to": 20},  # 21 frames
+            {"frame_from": 2, "frame_to": 1},
+            {"frame_from": 0},
+        ):
+            with self.subTest(params=params):
+                self.assertEqual(
+                    self._frames(self.admin, **params).status_code,
+                    status.HTTP_400_BAD_REQUEST,
+                )
+
+    def test_admin_only_and_missing_job_is_404(self):
+        self.assertEqual(
+            self._get_request(
+                f"{FRAMES}/99999999", self.admin, query_params={"frame_from": 0, "frame_to": 0}
+            ).status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+        self.assertEqual(
+            self._frames(self.user, frame_from=0, frame_to=0).status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
