@@ -63,14 +63,15 @@ def classify_job_transition(
     return None
 
 
-def _consistent_read():
-    """One snapshot of the database for the whole capture read.
+def consistent_read():
+    """One snapshot of the database for the whole read.
 
     `init_from_db` reads tags, shapes and tracks in separate queries; an annotation
-    save landing between them would mix two states into one snapshot. Export uses
-    the same repeatable-read transaction. Postgres only accepts the isolation level
-    as a transaction's first statement, so inside an already open transaction
-    (tests, or a caller's atomic block) that transaction's isolation applies.
+    save landing between them would mix two states into one snapshot/response.
+    Export uses the same repeatable-read transaction. Postgres only accepts the
+    isolation level as a transaction's first statement, so inside an already open
+    transaction (tests, or a caller's atomic block) that transaction's isolation
+    applies. Public: shared by job snapshot capture and the job_frames read API.
     """
     if _in_transaction():
         return transaction.atomic()
@@ -85,7 +86,7 @@ def build_job_snapshot_frames(db_job: Job) -> list[dict]:
     """Every included frame of the job, densified (tracks interpolated), in the
     same payload shape as issue snapshots. Empty frames are kept: "no keypoints"
     and "not recorded" must stay distinguishable (R24)."""
-    with _consistent_read():
+    with consistent_read():
         job_data = load_job_data(db_job)
         return [serialize_frame(m) for m in job_data.group_by_frame(include_empty=True)]
 
