@@ -43,6 +43,7 @@ from cvat.apps.production_stats.tests.test_query_builders import (
 JOB_FACTS_PATH = "/api/production_stats/job_facts"
 JOB_ROUNDS_PATH = "/api/production_stats/job_rounds"
 OBJECT_COUNTS_PATH = "/api/production_stats/object_counts"
+ISSUE_FACTS_PATH = "/api/production_stats/issue_facts"
 
 # The two stage-2 statements, named by a fragment that appears in one of them and nowhere
 # else, so a test can pick out what was bound to each.
@@ -271,10 +272,15 @@ class ProductionStatsPermissionTest(ApiTestBase):
         cls.job = create_job(
             project=Project.objects.create(name="Permissions"), task_name="permissions"
         )
-        cls.paths = (JOB_FACTS_PATH, job_rounds_path(cls.job.id), OBJECT_COUNTS_PATH)
+        cls.paths = (
+            JOB_FACTS_PATH,
+            job_rounds_path(cls.job.id),
+            OBJECT_COUNTS_PATH,
+            ISSUE_FACTS_PATH,
+        )
 
     def _get(self, path: str, user: User | None):
-        query_params = PERIOD if path == JOB_FACTS_PATH else None
+        query_params = PERIOD if path in (JOB_FACTS_PATH, ISSUE_FACTS_PATH) else None
         with mock.patch(RUN_QUERY, FakeClickHouse()):
             return self._get_request(path, user=user, query_params=query_params)
 

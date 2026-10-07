@@ -18,6 +18,9 @@ router.register(
 router.register(
     "job_snapshots", job_history.JobSnapshotsViewSet, basename="production_stats_job_snapshots"
 )
+router.register(
+    "issue_facts", views.IssueFactsViewSet, basename="production_stats_issue_facts"
+)
 router.register("job_issues", job_history.JobIssuesViewSet, basename="production_stats_job_issues")
 router.register(
     "job_outline", job_history.JobOutlineViewSet, basename="production_stats_job_outline"
