@@ -44,6 +44,7 @@ JOB_FACTS_PATH = "/api/production_stats/job_facts"
 JOB_ROUNDS_PATH = "/api/production_stats/job_rounds"
 OBJECT_COUNTS_PATH = "/api/production_stats/object_counts"
 ISSUE_FACTS_PATH = "/api/production_stats/issue_facts"
+USER_DAY_ACTIVITY_PATH = "/api/production_stats/user_day_activity"
 
 # The two stage-2 statements, named by a fragment that appears in one of them and nowhere
 # else, so a test can pick out what was bound to each.
@@ -91,6 +92,7 @@ class FakeClickHouse:
         timeline: Sequence[Mapping[str, Any]] = (),
         daily: Sequence[Mapping[str, Any]] = (),
         last_seen: Mapping[str, Any] | None = None,
+        user_days: Sequence[Mapping[str, Any]] = (),
     ):
         self.jobs = list(jobs)
         self.lifecycle = list(lifecycle)
@@ -98,6 +100,7 @@ class FakeClickHouse:
         self.timeline = list(timeline)
         self.daily = list(daily)
         self.last_seen = last_seen
+        self.user_days = list(user_days)
         self.statements: list[tuple[str, dict[str, Any]]] = []
 
     def __call__(self, sql: str, parameters: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -129,6 +132,9 @@ class FakeClickHouse:
 
         if "max(timestamp) AS last_seen" in sql:
             return [dict(self.last_seen)] if self.last_seen else [{"last_seen": None, "events": 0}]
+
+        if "AS first_at" in sql:
+            return [dict(row) for row in self.user_days]
 
         raise AssertionError(f"unexpected statement: {sql}")
 
@@ -277,10 +283,13 @@ class ProductionStatsPermissionTest(ApiTestBase):
             job_rounds_path(cls.job.id),
             OBJECT_COUNTS_PATH,
             ISSUE_FACTS_PATH,
+            USER_DAY_ACTIVITY_PATH,
         )
 
     def _get(self, path: str, user: User | None):
-        query_params = PERIOD if path in (JOB_FACTS_PATH, ISSUE_FACTS_PATH) else None
+        query_params = (
+            PERIOD if path in (JOB_FACTS_PATH, ISSUE_FACTS_PATH, USER_DAY_ACTIVITY_PATH) else None
+        )
         with mock.patch(RUN_QUERY, FakeClickHouse()):
             return self._get_request(path, user=user, query_params=query_params)
 
