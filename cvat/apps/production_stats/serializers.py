@@ -32,8 +32,8 @@ from cvat.apps.production_stats.queries import ROLE_ANNOTATION, ROLE_REVIEW
 MAX_PERIOD = timedelta(days=366)
 
 
-class JobFactsQuerySerializer(serializers.Serializer):
-    """Query parameters accepted by the job facts list route."""
+class PeriodQuerySerializer(serializers.Serializer):
+    """A reporting window, capped at MAX_PERIOD. Shared by every period-bound route."""
 
     period_start = serializers.DateTimeField(
         help_text="Inclusive lower bound of the reporting window."
@@ -41,9 +41,6 @@ class JobFactsQuerySerializer(serializers.Serializer):
     period_end = serializers.DateTimeField(
         help_text="Exclusive upper bound of the reporting window."
     )
-    # Optional on purpose: the screen's default filter is "all projects", so the unfiltered
-    # path is the one users take on first load.
-    project_id = serializers.IntegerField(required=False, min_value=1)
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         period_start = attrs["period_start"]
@@ -58,6 +55,14 @@ class JobFactsQuerySerializer(serializers.Serializer):
             )
 
         return attrs
+
+
+class JobFactsQuerySerializer(PeriodQuerySerializer):
+    """Query parameters accepted by the job facts list route."""
+
+    # Optional on purpose: the screen's default filter is "all projects", so the unfiltered
+    # path is the one users take on first load.
+    project_id = serializers.IntegerField(required=False, min_value=1)
 
 
 class UserRefSerializer(serializers.Serializer):
@@ -263,3 +268,31 @@ class ProjectObjectCountSerializer(serializers.Serializer):
     # by `job_count` to answer "how heavy is a job here": a project half of whose jobs are
     # not started yet would otherwise report a difficulty diluted by the untouched half.
     jobs_with_objects = serializers.IntegerField()
+
+
+class IssueFactsQuerySerializer(PeriodQuerySerializer):
+    """
+    Query parameters accepted by the issue facts list route.
+
+    **No project filter.** Beacon reads issues one calendar month at a time for every
+    project at once, and the aggregate is a single grouped statement either way.
+    """
+
+
+class IssueCountsSerializer(serializers.Serializer):
+    """How much review feedback a set of jobs drew inside the window."""
+
+    # Every Issue row created inside the window.
+    issues = serializers.IntegerField()
+
+    # Distinct (job, frame) pairs carrying at least one of those issues. CVAT has no
+    # per-frame rejection state - a rejection is a job-level transition - so a frame with
+    # an issue on it is the closest thing to "a rejected frame" the data holds. Three
+    # issues on one frame are one flagged frame.
+    flagged_frames = serializers.IntegerField()
+
+
+class IssueFactSerializer(IssueCountsSerializer):
+    """The feedback one assignee's jobs drew. Grouped by the job's *current* assignee."""
+
+    assignee = UserRefSerializer()
