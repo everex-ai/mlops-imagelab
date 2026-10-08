@@ -296,3 +296,22 @@ class IssueFactSerializer(IssueCountsSerializer):
     """The feedback one assignee's jobs drew. Grouped by the job's *current* assignee."""
 
     assignee = UserRefSerializer()
+
+
+class UserDayActivityQuerySerializer(PeriodQuerySerializer):
+    """Query parameters accepted by the user-day activity list route."""
+
+
+class UserDayActivitySerializer(serializers.Serializer):
+    """
+    One person's activity span on one KST day.
+
+    ``first_at`` / ``last_at`` are KST wall-clock ``HH:MM`` of the earliest and latest client
+    event at or after 06:00. Beacon reads them to tell a half-day leave from a full day.
+    """
+
+    user_id = serializers.IntegerField()
+    date = serializers.CharField(help_text="KST calendar day, YYYY-MM-DD.")
+    first_at = serializers.CharField(help_text="KST HH:MM of the first client event.")
+    last_at = serializers.CharField(help_text="KST HH:MM of the last client event.")
+    events = serializers.IntegerField()

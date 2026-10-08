@@ -22,7 +22,7 @@ from cvat.apps.engine.models import Issue, Job, LabeledShape, LabeledTrack
 from cvat.apps.engine.pagination import CustomPagination
 from cvat.apps.engine.types import ExtendedRequest
 from cvat.apps.production_stats.permissions import ProductionStatsPermission
-from cvat.apps.production_stats.queries import freshness, job_facts, job_rounds
+from cvat.apps.production_stats.queries import freshness, job_facts, job_rounds, user_day
 from cvat.apps.production_stats.queries.clickhouse import handle_clickhouse_exceptions
 from cvat.apps.production_stats.serializers import (
     FreshnessSerializer,
@@ -34,6 +34,8 @@ from cvat.apps.production_stats.serializers import (
     JobRoundsSerializer,
     ObjectCountsQuerySerializer,
     ProjectObjectCountSerializer,
+    UserDayActivityQuerySerializer,
+    UserDayActivitySerializer,
 )
 
 # These view sets are deliberately excluded from the OpenAPI schema: CI
@@ -642,6 +644,50 @@ class IssueFactsViewSet(viewsets.GenericViewSet):
         # are still feedback that happened. Dropping them would make the per-person
         # columns look like the whole picture.
         response.data["unassigned"] = IssueCountsSerializer(unassigned).data
+        response.data["period"] = {"start": period_start, "end": period_end}
+
+        return response
+
+
+@extend_schema(exclude=True)
+class UserDayActivityViewSet(viewsets.GenericViewSet):
+    """
+    Per-person, per-KST-day span of client activity (first and last event time).
+
+    Beacon's monthly productivity judges half-day leave from when a person's day starts and
+    ends; the rule itself lives in Beacon so its thresholds can change without an ImageLab
+    deploy. See queries/user_day.py for which events count.
+
+    The whole result set comes back in one response - see SingleResponsePagination.
+    """
+
+    serializer_class = UserDayActivitySerializer
+    pagination_class = SingleResponsePagination
+    # Without this attribute PolicyEnforcer raises AssertionError, which surfaces
+    # as HTTP 500 on every request instead of a permission decision.
+    iam_permission_class = ProductionStatsPermission
+    # ImageLab manages privileges with global Django groups only; there is no organization
+    # axis for OrganizationFilterBackend to filter on.
+    iam_organization_field = None
+
+    def get_queryset(self):
+        # Not a model view set: the rows are a ClickHouse aggregate, the same shape
+        # JobFactsViewSet returns.
+        return None
+
+    @method_decorator(never_cache)
+    @handle_clickhouse_exceptions
+    def list(self, request: ExtendedRequest) -> Response:
+        params = UserDayActivityQuerySerializer(data=request.query_params)
+        params.is_valid(raise_exception=True)
+
+        period_start = params.validated_data["period_start"]
+        period_end = params.validated_data["period_end"]
+
+        rows = user_day.fetch_user_day_activity(period_start=period_start, period_end=period_end)
+
+        page = self.paginate_queryset(rows)
+        response = self.get_paginated_response(self.get_serializer(page, many=True).data)
         response.data["period"] = {"start": period_start, "end": period_end}
 
         return response
