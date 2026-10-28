@@ -39,11 +39,11 @@ origin의 R1–R11을 그대로 따른다. 요약:
 
 ## Assumptions
 
-origin의 미결정 사항을 권장안으로 채택했다. Q1은 사용자가 결정했고(2026-10-28), Q2·Q3은 **가정(사용자 확인 대기)**이다. 바뀌면 U2의 조건과 U4의 판정만 달라진다.
+origin의 미결정 사항을 권장안으로 채택했다. Q1·Q2·Q3 모두 사용자 결정 2026-10-28 (Q2·Q3: 현행 유지). 바뀌면 U2의 조건과 U4의 판정만 달라진다.
 
 - Q1 → **사용자 결정 2026-10-28: worker만 차단.** 실효 privilege가 worker인 계정(sandbox에서는 전역 privilege `worker`, 조직 안에서는 조직 role `worker` 또는 무역할)만 반려 불가. 전역 admin, 전역 `user`/`reviewer`, 조직 owner/maintainer/supervisor/reviewer는 기존처럼 가능. 판정은 `jobs.rego`의 `can_reject` 한 곳과 UI `canRejectJob` 한 곳에 있다. **사용자 결정 2026-10-28: 전역 reviewer는 조직 role과 무관하게 허용** — 조직 role이 worker여도 반려 가능(이를 위해 reject 요청 전용 allow 규칙을 하나 추가).
-- Q2 → 작업자의 `rejected → rejected` no-op PATCH도 403.
-- Q3 → Task 상세 job 카드에도 비활성 처리 적용.
+- Q2 (사용자 결정 2026-10-28: 현행 유지) → 작업자의 `rejected → rejected` no-op PATCH도 403.
+- Q3 (사용자 결정 2026-10-28: 현행 유지) → Task 상세 job 카드에도 비활성 처리 적용.
 
 ---
 
@@ -54,7 +54,7 @@ origin의 미결정 사항을 권장안으로 채택했다. Q1은 사용자가 �
 - **가드는 `UPDATE_STATE` scope에만 걸린다.** 현재 규칙들은 `UPDATE_STATE`를 `UPDATE_ANNOTATIONS` 등과 한 집합으로 묶어 허용한다. 가드는 "scope가 `update:state`이고 요청 값이 `rejected`"일 때만 참이 되는 헬퍼로 만들어, 같은 규칙의 다른 scope는 영향받지 않게 한다.
 - **검수자·관리자 규칙은 손대지 않는다.** `utils.is_admin` 선행 허용과 두 reviewer 규칙(조직·sandbox)은 가드 없이 그대로 둔다.
 - **거부 사유는 OPA가 아닌 Python에서 붙인다.** `jobs/allow`는 bool을 반환하고, 사유를 rego에서 내려면 쿼리 형태를 바꿔야 한다. 대신 `JobPermission`이 "OPA가 거부했고 이것이 reject 요청"일 때 `PermissionResult.reasons`에 한국어 메시지를 채운다. 판단 자체는 여전히 rego가 한다(R2).
-- **`PolicyEnforcer`는 거부 결과에 사유가 있으면 그 사유로 `PermissionDenied`를 던진다.** 현재 `reasons`는 버려지고 DRF 기본 문구가 나간다. 사유가 없는 거부는 지금처럼 기본 문구를 유지한다.
+- **`PolicyEnforcer`는 거부 결과에 `public_detail`이 있을 때만 그 문구로 `PermissionDenied`를 던진다.** `public_detail`은 `JobPermission`의 반려 거부만 채운다. 다른 권한 클래스의 `reasons`(예: 읽기 전용 access token)는 지금처럼 버려지고 DRF 기본 문구가 나간다(리뷰 반영 2026-10-28: 범위 축소).
 - **UI 판정은 공용 훅 하나로, 서버의 단일 privilege 모델을 그대로 복제한다.** 서버는 사용자 그룹 중 `IAM_ROLES` 순서(admin > user > reviewer > worker)의 첫 번째 하나만 privilege로 쓴다(`cvat/apps/iam/middleware.py`). 따라서 `user`+`reviewer` 그룹을 함께 가진 계정의 privilege는 `user`이고 반려 불가다. 또 sandbox reviewer 규칙은 `utils.is_sandbox`를 요구하므로, 조직 안에서는 전역 reviewer도 조직 role이 `reviewer`여야 한다. 조직 role은 `org.members` 필터 조회(analytics-report 페이지 패턴)로 얻는다. 기존 `isReviewerOnly`(annotation-actions, annotation-menu)는 의미가 달라 합치지 않는다.
 
 ---
@@ -153,12 +153,12 @@ sequenceDiagram
 
 **Files:**
 - Modify: `cvat/apps/engine/permissions.py` (`JobPermission.check_access` override)
-- Modify: `cvat/apps/iam/permissions.py` (`PolicyEnforcer._check_permission`: 사유 있는 거부 시 `PermissionDenied(사유)`)
+- Modify: `cvat/apps/iam/permissions.py` (`PermissionResult.public_detail` 추가, `PolicyEnforcer._check_permission`: `public_detail`이 있을 때만 `PermissionDenied(public_detail)`)
 - Test: `cvat/apps/engine/tests/test_job_reject_permission.py`
 
 **Approach:**
 - `JobPermission.check_access`: 상위 결과가 거부이고 이 객체가 reject 요청이면 사유를 채운 결과를 반환.
-- `PolicyEnforcer`: 첫 거부 결과에 `reasons`가 있으면 그것으로 `PermissionDenied`를 raise. 없으면 기존처럼 `False`. 예외는 `access_tokens.PolicyEnforcer`의 `super()` 호출을 그대로 통과해 403이 된다.
+- `PolicyEnforcer`: 첫 거부 결과에 `public_detail`이 있으면 그것으로 `PermissionDenied`를 raise. 없으면(`reasons`만 있어도) 기존처럼 `False`. 예외는 `access_tokens.PolicyEnforcer`의 `super()` 호출을 그대로 통과해 403이 된다.
 - 영향 범위는 base enforcer 루프에서 검사되는 권한(이 계획에선 `JobPermission`)뿐이다. access token 플러그인 루프(`_check_permission_plugins`)는 bare `False`를 반환하므로 바뀌지 않는다.
 - 한국어 사유는 "OPA 거부 + reject 요청"이면 붙는다. 조직 안의 전역 reviewer처럼 다른 이유로 거부된 경우에도 같은 문구가 나간다 — U4가 서버와 같은 판정을 하면 화면에서는 이 경우가 생기지 않는다.
 - 권한 검사는 `perform_update` 전에 일어나므로 같은 요청의 다른 필드도 반영되지 않는다(AE6).
@@ -169,7 +169,7 @@ sequenceDiagram
 - worker가 `rejected` job에 `PATCH {"state": "in progress"}` → 200.
 - 전역 reviewer가 `completed` job에 `PATCH {"state": "rejected"}` → 200(AE5).
 - admin → 200.
-- worker가 이미 `rejected`인 job에 `PATCH {"state": "rejected"}` → 403(Q2 가정).
+- worker가 이미 `rejected`인 job에 `PATCH {"state": "rejected"}` → 403(Q2, 사용자 결정 2026-10-28).
 - 거부 시 `JobAnnotationSnapshot` 행이 생기지 않는다(round-boundary 미발생).
 - 사유 없는 일반 거부(예: 남의 job view)는 기존 DRF 기본 문구 그대로.
 
@@ -270,7 +270,7 @@ origin AE1–AE6을 위 단위 테스트 시나리오에 `Covers`로 연결했�
 - **upstream 테스트 영향.** `tests/cypress/.../case_28_review_pipeline_feature.js`는 회원가입한 `reviewer` 사용자(기본 그룹 `user`)가 반려한다. 이 사용자는 반려 불가가 되어 테스트가 깨진다. 그룹만 바꿔서는 고칠 수 없다: `reviewer` 그룹을 추가해도 privilege는 `user`이고, `user`를 빼면 같은 테스트 앞부분의 어노테이션 저장 단계가 실패한다. 이슈 생성·저장은 기존 사용자로 두고, 마지막 반려 단계만 admin(요청자 계정)으로 로그인해 수행하도록 바꾼다. `tests/python/rest_api/test_webhooks_sender.py`의 state 순회 테스트도 실행 사용자를 확인해 필요하면 admin으로 바꾼다.
 - **Q1 결정(worker만 차단) 반영됨.** 전역 `user`·조직 maintainer 등의 기존 반려는 그대로 동작한다. 남는 영향은 worker 계정(및 조직 role worker)의 반려 403뿐이다. 전역 reviewer는 조직 role과 무관하게 반려할 수 있다(사용자 결정 2026-10-28). Cypress `case_28`은 회원가입 계정(전역 `user`)이 반려하므로 수정이 필요 없어졌다.
 - **OPA 번들 갱신.** rego 변경은 서버의 `/api/auth/rules` 번들로 배포되므로 서버 재배포와 동시에 반영된다. 별도 조치 없음.
-- **사유 전달의 범위.** `PolicyEnforcer` 변경은 모든 뷰에 적용된다. 사유를 반환하는 권한 클래스는 현재 access token 플러그인뿐이라 영향은 좁다.
+- **사유 전달의 범위.** `public_detail`을 채우는 곳은 `JobPermission`의 반려 거부뿐이라, 다른 권한 클래스의 403 문구는 바뀌지 않는다(테스트로 고정).
 
 ---
 

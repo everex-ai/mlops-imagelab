@@ -90,6 +90,7 @@ class JobPermissionReasonTest(SimpleTestCase):
         result = self._check(_perm(JobPermission.Scopes.UPDATE_STATE, "rejected"), allow=False)
         self.assertFalse(result.allow)
         self.assertEqual(result.reasons, [REJECT_DENIED])
+        self.assertEqual(result.public_detail, REJECT_DENIED)
 
     def test_reject_denied_for_another_cause_has_no_reason(self):
         # can_reject holds, so the denial is not about the worker restriction
@@ -122,10 +123,23 @@ class PolicyEnforcerReasonTest(SimpleTestCase):
         with mock.patch("cvat.apps.iam.permissions.get_iam_context", return_value={}):
             return PolicyEnforcer().check_permission(request, view, None)
 
-    def test_reasoned_denial_raises_with_reason(self):
+    def test_public_detail_raises_with_detail(self):
         with self.assertRaises(PermissionDenied) as ctx:
-            self._run(PermissionResult(allow=False, reasons=["why"]))
+            self._run(PermissionResult(allow=False, reasons=["why"], public_detail="why"))
         self.assertEqual(str(ctx.exception.detail), "why")
+
+    def test_plain_reasons_are_not_exposed(self):
+        # any other permission's internal reasons keep the generic 403 (returns False)
+        self.assertFalse(self._run(PermissionResult(allow=False, reasons=["internal reason"])))
+
+    def test_read_only_access_token_reason_is_not_exposed(self):
+        from cvat.apps.access_tokens.permissions import AccessTokenReadOnlyDefaultPermission
+
+        perm = AccessTokenReadOnlyDefaultPermission.__new__(AccessTokenReadOnlyDefaultPermission)
+        result = perm.check_access()
+        self.assertEqual(result.reasons, [AccessTokenReadOnlyDefaultPermission.REJECTION_REASON])
+        self.assertIsNone(result.public_detail)
+        self.assertFalse(self._run(result))
 
     def test_plain_denial_returns_false(self):
         self.assertFalse(self._run(PermissionResult(allow=False)))
@@ -190,7 +204,7 @@ class JobRejectApiTest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(self._state(), StateChoice.IN_PROGRESS.value)
 
-    def test_worker_rejected_noop_is_403(self):  # 가정(사용자 확인 대기) Q2
+    def test_worker_rejected_noop_is_403(self):  # Q2, 사용자 결정 2026-10-28: 현행 유지
         models.Job.objects.filter(pk=self.job.pk).update(state=StateChoice.REJECTED.value)
         response = self._patch(self.worker, {"state": "rejected"})
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)

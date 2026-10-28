@@ -919,7 +919,11 @@ class JobPermission(OpenPolicyAgentPermission, DownloadExportedExtension):
     def check_access(self) -> PermissionResult:
         result = super().check_access()
         if not result.allow and self.is_reject_request and not self._opa_can_reject():
-            result = PermissionResult(allow=False, reasons=[self.REJECT_DENIED_REASON])
+            result = PermissionResult(
+                allow=False,
+                reasons=[self.REJECT_DENIED_REASON],
+                public_detail=self.REJECT_DENIED_REASON,
+            )
         return result
 
     @classmethod
