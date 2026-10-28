@@ -44,7 +44,7 @@ interface Props {
 const componentShortcuts = {
     SWITCH_STANDARD_REVIEW_WORKSPACE: {
         name: 'Switch Standard/Review',
-        description: 'Switch the workspace between Standard and Review (reviewers only)',
+        description: 'Toggle between Standard and Review workspaces (reviewers only)',
         sequences: ['z'],
         scope: ShortcutScope.ANNOTATION_PAGE,
     },
