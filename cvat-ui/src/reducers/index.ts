@@ -856,9 +856,12 @@ export interface AnnotationState {
     colors: any[];
     filtersPanelVisible: boolean;
     sidebarCollapsed: boolean;
+    sidebarActiveTab: ObjectsSidebarTab;
     appearanceCollapsed: boolean;
     workspace: Workspace;
 }
+
+export type ObjectsSidebarTab = 'objects' | 'labels' | 'issues';
 
 export enum Workspace {
     STANDARD = 'Standard',
