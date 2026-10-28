@@ -49,9 +49,9 @@ Acceptance Examples AE1–AE7은 origin 그대로이며 U5 시나리오에 연�
 
 ## Assumptions
 
-origin 미결정 사항에 대한 권장 기본값을 채택했다. 모두 가정(사용자 확인 대기)이다.
+origin 미결정 사항에 대한 권장 기본값을 채택했다. Q1은 사용자가 결정했고, 나머지는 가정(사용자 확인 대기)이다.
 
-- 검수자 = 시스템 그룹 `reviewer` 포함(admin 겸직 포함, 조직 역할 `reviewer` 미포함) (origin Q1). 헬퍼 한 곳만 바꾸면 기준을 바꿀 수 있다.
+- 검수자 = 시스템 그룹 `reviewer` 포함(admin 겸직 포함) **또는** 현재 잡의 조직에서 멤버십 역할 `reviewer` (origin Q1). 사용자 결정 2026-10-28: 조직 reviewer 역할 포함. 조직 역할은 현재 조직의 멤버십 조회(`/api/memberships`, 사용자 필터)로 비동기로 알아내며, 역할이 확인되면 바인딩·F2·드롭다운 표시가 나타난다. 판정은 `cvat-ui/src/utils/is-reviewer.ts`의 `useIsReviewer` 한 곳에 있다.
 - `Z` 전환만 선택 유지, 드롭다운은 기존대로 선택 해제 (origin Q2).
 - Attribute 등에서 `Z` → Review → `Z` → Standard (origin Q3).
 - 비검수자의 F2 목록에서 항목 숨김 (origin Q4).

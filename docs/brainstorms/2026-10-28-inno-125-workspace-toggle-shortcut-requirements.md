@@ -17,7 +17,7 @@ ticket: INNO-125
 ## Key Decisions
 
 - **키는 `Z` 단독 (합의 완료).** 코드상 `Z` 단독 바인딩은 없다 — 쓰이는 것은 `ctrl+z`(Undo), `ctrl+shift+z`(Redo)뿐이다(`top-bar/left-group.tsx`). SAM 플러그인(`cvat-ui/plugins/sam`)·`cvat-canvas`에도 `z` 키 처리가 없다. 기존 충돌 판정(`utils/conflict-detector.ts`의 `conflict`)도 `z`와 `ctrl+z`를 충돌로 보지 않는다.
-- **"검수자" = 시스템 그룹 `reviewer` 소속 (admin 겸직 포함).** 잡을 열 때 기본 workspace를 Review로 정하는 기존 판정(`actions/annotation-actions.ts`의 `isReviewer = groups.includes('reviewer')`)과 같은 기준을 쓴다. "기본으로 Review로 열리는 사람 = 토글이 필요한 사람"이라 일관된다. 저장 생략용 `isReviewerOnly`(reviewer이면서 admin 아님)와는 목적이 달라 따르지 않는다. 가정(사용자 확인 대기) — 미결정 Q1.
+- **"검수자" = 시스템 그룹 `reviewer` 소속 (admin 겸직 포함).** 잡을 열 때 기본 workspace를 Review로 정하는 기존 판정(`actions/annotation-actions.ts`의 `isReviewer = groups.includes('reviewer')`)과 같은 기준을 쓴다. "기본으로 Review로 열리는 사람 = 토글이 필요한 사람"이라 일관된다. 저장 생략용 `isReviewerOnly`(reviewer이면서 admin 아님)와는 목적이 달라 따르지 않는다. 여기에 더해 현재 잡의 조직에서 멤버십 역할이 `reviewer`인 사용자도 검수자로 본다. 사용자 결정 2026-10-28: 조직 reviewer 역할 포함 — Q1.
 - **어노테이션 화면 전체 스코프에 등록.** 기존 `ShortcutScope.ANNOTATION_PAGE`에 넣는다. 이 스코프는 충돌 검사 시 모든 workspace 스코프와 대조되므로(`conflict-detector.ts`의 `updatedFlatKeyMap`), 검수자가 다른 단축키를 `Z`로 바꾸거나 토글을 다른 키로 바꿀 때 기존 충돌 확인 모달(`settings-modal/multiple-shortcuts-display.tsx`)이 그대로 작동한다.
 - **전환 규칙은 시안의 동작 규칙을 따른다.** Review → Standard, 그 외 모든 모드(Standard, Attribute annotation, Single shape, Tag annotation) → Review. "원래 모드 기억"은 하지 않는다 — Attribute에서 `Z` 두 번이면 Standard로 간다. 가정(사용자 확인 대기) — 미결정 Q3.
 - **선택 상태 유지는 `Z` 전환에만 적용.** 현재 드롭다운 전환은 reducer(`reducers/annotation-reducer.ts`의 `CHANGE_WORKSPACE`)에서 활성 객체·선택 목록을 비운다. 시안이 "드롭다운 기존 동작 모두 유지"와 "Z는 선택 유지"를 함께 요구하므로, 두 경로의 동작이 갈린다. 가정(사용자 확인 대기) — 미결정 Q2.
@@ -95,7 +95,7 @@ ticket: INNO-125
 
 ## 미결정 사항 (사용자 확인 필요)
 
-- Q1. **검수자 판정 기준.** 권장: 시스템 그룹 `reviewer` 포함 여부(admin 겸직 포함). 근거: 기본 Review 진입 판정과 동일. 대안: (a) `isReviewerOnly`처럼 admin 겸직 제외, (b) 조직 멤버십 역할 `reviewer`까지 포함, (c) admin 단독 계정에도 허용.
+- Q1. **검수자 판정 기준.** 사용자 결정 2026-10-28: 조직 reviewer 역할 포함 — 시스템 그룹 `reviewer`(admin 겸직 포함) 또는 현재 잡의 조직 역할 `reviewer`. (당시 권장: 시스템 그룹 `reviewer` 포함 여부(admin 겸직 포함). 근거: 기본 Review 진입 판정과 동일. 대안: (a) `isReviewerOnly`처럼 admin 겸직 제외, (b) 조직 멤버십 역할 `reviewer`까지 포함, (c) admin 단독 계정에도 허용.)
 - Q2. **선택 유지가 `Z`에만 적용되어 드롭다운과 동작이 갈리는 점.** 권장: 시안대로 `Z`만 선택 유지, 드롭다운은 기존(선택 해제) 유지. 대안: 드롭다운도 선택 유지로 통일(시안의 "드롭다운 기존 동작 유지"와 충돌).
 - Q3. **Attribute 등에서 `Z`로 Review에 간 뒤 다시 `Z`의 목적지.** 권장: 항상 Standard(시안 동작 규칙). 대안: 직전 모드로 복귀("한 번 더 누르면 원래 모드로" 문구의 문자적 해석).
 - Q4. **F2 목록에서 비검수자에게 항목 숨김.** 권장: 숨김(R14, "등록 안 함"의 자연스러운 해석). 대안: 비활성(회색) 표시 — 기존 `nonActive` 패턴 재사용으로 구현이 단순하지만 시안의 "안 보임" 취지에 어긋남.

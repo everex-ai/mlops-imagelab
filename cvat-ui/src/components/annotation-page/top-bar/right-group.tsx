@@ -25,7 +25,7 @@ import { registerComponentShortcuts } from 'actions/shortcuts-actions';
 import { ShortcutScope } from 'utils/enums';
 import { subKeyMap } from 'utils/component-subkeymap';
 import GlobalHotKeys from 'utils/mousetrap-react';
-import { selectIsReviewer } from 'utils/is-reviewer';
+import { useIsReviewer } from 'utils/is-reviewer';
 
 import MDEditor from '@uiw/react-md-editor';
 
@@ -73,13 +73,14 @@ function RightGroup(props: Props): JSX.Element {
     const filters = annotationFilters.length;
 
     const dispatch = useDispatch();
-    const isReviewer = useSelector(selectIsReviewer);
+    const isReviewer = useIsReviewer();
     const keyMap = useSelector((state: CombinedState) => state.shortcuts.keyMap);
     const activeControl = useSelector((state: CombinedState) => state.annotation.canvas.activeControl);
     const toggleSequences = keyMap.SWITCH_STANDARD_REVIEW_WORKSPACE?.sequences ?? [];
     const toggleKeyHint = isReviewer ? formatSequences(toggleSequences) : '';
 
     const toggleRequestedRef = useRef(false);
+    const pointerPressedRef = useRef(false);
     const highlightTimeoutRef = useRef<number | null>(null);
     const [highlighted, setHighlighted] = useState(false);
 
@@ -106,9 +107,25 @@ function RightGroup(props: Props): JSX.Element {
         }
     }, []);
 
+    useEffect(() => {
+        // a shape drag/resize keeps the CURSOR control, so track the pointer to avoid switching mid-gesture
+        const onDown = (): void => { pointerPressedRef.current = true; };
+        const onUp = (): void => { pointerPressedRef.current = false; };
+        window.addEventListener('pointerdown', onDown, true);
+        window.addEventListener('pointerup', onUp, true);
+        window.addEventListener('pointercancel', onUp, true);
+        window.addEventListener('blur', onUp);
+        return () => {
+            window.removeEventListener('pointerdown', onDown, true);
+            window.removeEventListener('pointerup', onUp, true);
+            window.removeEventListener('pointercancel', onUp, true);
+            window.removeEventListener('blur', onUp);
+        };
+    }, []);
+
     const handlers = {
         SWITCH_STANDARD_REVIEW_WORKSPACE: (event: KeyboardEvent) => {
-            if (event?.repeat) {
+            if (event?.repeat || pointerPressedRef.current) {
                 return;
             }
 
