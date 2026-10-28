@@ -184,6 +184,24 @@ function build(): CVATCore {
                 return result;
             },
         },
+        jobInbox: {
+            async summary() {
+                const result = await PluginRegistry.apiWrapper(cvat.jobInbox.summary);
+                return result;
+            },
+            async list(filter = {}) {
+                const result = await PluginRegistry.apiWrapper(cvat.jobInbox.list, filter);
+                return result;
+            },
+            async markRead(id) {
+                const result = await PluginRegistry.apiWrapper(cvat.jobInbox.markRead, id);
+                return result;
+            },
+            async markAllRead() {
+                const result = await PluginRegistry.apiWrapper(cvat.jobInbox.markAllRead);
+                return result;
+            },
+        },
         plugins: {
             async list() {
                 const result = await PluginRegistry.apiWrapper(cvat.plugins.list);

@@ -34,6 +34,7 @@ import QualitySettings from './quality-settings';
 import ConsensusSettings from './consensus-settings';
 import AnnotationGuide from './guide';
 import ApiToken from './api-token';
+import { JobNotification, JobNotificationsSummary } from './job-inbox';
 import { JobValidationLayout, TaskValidationLayout } from './validation-layout';
 import { Request } from './request';
 import AboutData from './about';
@@ -86,6 +87,12 @@ export default interface CVATCore {
     };
     apiTokens: {
         get: (filter: ApiTokensFilter) => Promise<PaginatedResource<ApiToken>>;
+    };
+    jobInbox: {
+        summary: () => Promise<JobNotificationsSummary>;
+        list: (filter?: { unreadOnly?: boolean }) => Promise<JobNotification[]>;
+        markRead: (id: number) => Promise<void>;
+        markAllRead: () => Promise<void>;
     };
     jobs: {
         get: (filter: {

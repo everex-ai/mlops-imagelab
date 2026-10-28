@@ -21,6 +21,7 @@ import {
     SerializedQualityReportData, APIQualityReportsFilter, APIAnalyticsEventsFilter, APIConsensusSettingsFilter,
     SerializedRequest, SerializedJobValidationLayout, SerializedTaskValidationLayout, SerializedConsensusSettingsData,
     SerializedApiToken, APIApiTokensFilter,
+    SerializedJobNotification, SerializedJobNotificationsSummary,
 } from './server-response-types';
 import { APIApiTokenModifiableFields } from './server-request-types';
 import { PaginatedResource, UpdateStatusData } from './core-types';
@@ -610,6 +611,54 @@ async function revokeApiToken(id: number): Promise<void> {
 
     try {
         await Axios.delete(`${backendAPI}/auth/access_tokens/${id}`);
+    } catch (errorData) {
+        throw generateError(errorData);
+    }
+}
+
+async function getJobNotificationsSummary(): Promise<SerializedJobNotificationsSummary> {
+    const { backendAPI } = config;
+
+    let response = null;
+    try {
+        response = await Axios.get(`${backendAPI}/notifications/summary`);
+    } catch (errorData) {
+        throw generateError(errorData);
+    }
+
+    return response.data;
+}
+
+async function getJobNotifications(
+    params: { unread_only?: boolean } = {},
+): Promise<SerializedJobNotification[]> {
+    const { backendAPI } = config;
+
+    let response = null;
+    try {
+        response = await Axios.get(`${backendAPI}/notifications`, { params });
+    } catch (errorData) {
+        throw generateError(errorData);
+    }
+
+    return response.data;
+}
+
+async function markJobNotificationRead(id: number): Promise<void> {
+    const { backendAPI } = config;
+
+    try {
+        await Axios.post(`${backendAPI}/notifications/${id}/read`);
+    } catch (errorData) {
+        throw generateError(errorData);
+    }
+}
+
+async function markAllJobNotificationsRead(): Promise<void> {
+    const { backendAPI } = config;
+
+    try {
+        await Axios.post(`${backendAPI}/notifications/read_all`);
     } catch (errorData) {
         throw generateError(errorData);
     }
@@ -2469,6 +2518,13 @@ export default Object.freeze({
         create: createApiToken,
         update: updateApiToken,
         revoke: revokeApiToken,
+    }),
+
+    jobInbox: Object.freeze({
+        summary: getJobNotificationsSummary,
+        list: getJobNotifications,
+        markRead: markJobNotificationRead,
+        markAllRead: markAllJobNotificationsRead,
     }),
 
     frames: Object.freeze({

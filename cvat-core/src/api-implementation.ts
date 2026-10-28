@@ -24,6 +24,7 @@ import {
 import User from './user';
 import AnnotationFormats from './annotation-formats';
 import ApiToken from './api-token';
+import { toJobNotification, toJobNotificationsSummary } from './job-inbox';
 import { Task, Job } from './session';
 import Project from './project';
 import CloudStorage from './cloud-storage';
@@ -203,6 +204,26 @@ export default function implementAPI(cvat: CVATCore): CVATCore {
         const tokens = result.map((tokenData) => new ApiToken(tokenData));
         Object.assign(tokens, { count: result.count });
         return tokens as PaginatedResource<ApiToken>;
+    });
+
+    implementationMixin(cvat.jobInbox.summary, async () => {
+        const result = await serverProxy.jobInbox.summary();
+        return toJobNotificationsSummary(result);
+    });
+
+    implementationMixin(cvat.jobInbox.list, async (filter: { unreadOnly?: boolean } = {}) => {
+        checkFilter(filter, { unreadOnly: isBoolean });
+        const result = await serverProxy.jobInbox.list(filter.unreadOnly ? { unread_only: true } : {});
+        return result.map(toJobNotification);
+    });
+
+    implementationMixin(cvat.jobInbox.markRead, async (id: number) => {
+        checkObjectType('notification id', id, 'integer');
+        await serverProxy.jobInbox.markRead(id);
+    });
+
+    implementationMixin(cvat.jobInbox.markAllRead, async () => {
+        await serverProxy.jobInbox.markAllRead();
     });
 
     implementationMixin(cvat.jobs.get, async (
