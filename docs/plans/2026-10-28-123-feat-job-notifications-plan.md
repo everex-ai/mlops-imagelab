@@ -43,6 +43,7 @@ origin "미결정 사항"의 권장안을 채택했다. Q1·Q4는 사용자 결�
 - Q3 (가정(사용자 확인 대기)) 권한 요청 = 종 아이콘 첫 클릭 시. — U7.
 - Q4 (사용자 결정 2026-10-28) 이벤트 1건 = 알림 1건. — U1/U3. Job당 1건으로 바꾸면 모델에 upsert 키가 생긴다.
 - Q5 (가정(사용자 확인 대기)) 행위자명은 `작업 완료` 항목에만 표시. API는 모든 항목에 행위자를 내려주므로 UI 표시만 바꾸면 된다.
+- Q6 (사용자 결정 2026-10-28) 'Finish the job'(stage→acceptance) 분류는 현행 유지 — 3/20~8/24 ClickHouse 덤프에서 작업자가 acceptance를 찍은 사례 0건(677건 모두 d/test_reviewer). 작업자가 'Finish the job'을 눌러도 `검수 완료`로 분류되는 이론상 경우는 운영 데이터상 발생하지 않으므로 `classify_job_transition`의 acceptance 판정을 바꾸지 않는다.
 
 ---
 
@@ -147,7 +148,7 @@ sequenceDiagram
 - Covers AE1. 검수자 B가 담당자 A의 `completed` Job을 `rejected`로 → A에게 `rejected` 1건, B에게 0건.
 - `completed` → `in_progress`도 `rejected` 알림을 만든다.
 - Covers AE2. 담당자 A 본인이 `completed` → `in_progress` → 알림 0건.
-- stage → `acceptance` → 담당자에게 `accepted` 1건.
+- stage → `acceptance` → 담당자에게 `accepted` 1건. (행위자 역할과 무관 — Q6 사용자 결정 2026-10-28)
 - 담당자 없는 Job 반려 → 0건.
 - 조직 Job 제출 → 그 조직 활성 reviewer 2명에게 각 1건. 다른 조직 reviewer, 비활성 멤버십, 행위자는 제외.
 - 조직 밖 Job 제출 → `reviewer` 그룹 사용자에게 생성.
