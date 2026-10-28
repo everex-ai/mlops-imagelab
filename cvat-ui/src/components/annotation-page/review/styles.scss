@@ -72,6 +72,10 @@
     padding: $grid-unit-size;
     transform-origin: top left;
     box-shadow: $box-shadow-base;
+
+    // the opened issue dialog is the target of the "Delete issue" shortcut, outline it to make that visible
+    // (outline does not take layout space, so the dialog anchor position is not shifted)
+    outline: 2px solid $notification-border-color-1;
     border-radius: $border-radius-base;
 
     .cvat-issue-dialog-chat {
@@ -108,6 +112,10 @@
 
     .cvat-issue-dialog-footer {
         margin-top: $grid-unit-size;
+
+        .cvat-issue-dialog-remove-shortcut {
+            font-size: 12px;
+        }
     }
 
     .ant-comment > .ant-comment-inner {

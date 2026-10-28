@@ -7,9 +7,8 @@ import React, {
     useState, useEffect, useRef, useCallback,
 } from 'react';
 import ReactDOM from 'react-dom';
-import { useDispatch } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import dayjs from 'dayjs';
-import Modal from 'antd/lib/modal';
 import { Row, Col } from 'antd/lib/grid';
 import { CloseOutlined } from '@ant-design/icons';
 import { Comment } from '@ant-design/compatible';
@@ -18,8 +17,10 @@ import Button from 'antd/lib/button';
 import Input from 'antd/lib/input';
 import CVATTooltip from 'components/common/cvat-tooltip';
 import { Issue, Comment as CommentModel } from 'cvat-core-wrapper';
-import { deleteIssueAsync } from 'actions/review-actions';
+import { CombinedState } from 'reducers';
+import { platformInfoV2 } from 'utils/platform-checker';
 import { useDialogPositioning } from './use-dialog-positioning';
+import { confirmIssueDeletion, formatIssueDeleteShortcutHint } from './confirm-issue-deletion';
 
 interface Props {
     issue: Issue;
@@ -96,21 +97,16 @@ export default function IssueDialog(props: Props): JSX.Element {
         return () => {};
     }, [ref.current]);
 
+    const deleteShortcutSequences = useSelector(
+        (state: CombinedState) => state.shortcuts.keyMap.DELETE_ISSUE?.sequences,
+    );
+    const deleteShortcutHint = formatIssueDeleteShortcutHint(
+        deleteShortcutSequences,
+        platformInfoV2().toLowerCase().includes('mac'),
+    );
+
     const onDeleteIssue = useCallback((): void => {
-        const issueNumber = typeof id === 'number' ? ` #${id}` : '';
-        Modal.confirm({
-            title: `The issue${issueNumber} will be deleted.`,
-            className: 'cvat-modal-confirm-remove-issue',
-            onOk: () => {
-                collapse();
-                dispatch(deleteIssueAsync(id as number));
-            },
-            okButtonProps: {
-                type: 'primary',
-            },
-            autoFocusButton: 'cancel',
-            okText: 'Delete',
-        });
+        confirmIssueDeletion(id as number, collapse, dispatch);
     }, [id, collapse, dispatch]);
 
     const lines = comments.map(
@@ -189,6 +185,11 @@ export default function IssueDialog(props: Props): JSX.Element {
                     <Button type='link' className='cvat-issue-dialog-remove-button' danger onClick={onDeleteIssue}>
                         Remove
                     </Button>
+                    {deleteShortcutHint ? (
+                        <Text type='secondary' className='cvat-issue-dialog-remove-shortcut'>
+                            {deleteShortcutHint}
+                        </Text>
+                    ) : null}
                 </Col>
                 <Col>
                     {currentText.length ? (
