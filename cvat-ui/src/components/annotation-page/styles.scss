@@ -201,6 +201,9 @@
 // INNO-124: issue frame markers drawn over the player slider rail, under the handle (z-index 100)
 .cvat-issue-markers-area {
     position: relative;
+    // a new block formatting context, like the Col it wraps the slider for: without it the slider's
+    // negative margin-top collapses through this div and the progress svg (top: 0) lands 4px above the rail
+    display: flow-root;
 }
 
 .cvat-issue-markers {
@@ -215,12 +218,13 @@
         height: 12px;
     }
 
+    // colors are the INNO-124 시안 tokens: unresolved #ff4d4f → #cf1322, resolved #8c8c8c → #595959 (snapped)
     > .cvat-issue-marker-resolved {
-        background-color: #ccc;
+        background-color: #8c8c8c;
     }
 
     > .cvat-issue-marker-unresolved {
-        background-color: $danger-icon-color;
+        background-color: #ff4d4f;
     }
 
     > .cvat-issue-marker.cvat-issue-marker-snapped {
@@ -231,11 +235,11 @@
     }
 
     > .cvat-issue-marker-resolved.cvat-issue-marker-snapped {
-        background-color: $player-slider-color;
+        background-color: #595959;
     }
 
     > .cvat-issue-marker-unresolved.cvat-issue-marker-snapped {
-        background-color: #cf1322; // antd red-7, a darker shade of $danger-icon-color
+        background-color: #cf1322;
     }
 }
 
