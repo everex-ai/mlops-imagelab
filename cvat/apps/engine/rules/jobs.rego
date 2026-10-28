@@ -58,7 +58,10 @@ import data.organizations
 #         } or null,
 #         "rq_job": { "owner": { "id": <num> } } or null,
 #         "destination": <"local" | "cloud_storage"> or undefined,
-#     }
+#     },
+#     "request": {
+#         "state": <"new"|"in progress"|"completed"|"rejected"> or null
+#     } or undefined (present only for the "update:state" scope)
 # }
 
 is_job_assignee if {
@@ -107,6 +110,42 @@ is_job_staff if {
 
 is_job_staff if {
     is_job_assignee
+}
+
+# === Reject restriction (INNO-126) ===
+# Only reviewers and admins may move a job to state "rejected". The requested
+# value comes from `input.request.state`; when it is absent the request is not
+# treated as a reject (keeps generated tests without a request axis unchanged).
+
+is_reject_request if {
+    input.scope == utils.UPDATE_STATE
+    input.request.state == "rejected"
+}
+
+# Who may reject. Widen the restriction by adding a `can_reject` rule here, e.g.
+# `can_reject if organizations.has_perm(organizations.MAINTAINER)`.
+# (가정(사용자 확인 대기) Q1: global "user" and org owner/maintainer cannot reject.)
+can_reject if {
+    utils.is_admin
+}
+
+can_reject if {
+    utils.is_sandbox
+    utils.is_reviewer
+}
+
+can_reject if {
+    organizations.is_reviewer
+}
+
+# Guard for the generic update rules: they grant update:state, but a reject
+# request additionally needs `can_reject`.
+reject_allowed if {
+    not is_reject_request
+}
+
+reject_allowed if {
+    can_reject
 }
 
 default allow := false
@@ -230,6 +269,7 @@ allow if {
     utils.is_sandbox
     utils.has_perm(utils.WORKER)
     is_job_staff
+    reject_allowed
 }
 
 allow if {
@@ -240,6 +280,7 @@ allow if {
     input.auth.organization.id == input.resource.organization.id
     utils.has_perm(utils.USER)
     organizations.has_perm(organizations.MAINTAINER)
+    reject_allowed
 }
 
 allow if {
@@ -251,6 +292,7 @@ allow if {
     utils.has_perm(utils.WORKER)
     organizations.has_perm(organizations.WORKER)
     is_job_staff
+    reject_allowed
 }
 
 allow if {
@@ -263,6 +305,7 @@ allow if {
     input.auth.user.privilege == utils.WORKER
     input.auth.organization.user.role == null
     is_job_assignee
+    reject_allowed
 }
 
 allow if {

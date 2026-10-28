@@ -1,0 +1,201 @@
+# Copyright (C) CVAT.ai Corporation
+#
+# SPDX-License-Identifier: MIT
+
+"""INNO-126: only reviewers and admins may move a job to state "rejected".
+
+The decision is made by jobs.rego (`can_reject`), so the API tests below need the
+OPA bundle served by a server that runs this source (see CLAUDE.md, "Running
+Django tests against uncommitted source").
+"""
+
+from types import SimpleNamespace
+from unittest import mock
+
+from django.contrib.auth.models import Group
+from django.test import SimpleTestCase, TestCase
+from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
+from rest_framework.test import APIClient
+
+from cvat.apps.engine import models
+from cvat.apps.engine.models import JobAnnotationSnapshot, StateChoice
+from cvat.apps.engine.permissions import JobPermission
+from cvat.apps.engine.tests.test_issue_snapshots_capture import _make_job
+from cvat.apps.iam.permissions import PermissionResult, PolicyEnforcer
+
+REJECT_DENIED = JobPermission.REJECT_DENIED_REASON
+
+
+def _perm(scope, requested_state=None):
+    return JobPermission(
+        scope=scope,
+        user_id=1,
+        group_name="worker",
+        org_id=None,
+        org_owner_id=None,
+        org_role=None,
+        obj=None,
+        requested_state=requested_state,
+    )
+
+
+class JobPermissionPayloadTest(SimpleTestCase):
+    """U1: the requested state reaches OPA under `input.request`, only for update:state."""
+
+    def _scope_params(self, scope, data):
+        request = SimpleNamespace(data=data, query_params={})
+        return JobPermission.get_scope_specific_params(
+            scope, request=request, view=None, obj=None, iam_context=None
+        )
+
+    def test_update_state_params_carry_requested_state(self):
+        params = self._scope_params(JobPermission.Scopes.UPDATE_STATE, {"state": "rejected"})
+        self.assertEqual(params, {"requested_state": "rejected"})
+
+    def test_other_scopes_have_no_requested_state(self):
+        params = self._scope_params(JobPermission.Scopes.UPDATE_ASSIGNEE, {"assignee": 1})
+        self.assertNotIn("requested_state", params)
+
+    def test_update_state_payload_has_request_key(self):
+        perm = _perm(JobPermission.Scopes.UPDATE_STATE, "rejected")
+        self.assertEqual(perm.payload["input"]["request"], {"state": "rejected"})
+
+    def test_other_scope_payload_has_no_request_key(self):
+        perm = _perm(JobPermission.Scopes.UPDATE_ASSIGNEE)
+        self.assertNotIn("request", perm.payload["input"])
+
+    def test_resource_is_not_touched(self):
+        perm = _perm(JobPermission.Scopes.UPDATE_STATE, "rejected")
+        self.assertIsNone(perm.payload["input"]["resource"])
+
+
+class JobPermissionReasonTest(SimpleTestCase):
+    """U3: the Korean reason is attached only to a denied reject request."""
+
+    def _check(self, perm, allow):
+        with mock.patch(
+            "cvat.apps.iam.permissions.OpenPolicyAgentPermission.check_access",
+            return_value=PermissionResult(allow=allow),
+        ):
+            return perm.check_access()
+
+    def test_denied_reject_gets_reason(self):
+        result = self._check(_perm(JobPermission.Scopes.UPDATE_STATE, "rejected"), allow=False)
+        self.assertFalse(result.allow)
+        self.assertEqual(result.reasons, [REJECT_DENIED])
+
+    def test_allowed_reject_has_no_reason(self):
+        result = self._check(_perm(JobPermission.Scopes.UPDATE_STATE, "rejected"), allow=True)
+        self.assertTrue(result.allow)
+        self.assertEqual(result.reasons, [])
+
+    def test_denied_other_state_has_no_reason(self):
+        result = self._check(_perm(JobPermission.Scopes.UPDATE_STATE, "completed"), allow=False)
+        self.assertEqual(result.reasons, [])
+
+    def test_denied_other_scope_has_no_reason(self):
+        result = self._check(_perm(JobPermission.Scopes.VIEW), allow=False)
+        self.assertEqual(result.reasons, [])
+
+
+class PolicyEnforcerReasonTest(SimpleTestCase):
+    def _run(self, result):
+        perm = mock.Mock()
+        perm.check_access.return_value = result
+        view = SimpleNamespace(iam_permission_class=mock.Mock(create=lambda *a, **k: [perm]))
+        request = SimpleNamespace(method="PATCH")
+        with mock.patch("cvat.apps.iam.permissions.get_iam_context", return_value={}):
+            return PolicyEnforcer().check_permission(request, view, None)
+
+    def test_reasoned_denial_raises_with_reason(self):
+        with self.assertRaises(PermissionDenied) as ctx:
+            self._run(PermissionResult(allow=False, reasons=["why"]))
+        self.assertEqual(str(ctx.exception.detail), "why")
+
+    def test_plain_denial_returns_false(self):
+        self.assertFalse(self._run(PermissionResult(allow=False)))
+
+    def test_allow_returns_true(self):
+        self.assertTrue(self._run(PermissionResult(allow=True)))
+
+
+class JobRejectApiTest(TestCase):
+    """U3 end to end through DRF + OPA (sandbox, no organization)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        def user(name, group):
+            u = models.User.objects.create_user(username=name, password="x")
+            u.groups.set([Group.objects.get_or_create(name=group)[0]])
+            return u
+
+        cls.worker = user("inno126_worker", "worker")
+        cls.other_worker = user("inno126_other", "worker")
+        cls.reviewer = user("inno126_reviewer", "reviewer")
+        cls.admin = models.User.objects.create_superuser(
+            username="inno126_admin", email="", password="x"
+        )
+
+    def setUp(self):
+        _, self.job, _ = _make_job()
+        self.job.assignee = self.worker
+        self.job.state = StateChoice.COMPLETED.value
+        self.job.save()
+
+    def _patch(self, user, data):
+        client = APIClient()
+        client.force_authenticate(user)
+        # Job snapshots are enqueued on commit; keep the transport out of the test.
+        with mock.patch("cvat.apps.engine.job_snapshots.enqueue_job_snapshot"):
+            with self.captureOnCommitCallbacks(execute=True):
+                return client.patch(f"/api/jobs/{self.job.id}", data, format="json")
+
+    def _state(self):
+        self.job.refresh_from_db()
+        return self.job.state
+
+    def test_worker_reject_is_403_with_reason_and_state_unchanged(self):  # AE3
+        response = self._patch(self.worker, {"state": "rejected"})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.json()["detail"], REJECT_DENIED)
+        self.assertEqual(self._state(), StateChoice.COMPLETED.value)
+        self.assertFalse(JobAnnotationSnapshot.objects.filter(job=self.job).exists())
+
+    def test_worker_reject_with_other_fields_changes_nothing(self):  # AE6
+        response = self._patch(
+            self.worker, {"state": "rejected", "assignee": self.other_worker.id}
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.assignee_id, self.worker.id)
+        self.assertEqual(self.job.state, StateChoice.COMPLETED.value)
+
+    def test_worker_can_leave_rejected(self):  # AE4
+        models.Job.objects.filter(pk=self.job.pk).update(state=StateChoice.REJECTED.value)
+        response = self._patch(self.worker, {"state": "in progress"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(self._state(), StateChoice.IN_PROGRESS.value)
+
+    def test_worker_rejected_noop_is_403(self):  # 가정(사용자 확인 대기) Q2
+        models.Job.objects.filter(pk=self.job.pk).update(state=StateChoice.REJECTED.value)
+        response = self._patch(self.worker, {"state": "rejected"})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_reviewer_can_reject(self):  # AE5
+        response = self._patch(self.reviewer, {"state": "rejected"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(self._state(), StateChoice.REJECTED.value)
+
+    def test_admin_can_reject(self):
+        response = self._patch(self.admin, {"state": "rejected"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(self._state(), StateChoice.REJECTED.value)
+
+    def test_unrelated_denial_keeps_default_message(self):
+        response = self._patch(self.other_worker, {"state": "in progress"})
+        self.assertIn(
+            response.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND)
+        )
+        if response.status_code == status.HTTP_403_FORBIDDEN:
+            self.assertNotEqual(response.json()["detail"], REJECT_DENIED)

@@ -18,6 +18,7 @@ from cvat.apps.engine.types import ExtendedRequest
 from cvat.apps.engine.utils import is_dataset_export
 from cvat.apps.iam.permissions import (
     OpenPolicyAgentPermission,
+    PermissionResult,
     StrEnum,
     build_iam_context,
     get_iam_context,
@@ -35,6 +36,7 @@ from .models import (
     Label,
     Location,
     Project,
+    StateChoice,
     Task,
     User,
 )
@@ -791,7 +793,12 @@ class TaskPermission(
 
 class JobPermission(OpenPolicyAgentPermission, DownloadExportedExtension):
     task_id: int | None
+    requested_state: str | None
     obj: Job | None
+
+    # INNO-126: who may set state=rejected is decided by jobs.rego (`can_reject`);
+    # this is only the 403 detail sent back when OPA denies such a request.
+    REJECT_DENIED_REASON = '반려(rejected)는 검수자만 할 수 있습니다.'
 
     class Scopes(StrEnum):
         CREATE = 'create'
@@ -881,8 +888,28 @@ class JobPermission(OpenPolicyAgentPermission, DownloadExportedExtension):
 
     def __init__(self, **kwargs):
         self.task_id = kwargs.pop('task_id', None)
+        self.requested_state = kwargs.pop('requested_state', None)
         super().__init__(**kwargs)
         self.url = settings.IAM_OPA_DATA_URL + '/jobs/allow'
+
+    @property
+    def is_reject_request(self) -> bool:
+        return (
+            self.scope == self.Scopes.UPDATE_STATE
+            and self.requested_state == StateChoice.REJECTED.value
+        )
+
+    def get_opa_payload(self):
+        payload = super().get_opa_payload()
+        if self.scope == self.Scopes.UPDATE_STATE:
+            payload['input']['request'] = {'state': self.requested_state}
+        return payload
+
+    def check_access(self) -> PermissionResult:
+        result = super().check_access()
+        if not result.allow and self.is_reject_request:
+            result = PermissionResult(allow=False, reasons=[self.REJECT_DENIED_REASON])
+        return result
 
     @classmethod
     def _get_scopes(cls, request: ExtendedRequest, view: ViewSet, obj: Job | None):
@@ -955,6 +982,11 @@ class JobPermission(OpenPolicyAgentPermission, DownloadExportedExtension):
             ExportableResourceExtension.update_scope_params.__func__(
                 cls, params, request=request, db_instance=obj
             )
+
+        if scope == cls.Scopes.UPDATE_STATE:
+            # The new value is part of the request, not of the stored job, so it is
+            # passed to OPA under `input.request` rather than `input.resource`.
+            params['requested_state'] = request.data.get('state')
 
         return params
 
