@@ -68,16 +68,21 @@ Mousetrap.prototype.stopCallback = function (e: KeyboardEvent, element: Element,
         return true;
     }
 
-    const activeSequences = Object.values(applicationKeyMap).map((keyMap) => [...keyMap.sequences]).flat();
-    if (activeSequences.some((sequence) => sequence.startsWith(combo))) {
-        // prevent default behaviour of the event if potentially one of active shortcuts will be triggered
-        e?.preventDefault();
-    }
-
     // stop when modals are opened
     const anyModalsOpened = Array.from(
         window.document.getElementsByClassName('ant-modal'),
     ).some((el) => (el as HTMLElement).style.display !== 'none');
+
+    // Enter/Space on a focused control inside a modal (e.g. the focused "Delete" button of a confirmation)
+    // must keep its native activation, even if some shortcut (like 'enter') is bound on the page
+    const isModalControlActivation = anyModalsOpened && ['enter', 'space'].includes(combo) &&
+        !!element.closest?.('.ant-modal');
+
+    const activeSequences = Object.values(applicationKeyMap).map((keyMap) => [...keyMap.sequences]).flat();
+    if (!isModalControlActivation && activeSequences.some((sequence) => sequence.startsWith(combo))) {
+        // prevent default behaviour of the event if potentially one of active shortcuts will be triggered
+        e?.preventDefault();
+    }
 
     if (anyModalsOpened) {
         const modalClosingSequences = ['SWITCH_SHORTCUTS', 'SWITCH_SETTINGS']
