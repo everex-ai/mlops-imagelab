@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-import { JobNotificationActor, JobNotificationEvent } from 'cvat-core-wrapper';
+import { JobNotificationEvent } from 'cvat-core-wrapper';
 
 export const EVENT_LABELS: Record<JobNotificationEvent, string> = {
     [JobNotificationEvent.REJECTED]: '검수 반려',
@@ -15,8 +15,3 @@ export const EVENT_TAG_COLORS: Record<JobNotificationEvent, string> = {
     [JobNotificationEvent.ACCEPTED]: 'green',
     [JobNotificationEvent.SUBMITTED]: 'blue',
 };
-
-export function actorName(actor: JobNotificationActor): string {
-    const fullName = [actor.firstName, actor.lastName].filter(Boolean).join(' ').trim();
-    return fullName || actor.username;
-}

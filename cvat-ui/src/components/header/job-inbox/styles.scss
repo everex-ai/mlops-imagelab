@@ -16,7 +16,7 @@
 }
 
 .cvat-job-inbox-panel {
-    width: 380px;
+    width: 410px;
     height: 480px;
     display: flex;
     flex-direction: column;
@@ -27,8 +27,9 @@
     padding: $grid-unit-size $grid-unit-size * 1.5;
     border-bottom: 1px solid $border-color-1;
     display: flex;
-    flex-direction: column;
-    gap: $grid-unit-size * 0.5;
+    align-items: center;
+    justify-content: space-between;
+    gap: $grid-unit-size;
 }
 
 .cvat-job-inbox-header-title {
@@ -37,10 +38,17 @@
     gap: $grid-unit-size * 0.5;
 }
 
+.cvat-job-inbox-header-sort {
+    font-size: 12px;
+}
+
 .cvat-job-inbox-header-actions {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+
+    .ant-btn-link {
+        padding-inline: $grid-unit-size * 0.5;
+    }
 }
 
 .cvat-job-inbox-info {
@@ -117,6 +125,12 @@
 
 .cvat-job-inbox-item-tag {
     margin-inline-end: 0;
+}
+
+.cvat-job-inbox-item-time {
+    margin-left: auto;
+    flex: none;
+    font-size: 12px;
 }
 
 .cvat-job-inbox-item-task {
