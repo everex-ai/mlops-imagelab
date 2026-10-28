@@ -1,7 +1,7 @@
 ---
 title: "feat: Reviewer-only Z shortcut to toggle Standard/Review workspace (INNO-125)"
 type: feat
-status: active
+status: completed
 date: 2026-10-28
 origin: docs/brainstorms/2026-10-28-inno-125-workspace-toggle-shortcut-requirements.md
 ---
