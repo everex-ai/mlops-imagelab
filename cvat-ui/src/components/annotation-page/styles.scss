@@ -273,6 +273,18 @@
 
 .cvat-workspace-selector {
     width: 150px;
+
+    // INNO-125: brief highlight after the reviewer toggle shortcut switched the workspace
+    &.cvat-workspace-selector-toggled .ant-select-selector {
+        border-color: $border-color-hover !important;
+        box-shadow: 0 0 0 2px rgba(24, 144, 255, 35%);
+    }
+}
+
+.cvat-workspace-selector-shortcut {
+    float: right;
+    color: $text-color-secondary;
+    font-size: 12px;
 }
 
 .cvat-job-info-modal-window {
