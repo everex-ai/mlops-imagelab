@@ -55,3 +55,6 @@ if apps.is_installed("cvat.apps.access_tokens"):
 
 if apps.is_installed("cvat.apps.production_stats"):
     urlpatterns.append(path("api/", include("cvat.apps.production_stats.urls")))
+
+if apps.is_installed("cvat.apps.notifications"):
+    urlpatterns.append(path("api/", include("cvat.apps.notifications.urls")))
