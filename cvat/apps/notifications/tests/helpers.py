@@ -18,7 +18,10 @@ _CURRENT_USER = "cvat.apps.engine.job_snapshots.get_current_user"
 
 
 def make_user(username: str, *groups: str, **kwargs) -> User:
+    """A user in exactly these IAM groups. The signup signal adds the default "user"
+    group, which would outrank "reviewer"; real reviewers are set up without it."""
     user = User.objects.create_user(username=username, password=username, **kwargs)
+    user.groups.clear()
     for name in groups:
         user.groups.add(Group.objects.get_or_create(name=name)[0])
     return user

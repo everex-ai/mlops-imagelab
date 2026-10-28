@@ -1,7 +1,7 @@
 ---
 title: "feat: Job 완료/반려 인앱 알림 + 브라우저 알림 (INNO-123)"
 type: feat
-status: active
+status: completed
 date: 2026-10-28
 origin: docs/brainstorms/2026-10-28-inno-123-job-notifications-requirements.md
 ---

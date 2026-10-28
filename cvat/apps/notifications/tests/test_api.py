@@ -182,6 +182,25 @@ class JobNotificationApiTest(ApiTestBase):
         self.reviewer.groups.add(Group.objects.get_or_create(name="worker")[0])
         self.assertEqual(self._ids(self.reviewer), [])
 
+    def test_org_reviewer_demoted_hides_org_submissions(self):
+        org = make_org("org", make_user("owner", "user"))
+        org_reviewer = make_user("org_reviewer", "worker")
+        membership = add_member(org, org_reviewer, Membership.REVIEWER)
+        n = notify(org_reviewer, make_job(assignee=self.annotator, org=org), event="submitted")
+        self.assertEqual(self._ids(org_reviewer), [n.id])
+
+        membership.role = Membership.WORKER
+        membership.save()
+        self.assertEqual(self._ids(org_reviewer), [])
+        self.assertEqual(self._get(SUMMARY, org_reviewer)["unread_count"], 0)
+
+    def test_reviewer_outranked_by_user_group_does_not_see_org_less_submissions(self):
+        # The IAM middleware uses the highest-ranked group: "user" beats "reviewer",
+        # and a "user" cannot read other people's organization-less jobs.
+        both = make_user("both", "user", "reviewer")
+        notify(both, self.job, event="submitted")
+        self.assertEqual(self._ids(both), [])
+
     def test_deleted_job_takes_its_notifications(self):
         notify(self.annotator, self.job)
         self.job.delete()

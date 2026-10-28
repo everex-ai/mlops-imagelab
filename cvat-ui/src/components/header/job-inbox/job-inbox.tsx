@@ -25,6 +25,8 @@ import { requestBrowserNotificationPermission } from './browser-notifications';
 import JobInboxItem from './job-inbox-item';
 import { useJobInbox } from './use-job-inbox';
 
+const MARK_READ_WAIT_MS = 1000;
+
 export default function JobInbox(): JSX.Element {
     const history = useHistory();
     const dispatch = useDispatch();
@@ -38,21 +40,35 @@ export default function JobInbox(): JSX.Element {
 
     const navigate = useCallback((item: JobNotification): void => {
         const path = `/tasks/${item.taskId}/jobs/${item.jobId}`;
-        if (openedJobIdRef.current === item.jobId && history.location.pathname === path) {
+        const openedJob = openedJobIdRef.current;
+        if (openedJob === item.jobId && history.location.pathname === path) {
             // The annotation page reads ?frame= only when it loads a job, so for the job
             // that is already open just move the player.
             dispatch(changeFrameAsync(item.targetFrame));
             return;
         }
-        // For another job, the top bar's history.block() asks about unsaved changes, and
-        // the page reloads the job (with ?frame=) once the route's job id changes.
-        history.push(`${path}?frame=${item.targetFrame}`);
+        const url = `${path}?frame=${item.targetFrame}`;
+        if (openedJob !== null) {
+            // Another job is open: the job route is not keyed by id, so an in-app push
+            // would swap jobs under a mounted annotation page without closing the old
+            // one. Load the page afresh; the top bar's beforeunload handler still asks
+            // about unsaved changes.
+            window.location.assign(url);
+            return;
+        }
+        history.push(url);
     }, [history, dispatch]);
 
     const inboxRef = useRef<ReturnType<typeof useJobInbox>>();
     const openItem = useCallback(async (item: JobNotification): Promise<void> => {
         setOpen(false);
-        const result = await inboxRef.current?.markRead(item);
+        const marking = inboxRef.current?.markRead(item) ?? Promise.resolve('ok' as const);
+        // Wait briefly so a deleted or no-longer-accessible job is caught before
+        // navigating, but never let a slow server make the click look dead.
+        const result = await Promise.race([
+            marking,
+            new Promise<'timeout'>((resolve) => { window.setTimeout(() => resolve('timeout'), MARK_READ_WAIT_MS); }),
+        ]);
         if (result === 'gone') {
             message.warning('더 이상 접근할 수 없는 Job입니다');
             return;
@@ -60,10 +76,22 @@ export default function JobInbox(): JSX.Element {
         navigate(item);
     }, [navigate]);
 
-    const inbox = useJobInbox({ open, unreadOnly, onBrowserNotificationClick: openItem });
+    const onMarkAllRead = useCallback(async (): Promise<void> => {
+        const ok = await inboxRef.current?.markAllRead();
+        if (ok === false) {
+            message.error('알림을 읽음 처리하지 못했습니다');
+        }
+    }, []);
+
+    const inbox = useJobInbox({
+        open,
+        unreadOnly,
+        onBrowserNotificationClick: openItem,
+        onBrowserDigestClick: () => setOpen(true),
+    });
     inboxRef.current = inbox;
     const {
-        unreadCount, items, loading, failed, reload, markAllRead,
+        unreadCount, items, loading, failed, reload,
     } = inbox;
 
     const onOpenChange = (nextOpen: boolean): void => {
@@ -107,7 +135,7 @@ export default function JobInbox(): JSX.Element {
                     >
                         읽은 알림 제외
                     </Checkbox>
-                    <Button type='link' size='small' disabled={!unreadCount} onClick={markAllRead}>
+                    <Button type='link' size='small' disabled={!unreadCount} onClick={onMarkAllRead}>
                         모두 읽음
                     </Button>
                 </span>

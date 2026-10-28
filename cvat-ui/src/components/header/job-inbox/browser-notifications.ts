@@ -56,3 +56,23 @@ export function showBrowserNotification(item: JobNotification, onClick: () => vo
         // Some browsers (e.g. Android Chrome) only allow notifications from a Service Worker.
     }
 }
+
+export function showBrowserNotificationsDigest(count: number, onClick: () => void): void {
+    if (!browserNotificationsSupported() || Notification.permission !== 'granted') {
+        return;
+    }
+
+    try {
+        const notification = new Notification(`새 Job 알림 ${count}건`, {
+            body: '알림 목록에서 확인하세요.',
+            tag: 'imagelab-job-notification-digest',
+        });
+        notification.onclick = () => {
+            window.focus();
+            notification.close();
+            onClick();
+        };
+    } catch {
+        // See showBrowserNotification.
+    }
+}

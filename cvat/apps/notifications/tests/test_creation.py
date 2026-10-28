@@ -102,6 +102,14 @@ class SubmissionTest(TestCase):
         transition(self, job, actor=self.annotator, state="completed")
         self.assertEqual(_rows(), [("global_reviewer", "submitted", self.annotator.id)])
 
+    def test_org_less_job_skips_reviewers_outranked_by_the_user_group(self):
+        make_user("global_reviewer", "reviewer")
+        make_user("user_and_reviewer", "user", "reviewer")
+        make_user("admin_and_reviewer", "admin", "reviewer")
+        job = make_job(assignee=self.annotator, state="in progress")
+        transition(self, job, actor=self.annotator, state="completed")
+        self.assertEqual([r[0] for r in _rows()], ["admin_and_reviewer", "global_reviewer"])
+
     def test_a_reviewer_submitting_is_not_notified_of_it(self):
         reviewer = make_user("global_reviewer", "reviewer")
         job = make_job(assignee=reviewer, state="in progress")

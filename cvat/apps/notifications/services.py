@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.db.models import Case, Exists, F, IntegerField, OuterRef, Q, Subquery, When
 from django.db.models.functions import Coalesce
@@ -46,13 +47,37 @@ def resolve_recipient_ids(job: Job, trigger: str, actor_id: int | None) -> list[
                 memberships__role=Membership.REVIEWER,
             )
         else:
-            users = User.objects.filter(groups__name=REVIEWER_GROUP)
+            users = _sandbox_reviewers()
         users = users.filter(is_active=True)
         if actor_id is not None:
             users = users.exclude(pk=actor_id)
         return sorted(set(users.values_list("pk", flat=True)))
 
     return []
+
+
+def _sandbox_reviewers():
+    """Users whose effective privilege is the reviewer group.
+
+    The IAM middleware uses only the highest-ranked IAM_ROLES group, so a user in
+    both "user" and "reviewer" acts as "user" and cannot read other people's
+    organization-less jobs (jobs.rego "Sandbox reviewer"). They must not be told
+    about those jobs either.
+    """
+    above = settings.IAM_ROLES[: settings.IAM_ROLES.index(REVIEWER_GROUP)]
+    # Admins read every job, so only a non-admin role ranked above reviewer hides them.
+    outranked = User.objects.filter(
+        groups__name__in=[role for role in above if role != settings.IAM_ADMIN_ROLE]
+    ).exclude(groups__name=settings.IAM_ADMIN_ROLE)
+    return User.objects.filter(groups__name=REVIEWER_GROUP).exclude(pk__in=outranked.values("pk"))
+
+
+def _acts_as_sandbox_reviewer(user: User) -> bool:
+    """Whether the user can read others' organization-less jobs: effective
+    privilege (highest-ranked IAM_ROLES group) is admin or reviewer."""
+    names = set(user.groups.filter(name__in=settings.IAM_ROLES).values_list("name", flat=True))
+    ranked = [role for role in settings.IAM_ROLES if role in names]
+    return bool(ranked) and ranked[0] in (settings.IAM_ADMIN_ROLE, REVIEWER_GROUP)
 
 
 def create_job_notifications(
@@ -85,7 +110,7 @@ def visible_notifications(user: User) -> JobNotificationQuerySet:
     """The user's notifications they can still act on (R19, R26).
 
     Hidden, not deleted: a job removed from the user's reach (left the
-    organization, reassigned, removed from the reviewer group) drops out of the
+    organization, reassigned, no longer a reviewer) drops out of the
     list and the badge. Deleted jobs cascade their notifications away.
     """
     qs = JobNotification.objects.active().filter(recipient=user)
@@ -99,10 +124,25 @@ def visible_notifications(user: User) -> JobNotificationQuerySet:
     )
     qs = qs.filter(Q(job__segment__task__organization__isnull=True) | Q(has_membership))
 
+    # Submissions are for reviewers: in an organization, the reviewer role must still hold.
+    is_org_reviewer = Exists(
+        Membership.objects.filter(
+            organization_id=OuterRef("job__segment__task__organization_id"),
+            user_id=user.id,
+            is_active=True,
+            role=Membership.REVIEWER,
+        )
+    )
+    qs = qs.exclude(
+        Q(event=JobSnapshotTrigger.SUBMITTED.value)
+        & Q(job__segment__task__organization__isnull=False)
+        & ~Q(is_org_reviewer)
+    )
+
     # The worker-facing events stay visible only while the user is still the assignee.
     qs = qs.exclude(Q(event__in=_ASSIGNEE_EVENTS) & ~Q(job__assignee_id=user.id))
 
-    if not user.groups.filter(name=REVIEWER_GROUP).exists():
+    if not _acts_as_sandbox_reviewer(user):
         qs = qs.exclude(
             event=JobSnapshotTrigger.SUBMITTED.value,
             job__segment__task__organization__isnull=True,
