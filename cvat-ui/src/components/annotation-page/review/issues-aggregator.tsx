@@ -28,7 +28,7 @@ import { confirmIssueDeletion } from './confirm-issue-deletion';
 const componentShortcuts = {
     DELETE_ISSUE: {
         name: 'Delete issue',
-        description: 'Delete the issue whose dialog is currently opened on the canvas',
+        description: 'Delete the issue whose dialog is open (asks for confirmation)',
         sequences: ['ctrl+del', 'command+backspace'],
         scope: ShortcutScope.ANNOTATION_PAGE,
     },
