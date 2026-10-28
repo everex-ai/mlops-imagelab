@@ -18,6 +18,9 @@ import {
     ApiTokensFilter,
 } from 'cvat-core/src/server-response-types';
 import { ApiTokenModifiableFields } from 'cvat-core/src/server-request-types';
+import {
+    JobNotification, JobNotificationActor, JobNotificationEvent, JobNotificationsSummary,
+} from 'cvat-core/src/job-inbox';
 import { UpdateStatusData } from 'cvat-core/src/core-types';
 import { Job, Task } from 'cvat-core/src/session';
 import Project from 'cvat-core/src/project';
@@ -117,6 +120,7 @@ export {
     StorageLocation,
     MembershipRole,
     AboutData,
+    JobNotificationEvent,
 };
 
 export type {
@@ -136,4 +140,7 @@ export type {
     AnalyticsEventsFilter,
     ApiTokenModifiableFields,
     ApiTokensFilter,
+    JobNotification,
+    JobNotificationActor,
+    JobNotificationsSummary,
 };
