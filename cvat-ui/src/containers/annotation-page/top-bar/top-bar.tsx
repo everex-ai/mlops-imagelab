@@ -21,6 +21,7 @@ import {
     searchChaptersAsync,
     setForceExitAnnotationFlag as setForceExitAnnotationFlagAction,
     setNavigationType as setNavigationTypeAction,
+    setObjectsSidebarTab,
     showFilters as showFiltersAction,
     showStatistics as showStatisticsAction,
     switchNavigationBlocked as switchNavigationBlockedAction,
@@ -105,6 +106,7 @@ interface DispatchToProps {
     restoreFrame(frame: number): void;
     switchNavigationBlocked(blocked: boolean): void;
     setNavigationType(navigationType: NavigationType): void;
+    openIssuesTab(): void;
 }
 
 function mapStateToProps(state: CombinedState): StateToProps {
@@ -254,6 +256,9 @@ function mapDispatchToProps(dispatch: any): DispatchToProps {
         },
         setNavigationType(navigationType: NavigationType): void {
             dispatch(setNavigationTypeAction(navigationType));
+        },
+        openIssuesTab(): void {
+            dispatch(setObjectsSidebarTab('issues', true));
         },
     };
 }
@@ -595,6 +600,29 @@ class AnnotationTopBarContainer extends React.PureComponent<Props> {
         }
     };
 
+    // INNO-124: a click on an issue marker of the player slider
+    private onIssueMarkerClick = (frame: number): void => {
+        const {
+            playing, onSwitchPlay, frameNumber, workspace, openIssuesTab,
+        } = this.props;
+
+        if (playing) {
+            onSwitchPlay(false);
+        }
+
+        if (frame !== frameNumber) {
+            if (!isAbleToChangeFrame(frame)) {
+                return;
+            }
+            this.changeFrame(frame);
+        }
+
+        // only these workspaces render the objects sidebar with the Issues tab
+        if ([Workspace.STANDARD, Workspace.REVIEW].includes(workspace)) {
+            openIssuesTab();
+        }
+    };
+
     private onChangePlayerInputValue = async (value: number): Promise<void> => {
         const {
             frameNumber, onSwitchPlay, playing, jobInstance, showDeletedFrames,
@@ -740,6 +768,7 @@ class AnnotationTopBarContainer extends React.PureComponent<Props> {
                 setHoveredChapter={this.setHoveredChapter}
                 setNavigationType={setNavigationType}
                 onSliderChange={this.onChangePlayerSliderValue}
+                onIssueMarkerClick={this.onIssueMarkerClick}
                 onInputChange={this.onChangePlayerInputValue}
                 onURLIconClick={this.onURLIconClick}
                 onCopyFilenameIconClick={this.onCopyFilenameIconClick}
