@@ -92,7 +92,7 @@ job state를 `rejected`로 바꾸는 동작을 검수자(reviewer)와 관리자(
 
 ## 미결정 사항 (사용자 확인 필요)
 
-- **Q1. 전역 `user` 권한 계정과 조직 owner/maintainer의 반려 가능 여부** — 사용자 결정 2026-10-28: worker만 차단. 실효 privilege가 worker인 계정(sandbox: 전역 `worker`, 조직: role `worker`/무역할)만 반려 불가, 나머지(admin, `user`, `reviewer`, 조직 owner/maintainer/supervisor/reviewer)는 가능.
+- **Q1. 전역 `user` 권한 계정과 조직 owner/maintainer의 반려 가능 여부** — 사용자 결정 2026-10-28: worker만 차단. 실효 privilege가 worker인 계정(sandbox: 전역 `worker`, 조직: role `worker`/무역할)만 반려 불가, 나머지(admin, `user`, `reviewer`, 조직 owner/maintainer/supervisor/reviewer)는 가능. 추가 사용자 결정 2026-10-28: 전역 reviewer는 조직 role과 무관하게 허용.
   - 권장: 티켓 문구대로 **불가**. 반려 권한이 필요한 사람은 `reviewer` 그룹(또는 조직 reviewer 역할)에 넣는다.
   - 대안: 전역 `user`(task/project를 만드는 관리자 계정)와 조직 owner/maintainer도 허용. 현재 이 계정들은 `update:state` 권한이 있어, 불가로 하면 이들의 반려 능력이 사라진다. 실제로 반려를 `user` 계정으로 하는 사람이 있다면 대안이 맞다.
 - **Q2. 같은 값 no-op(`rejected` → `rejected`) PATCH** — 가정(사용자 확인 대기).

@@ -234,6 +234,7 @@ class JobRejectOrgApiTest(TestCase):
             ("reviewer", "user"),
             ("worker", "user"),  # global "user", but a worker in this organization
             ("worker_worker", "worker"),
+            ("worker_reviewer", "reviewer"),  # global reviewer, org role worker
         ]:
             if role == "owner":
                 member = cls.owner
@@ -281,7 +282,8 @@ class JobRejectOrgApiTest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_org_non_workers_can_reject(self):
-        for role in ("owner", "maintainer", "reviewer"):
+        # 사용자 결정 2026-10-28: a global reviewer may reject regardless of its org role
+        for role in ("owner", "maintainer", "reviewer", "worker_reviewer"):
             with self.subTest(role=role):
                 models.Job.objects.filter(pk=self.job.pk).update(state=StateChoice.COMPLETED.value)
                 response = self._patch(self.members[role], {"state": "rejected"})

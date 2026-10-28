@@ -41,7 +41,7 @@ origin의 R1–R11을 그대로 따른다. 요약:
 
 origin의 미결정 사항을 권장안으로 채택했다. Q1은 사용자가 결정했고(2026-10-28), Q2·Q3은 **가정(사용자 확인 대기)**이다. 바뀌면 U2의 조건과 U4의 판정만 달라진다.
 
-- Q1 → **사용자 결정 2026-10-28: worker만 차단.** 실효 privilege가 worker인 계정(sandbox에서는 전역 privilege `worker`, 조직 안에서는 조직 role `worker` 또는 무역할)만 반려 불가. 전역 admin, 전역 `user`/`reviewer`, 조직 owner/maintainer/supervisor/reviewer는 기존처럼 가능. 판정은 `jobs.rego`의 `can_reject` 한 곳과 UI `canRejectJob` 한 곳에 있다.
+- Q1 → **사용자 결정 2026-10-28: worker만 차단.** 실효 privilege가 worker인 계정(sandbox에서는 전역 privilege `worker`, 조직 안에서는 조직 role `worker` 또는 무역할)만 반려 불가. 전역 admin, 전역 `user`/`reviewer`, 조직 owner/maintainer/supervisor/reviewer는 기존처럼 가능. 판정은 `jobs.rego`의 `can_reject` 한 곳과 UI `canRejectJob` 한 곳에 있다. **사용자 결정 2026-10-28: 전역 reviewer는 조직 role과 무관하게 허용** — 조직 role이 worker여도 반려 가능(이를 위해 reject 요청 전용 allow 규칙을 하나 추가).
 - Q2 → 작업자의 `rejected → rejected` no-op PATCH도 403.
 - Q3 → Task 상세 job 카드에도 비활성 처리 적용.
 
@@ -203,7 +203,8 @@ sequenceDiagram
 | `reviewer` / `user` / `user`+`reviewer` | sandbox | 가능 |
 | `worker` | sandbox | 불가 |
 | 조직 role owner/maintainer/supervisor/reviewer | 조직 | 가능 |
-| 조직 role worker (전역 privilege 무관, admin 제외) | 조직 | 불가 |
+| 조직 role worker (전역 admin·reviewer 제외) | 조직 | 불가 |
+| 전역 `reviewer`, 조직 role worker | 조직 | 가능 (사용자 결정 2026-10-28: 전역 reviewer는 조직 role과 무관하게 허용) |
 
 **Verification:** type-check 통과, 위 표와 일치.
 
@@ -267,7 +268,7 @@ origin AE1–AE6을 위 단위 테스트 시나리오에 `Covers`로 연결했�
 ## Risks & Dependencies
 
 - **upstream 테스트 영향.** `tests/cypress/.../case_28_review_pipeline_feature.js`는 회원가입한 `reviewer` 사용자(기본 그룹 `user`)가 반려한다. 이 사용자는 반려 불가가 되어 테스트가 깨진다. 그룹만 바꿔서는 고칠 수 없다: `reviewer` 그룹을 추가해도 privilege는 `user`이고, `user`를 빼면 같은 테스트 앞부분의 어노테이션 저장 단계가 실패한다. 이슈 생성·저장은 기존 사용자로 두고, 마지막 반려 단계만 admin(요청자 계정)으로 로그인해 수행하도록 바꾼다. `tests/python/rest_api/test_webhooks_sender.py`의 state 순회 테스트도 실행 사용자를 확인해 필요하면 admin으로 바꾼다.
-- **Q1 결정(worker만 차단) 반영됨.** 전역 `user`·조직 maintainer 등의 기존 반려는 그대로 동작한다. 남는 영향은 worker 계정(및 조직 role worker)의 반려 403뿐이다. 조직 안의 전역 reviewer라도 조직 role이 worker면 차단된다. Cypress `case_28`은 회원가입 계정(전역 `user`)이 반려하므로 수정이 필요 없어졌다.
+- **Q1 결정(worker만 차단) 반영됨.** 전역 `user`·조직 maintainer 등의 기존 반려는 그대로 동작한다. 남는 영향은 worker 계정(및 조직 role worker)의 반려 403뿐이다. 전역 reviewer는 조직 role과 무관하게 반려할 수 있다(사용자 결정 2026-10-28). Cypress `case_28`은 회원가입 계정(전역 `user`)이 반려하므로 수정이 필요 없어졌다.
 - **OPA 번들 갱신.** rego 변경은 서버의 `/api/auth/rules` 번들로 배포되므로 서버 재배포와 동시에 반영된다. 별도 조치 없음.
 - **사유 전달의 범위.** `PolicyEnforcer` 변경은 모든 뷰에 적용된다. 사유를 반환하는 권한 클래스는 현재 access token 플러그인뿐이라 영향은 좁다.
 

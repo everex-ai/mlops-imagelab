@@ -23,14 +23,15 @@ export function getEffectivePrivilege(groups: string[]): string | null {
     return PRIVILEGE_ORDER.find((privilege) => groups.includes(privilege)) ?? null;
 }
 
-// Keep in sync with `can_reject` in cvat/apps/engine/rules/jobs.rego: admins always,
-// otherwise the job is rejectable unless the effective privilege is "worker" — the
+// Keep in sync with `can_reject` in cvat/apps/engine/rules/jobs.rego: admins and global
+// reviewers always, otherwise the job is rejectable unless the effective privilege is "worker" — the
 // global privilege in the sandbox, the membership role inside an organization.
 export function canRejectJob(
     privilege: string | null,
     organization: { role: MembershipRole | null } | null,
 ): boolean {
-    if (privilege === 'admin') return true;
+    // 사용자 결정 2026-10-28: a global reviewer may reject regardless of its org role
+    if (privilege === 'admin' || privilege === 'reviewer') return true;
     if (organization === null) return privilege !== null && privilege !== 'worker';
     return organization.role !== null && organization.role !== MembershipRole.WORKER;
 }
@@ -68,7 +69,7 @@ export function useCanRejectJob(): boolean {
 
     const privilege = getEffectivePrivilege(user?.groups ?? []);
     // The membership role matters only inside an organization and for non-admins.
-    const lookup = (user && organization && privilege !== 'admin') ?
+    const lookup = (user && organization && privilege !== 'admin' && privilege !== 'reviewer') ?
         { organization, username: user.username, key: `${organization.id}:${user.username}` } :
         null;
     const [orgRole, setOrgRole] = useState<{ key: string; role: OrgRoleLookup } | null>(null);

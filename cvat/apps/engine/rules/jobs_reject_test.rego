@@ -147,8 +147,22 @@ test_org_reviewer_can_reject if {
     jobs.allow with input as state_input(org_auth(1, "user", "reviewer"), org_job, "rejected")
 }
 
-test_global_reviewer_with_org_worker_role_cannot_reject if {
-    not jobs.allow with input as state_input(org_auth(50, "reviewer", "worker"), org_job, "rejected")
+# 사용자 결정 2026-10-28: a global reviewer may reject regardless of its org role.
+test_global_reviewer_with_org_worker_role_can_reject if {
+    jobs.allow with input as state_input(org_auth(50, "reviewer", "worker"), org_job, "rejected")
+}
+
+test_global_reviewer_with_org_worker_role_not_assignee_can_reject if {
+    jobs.allow with input as state_input(org_auth(3, "reviewer", "worker"), org_job, "rejected")
+}
+
+# The extra reviewer rule covers reject requests only.
+test_global_reviewer_with_org_worker_role_other_state_unchanged if {
+    not jobs.allow with input as state_input(org_auth(3, "reviewer", "worker"), org_job, "completed")
+}
+
+test_global_reviewer_of_other_org_cannot_reject if {
+    not jobs.allow with input as state_input(org_auth(3, "reviewer", "worker"), job(11), "rejected")
 }
 
 test_org_admin_can_reject if {

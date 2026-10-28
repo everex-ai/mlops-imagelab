@@ -130,6 +130,11 @@ can_reject if {
     utils.is_admin
 }
 
+# 사용자 결정 2026-10-28: 전역 reviewer는 조직 role과 무관하게 허용.
+can_reject if {
+    utils.is_reviewer
+}
+
 # Sandbox: the global privilege decides.
 can_reject if {
     utils.is_sandbox
@@ -383,6 +388,14 @@ allow if {
     input.scope in {utils.UPDATE_STAGE, utils.UPDATE_STATE, utils.UPDATE_ASSIGNEE}
     input.auth.organization.id == input.resource.organization.id
     organizations.is_reviewer
+}
+
+# A global reviewer may reject inside an organization even when its org role
+# (e.g. worker) grants no update:state through the rules above.
+allow if {
+    is_reject_request
+    utils.is_reviewer
+    input.auth.organization.id == input.resource.organization.id
 }
 
 # === Sandbox reviewer rules ===
