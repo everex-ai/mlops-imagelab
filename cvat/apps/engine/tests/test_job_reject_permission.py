@@ -2,7 +2,8 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""INNO-126: only reviewers and admins may move a job to state "rejected".
+"""INNO-126: workers may not move a job to state "rejected"; everyone else may
+(사용자 결정 2026-10-28, Q1: worker만 차단).
 
 The decision is made by jobs.rego (`can_reject`), so the API tests below need the
 OPA bundle served by a server that runs this source (see CLAUDE.md, "Running
@@ -133,6 +134,7 @@ class JobRejectApiTest(TestCase):
         cls.worker = user("inno126_worker", "worker")
         cls.other_worker = user("inno126_other", "worker")
         cls.reviewer = user("inno126_reviewer", "reviewer")
+        cls.plain_user = user("inno126_user", "user")
         cls.admin = models.User.objects.create_superuser(
             username="inno126_admin", email="", password="x"
         )
@@ -184,6 +186,12 @@ class JobRejectApiTest(TestCase):
 
     def test_reviewer_can_reject(self):  # AE5
         response = self._patch(self.reviewer, {"state": "rejected"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(self._state(), StateChoice.REJECTED.value)
+
+    def test_user_task_owner_can_reject(self):  # Q1: only workers are blocked
+        models.Task.objects.filter(pk=self.job.segment.task_id).update(owner=self.plain_user)
+        response = self._patch(self.plain_user, {"state": "rejected"})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(self._state(), StateChoice.REJECTED.value)
 

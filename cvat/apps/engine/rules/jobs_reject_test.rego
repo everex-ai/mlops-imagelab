@@ -4,7 +4,8 @@ import rego.v1
 
 import data.jobs
 
-# INNO-126: only reviewers and admins may move a job to state "rejected".
+# INNO-126: workers may not move a job to state "rejected"; everyone else may.
+# (사용자 결정 2026-10-28, Q1: worker만 차단)
 # Hand-written because the generated matrix (jobs_test.gen.rego) has no
 # request-value axis; requests without `input.request` must keep their old result.
 
@@ -87,17 +88,11 @@ test_sandbox_worker_null_requested_state_is_not_reject if {
     jobs.allow with input as state_input(sandbox_auth(50, "worker"), sandbox_job, null)
 }
 
-# --- sandbox user (task owner) — 가정(사용자 확인 대기) Q1 ------------------
+# --- sandbox user / reviewer / admin -------------------------------------
 
-test_sandbox_user_task_owner_cannot_reject if {
-    not jobs.allow with input as state_input(sandbox_auth(60, "user"), sandbox_job, "rejected")
+test_sandbox_user_task_owner_can_reject if {
+    jobs.allow with input as state_input(sandbox_auth(60, "user"), sandbox_job, "rejected")
 }
-
-test_sandbox_user_task_owner_can_complete if {
-    jobs.allow with input as state_input(sandbox_auth(60, "user"), sandbox_job, "completed")
-}
-
-# --- sandbox reviewer / admin ---------------------------------------------
 
 test_sandbox_reviewer_can_reject if {
     jobs.allow with input as state_input(sandbox_auth(1, "reviewer"), sandbox_job, "rejected")
@@ -105,6 +100,11 @@ test_sandbox_reviewer_can_reject if {
 
 test_sandbox_admin_can_reject if {
     jobs.allow with input as state_input(sandbox_auth(1, "admin"), sandbox_job, "rejected")
+}
+
+# A sandbox worker who is also task staff is still a worker.
+test_sandbox_worker_task_owner_cannot_reject if {
+    not jobs.allow with input as state_input(sandbox_auth(60, "worker"), sandbox_job, "rejected")
 }
 
 # --- organization ---------------------------------------------------------
@@ -117,6 +117,11 @@ test_org_worker_assignee_can_complete if {
     jobs.allow with input as state_input(org_auth(50, "worker", "worker"), org_job, "completed")
 }
 
+# The org role decides inside an organization, even for a global "user".
+test_org_worker_role_with_user_privilege_cannot_reject if {
+    not jobs.allow with input as state_input(org_auth(50, "user", "worker"), org_job, "rejected")
+}
+
 test_org_roleless_worker_assignee_cannot_reject if {
     not jobs.allow with input as state_input(org_auth(50, "worker", null), org_job, "rejected")
 }
@@ -125,24 +130,23 @@ test_org_roleless_worker_assignee_can_complete if {
     jobs.allow with input as state_input(org_auth(50, "worker", null), org_job, "completed")
 }
 
-# 가정(사용자 확인 대기) Q1: org owner/maintainer cannot reject.
-test_org_maintainer_cannot_reject if {
-    not jobs.allow with input as state_input(org_auth(2, "user", "maintainer"), org_job, "rejected")
+test_org_maintainer_can_reject if {
+    jobs.allow with input as state_input(org_auth(2, "user", "maintainer"), org_job, "rejected")
 }
 
-test_org_owner_cannot_reject if {
-    not jobs.allow with input as state_input(org_auth(999, "user", "owner"), org_job, "rejected")
+test_org_owner_can_reject if {
+    jobs.allow with input as state_input(org_auth(999, "user", "owner"), org_job, "rejected")
 }
 
-test_org_maintainer_can_set_in_progress if {
-    jobs.allow with input as state_input(org_auth(2, "user", "maintainer"), org_job, "in progress")
+# Supervisor reaches update:state through job staff membership (task owner here).
+test_org_supervisor_task_owner_can_reject if {
+    jobs.allow with input as state_input(org_auth(60, "user", "supervisor"), org_job, "rejected")
 }
 
 test_org_reviewer_can_reject if {
     jobs.allow with input as state_input(org_auth(1, "user", "reviewer"), org_job, "rejected")
 }
 
-# A global reviewer acts by its org role inside an organization.
 test_global_reviewer_with_org_worker_role_cannot_reject if {
     not jobs.allow with input as state_input(org_auth(50, "reviewer", "worker"), org_job, "rejected")
 }

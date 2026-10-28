@@ -22,6 +22,7 @@ import { Job, JobState } from 'cvat-core-wrapper';
 import { usePlugins } from 'utils/hooks';
 
 import CVATTooltip from 'components/common/cvat-tooltip';
+import { REJECT_DISABLED_TOOLTIP, useCanRejectJob } from 'components/job-item/use-can-reject-job';
 import { openAnnotationsActionModal } from 'components/annotation-page/annotations-actions/annotations-actions-modal';
 import { CombinedState } from 'reducers';
 import {
@@ -46,6 +47,7 @@ function AnnotationMenuComponent(): JSX.Element {
     const history = useHistory();
     const jobInstance = useSelector((state: CombinedState) => state.annotation.job.instance as Job);
     const [jobState, setJobState] = useState(jobInstance.state);
+    const canReject = useCanRejectJob();
     const pluginActions = usePlugins(
         (state: CombinedState) => state.plugins.components.annotationPage.menuActions.items,
         { jobInstance },
@@ -213,9 +215,19 @@ function AnnotationMenuComponent(): JSX.Element {
             onClick: changeJobState(JobState.IN_PROGRESS),
         }, {
             key: `state:${JobState.REJECTED}`,
-            label: JobState.REJECTED,
             className: computeClassName(JobState.REJECTED),
-            onClick: changeJobState(JobState.REJECTED),
+            ...(canReject ? {
+                label: JobState.REJECTED,
+                onClick: changeJobState(JobState.REJECTED),
+            } : {
+                // INNO-126: disabled for non-reviewers, no confirmation modal
+                label: (
+                    <CVATTooltip title={REJECT_DISABLED_TOOLTIP}>
+                        <span>{JobState.REJECTED}</span>
+                    </CVATTooltip>
+                ),
+                disabled: true,
+            }),
         }, {
             key: `state:${JobState.COMPLETED}`,
             label: JobState.COMPLETED,

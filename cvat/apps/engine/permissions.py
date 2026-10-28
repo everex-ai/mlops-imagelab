@@ -796,9 +796,10 @@ class JobPermission(OpenPolicyAgentPermission, DownloadExportedExtension):
     requested_state: str | None
     obj: Job | None
 
-    # INNO-126: who may set state=rejected is decided by jobs.rego (`can_reject`);
-    # this is only the 403 detail sent back when OPA denies such a request.
-    REJECT_DENIED_REASON = '반려(rejected)는 검수자만 할 수 있습니다.'
+    # INNO-126: who may set state=rejected is decided by jobs.rego (`can_reject`:
+    # everyone but workers); this is only the 403 detail sent back when OPA
+    # denies such a request.
+    REJECT_DENIED_REASON = '반려(rejected)는 작업자 계정으로 할 수 없습니다.'
 
     class Scopes(StrEnum):
         CREATE = 'create'

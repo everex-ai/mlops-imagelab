@@ -31,7 +31,7 @@ job state를 `rejected`로 바꾸는 동작을 검수자(reviewer)와 관리자(
 
 - **막는 대상은 "다른 상태 → rejected"뿐.** 판단 기준은 요청된 새 값이 `rejected`인지다. 현재 값이 `rejected`인 job에서 다른 상태로 가는 전환은 기존 규칙 그대로다.
 - **서버 판단은 `jobs.rego`의 `update:state` 규칙 안에서 한다.** 이를 위해 요청된 새 state를 OPA input에 실어야 한다. 현재는 어떤 permission 클래스도 요청 본문 값을 OPA로 넘기지 않으므로 이 fork에서 새로 여는 경로다. 형태(필드 이름·위치)는 planning이 정한다.
-- **허용 계정 = 전역 `admin`, 전역 `reviewer`, 조직 역할 `reviewer`.** 그 외(전역 `user`·`worker`, 조직 owner/maintainer/supervisor/worker, task·project 소유자/담당자)는 job 담당자여도 불가. 티켓의 "reviewer, admin 외 불가"를 문자 그대로 적용했다 — 가정(사용자 확인 대기), 미결정 사항 Q1 참고.
+- **허용 계정 = 전역 `admin`, 전역 `reviewer`, 조직 역할 `reviewer`.** 그 외(전역 `user`·`worker`, 조직 owner/maintainer/supervisor/worker, task·project 소유자/담당자)는 job 담당자여도 불가. 티켓의 "reviewer, admin 외 불가"를 문자 그대로 적용했다 — **사용자 결정 2026-10-28로 대체: worker만 차단**(Q1 참고).
 - **같은 값 no-op도 거부한다.** 작업자가 이미 `rejected`인 job에 `state=rejected`를 PATCH해도 403. 서버 규칙이 "요청 값이 rejected인가"만 보면 되어 단순하고, 화면은 해당 항목이 비활성이라 이 요청을 보내지 않는다. 일괄 변경은 이미 같은 상태인 job을 요청에서 빼므로(`onUpdateJobField`) 영향이 없다.
 - **`state=rejected`가 다른 필드와 함께 오면 요청 전체를 거부한다.** 권한 검사는 업데이트 전에 scope별로 수행되므로 일부만 반영되는 일은 없다.
 - **Task 상세 job 카드에도 같은 비활성 처리를 적용한다.** 티켓은 두 화면만 명시했지만 같은 `JobStateSelector` 컴포넌트를 공유하고, 목표가 "화면에서 막기"이므로 세 번째 진입점을 열어 둘 이유가 없다.
@@ -43,12 +43,12 @@ job state를 `rejected`로 바꾸는 동작을 검수자(reviewer)와 관리자(
 - R1. 허용 계정(A2, A3)이 아닌 사용자가 job state를 `rejected`로 바꾸는 요청은 403으로 거부되고 job state는 바뀌지 않는다.
 - R2. 판단은 `jobs.rego`의 `update:state` 규칙에서 요청된 새 state 값으로 한다. 이를 위해 요청된 state가 OPA input에 포함된다.
 - R3. 새 state가 `rejected`가 아닌 `update:state`는 현재 규칙 그대로 허용·거부된다(`rejected` → `in progress`/`completed`/`new` 포함).
-- R4. 403 응답에는 `반려(rejected)는 검수자만 할 수 있습니다.` 메시지가 담겨, UI의 기존 오류 알림이 `Could not update job` / `Error: 반려(rejected)는 검수자만 할 수 있습니다.`로 표시된다. 현재 OPA의 거부 사유(`reasons`)는 `PolicyEnforcer`에서 버려져 DRF 기본 문구가 나가므로, 메시지를 응답까지 전달하는 경로가 필요하다.
+- R4. 403 응답에는 `반려(rejected)는 작업자 계정으로 할 수 없습니다.` 메시지가 담겨, UI의 기존 오류 알림이 `Could not update job` / `Error: 반려(rejected)는 작업자 계정으로 할 수 없습니다.`로 표시된다. 현재 OPA의 거부 사유(`reasons`)는 `PolicyEnforcer`에서 버려져 DRF 기본 문구가 나가므로, 메시지를 응답까지 전달하는 경로가 필요하다.
 - R5. 검수자·관리자의 기존 권한(stage/state/assignee 변경, 어노테이션 변경 금지)은 바뀌지 않는다.
 
 **작업자 화면**
 
-- R6. 어노테이션 화면 Menu > Change job state에서 `rejected` 항목은 보이되 비활성(회색)이며, 호버 시 툴팁 `반려(rejected)는 검수자만 할 수 있습니다`를 띄운다. 클릭해도 확인 창이 뜨지 않는다.
+- R6. 어노테이션 화면 Menu > Change job state에서 `rejected` 항목은 보이되 비활성(회색)이며, 호버 시 툴팁 `반려(rejected)는 작업자 계정으로 할 수 없습니다`를 띄운다. 클릭해도 확인 창이 뜨지 않는다.
 - R7. Jobs 목록 ⋮ > State 선택지와 Task 상세 job 카드의 State 선택지에서 `rejected`는 같은 방식(비활성+툴팁)으로 표시된다. 여러 job을 선택한 일괄 변경도 같다.
 - R8. 이미 `rejected`인 job에서는 `rejected`가 현재 상태 표시(✓/선택값)로 보이지만 비활성이고, `new`/`in progress`/`completed`는 기존대로 선택할 수 있다.
 - R9. 화면의 허용 판정은 서버와 같은 기준(A2, A3)을 따른다. 조직 역할 `reviewer`도 검수자로 본다.
@@ -65,7 +65,7 @@ job state를 `rejected`로 바꾸는 동작을 검수자(reviewer)와 관리자(
 
 - AE1. 작업자가 담당 job(`in progress`)의 Change job state를 연다 → `rejected`가 회색, 호버 시 툴팁, 클릭해도 아무 일 없음. `completed` 클릭 → 기존 확인 창 → 변경됨.
 - AE2. 작업자가 Jobs 목록에서 job 3개를 선택하고 ⋮ > State를 연다 → `rejected` 비활성+툴팁.
-- AE3. 작업자가 반려 전 열어 둔 화면에서, 또는 API로 `PATCH /api/jobs/{id} {"state": "rejected"}` → 403, 알림 `Could not update job` / `Error: 반려(rejected)는 검수자만 할 수 있습니다.`, job state 그대로.
+- AE3. 작업자가 반려 전 열어 둔 화면에서, 또는 API로 `PATCH /api/jobs/{id} {"state": "rejected"}` → 403, 알림 `Could not update job` / `Error: 반려(rejected)는 작업자 계정으로 할 수 없습니다.`, job state 그대로.
 - AE4. 검수자가 반려한 job을 작업자가 연다 → `rejected`에 ✓, 비활성. `in progress` 선택 → 변경됨.
 - AE5. 검수자(전역 또는 조직 reviewer)가 `completed` job을 `rejected`로 → 지금과 동일하게 성공.
 - AE6. 작업자가 `PATCH {"state": "rejected", "assignee": ...}` → 403, assignee도 바뀌지 않음.
@@ -92,7 +92,7 @@ job state를 `rejected`로 바꾸는 동작을 검수자(reviewer)와 관리자(
 
 ## 미결정 사항 (사용자 확인 필요)
 
-- **Q1. 전역 `user` 권한 계정과 조직 owner/maintainer의 반려 가능 여부** — 가정(사용자 확인 대기).
+- **Q1. 전역 `user` 권한 계정과 조직 owner/maintainer의 반려 가능 여부** — 사용자 결정 2026-10-28: worker만 차단. 실효 privilege가 worker인 계정(sandbox: 전역 `worker`, 조직: role `worker`/무역할)만 반려 불가, 나머지(admin, `user`, `reviewer`, 조직 owner/maintainer/supervisor/reviewer)는 가능.
   - 권장: 티켓 문구대로 **불가**. 반려 권한이 필요한 사람은 `reviewer` 그룹(또는 조직 reviewer 역할)에 넣는다.
   - 대안: 전역 `user`(task/project를 만드는 관리자 계정)와 조직 owner/maintainer도 허용. 현재 이 계정들은 `update:state` 권한이 있어, 불가로 하면 이들의 반려 능력이 사라진다. 실제로 반려를 `user` 계정으로 하는 사람이 있다면 대안이 맞다.
 - **Q2. 같은 값 no-op(`rejected` → `rejected`) PATCH** — 가정(사용자 확인 대기).

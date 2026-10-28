@@ -1,0 +1,89 @@
+// Copyright (C) CVAT.ai Corporation
+//
+// SPDX-License-Identifier: MIT
+
+// INNO-126: workers may not set a job state to "rejected"; everyone else may
+// (사용자 결정 2026-10-28, Q1: worker만 차단).
+// The server (jobs.rego `can_reject`) is the source of truth; this mirrors it so
+// the UI can disable the option instead of letting the request fail with 403.
+
+import { useEffect, useState } from 'react';
+import { shallowEqual, useSelector } from 'react-redux';
+
+import { MembershipRole, Organization } from 'cvat-core-wrapper';
+import { CombinedState } from 'reducers';
+
+export const REJECT_DISABLED_TOOLTIP = '반려(rejected)는 작업자 계정으로 할 수 없습니다';
+
+// Same order as IAM_ROLES in cvat/settings/base.py: the server keeps only the
+// first matching group as the user's privilege (cvat/apps/iam/middleware.py).
+const PRIVILEGE_ORDER = ['admin', 'user', 'reviewer', 'worker'];
+
+export function getEffectivePrivilege(groups: string[]): string | null {
+    return PRIVILEGE_ORDER.find((privilege) => groups.includes(privilege)) ?? null;
+}
+
+// Keep in sync with `can_reject` in cvat/apps/engine/rules/jobs.rego: admins always,
+// otherwise the job is rejectable unless the effective privilege is "worker" — the
+// global privilege in the sandbox, the membership role inside an organization.
+export function canRejectJob(
+    privilege: string | null,
+    organization: { role: MembershipRole | null } | null,
+): boolean {
+    if (privilege === 'admin') return true;
+    if (organization === null) return privilege !== null && privilege !== 'worker';
+    return organization.role !== null && organization.role !== MembershipRole.WORKER;
+}
+
+// One in-flight/finished membership lookup per (organization, user), shared by
+// every selector on the page (e.g. all job cards on the task page).
+const orgRoleCache = new Map<string, Promise<MembershipRole | null>>();
+
+function fetchOrgRole(organization: Organization, username: string): Promise<MembershipRole | null> {
+    const key = `${organization.id}:${username}`;
+    let request = orgRoleCache.get(key);
+    if (!request) {
+        request = organization.members({
+            filter: JSON.stringify({ and: [{ '==': [{ var: 'user' }, username] }] }),
+        }).then(
+            (memberships) => (memberships.length ? memberships[0].role : null),
+        ).catch(() => {
+            orgRoleCache.delete(key);
+            return null;
+        });
+        orgRoleCache.set(key, request);
+    }
+    return request;
+}
+
+export function useCanRejectJob(): boolean {
+    const { user, organization } = useSelector((state: CombinedState) => ({
+        user: state.auth.user,
+        organization: state.organizations.current ?? null,
+    }), shallowEqual);
+
+    const privilege = getEffectivePrivilege(user?.groups ?? []);
+    // The membership role matters only inside an organization and for non-admins.
+    const lookup = (user && organization && privilege !== 'admin') ?
+        { organization, username: user.username, key: `${organization.id}:${user.username}` } :
+        null;
+    const [orgRole, setOrgRole] = useState<{ key: string; role: MembershipRole | null } | null>(null);
+
+    useEffect(() => {
+        if (!lookup) return undefined;
+
+        let cancelled = false;
+        fetchOrgRole(lookup.organization, lookup.username).then((role) => {
+            if (!cancelled) setOrgRole({ key: lookup.key, role });
+        });
+        return () => { cancelled = true; };
+    }, [lookup?.key]);
+
+    if (!user) return false;
+    if (!organization) return canRejectJob(privilege, null);
+    if (!lookup) return canRejectJob(privilege, { role: null });
+
+    // Until the role is known, keep the option disabled; the server decides anyway.
+    const role = orgRole?.key === lookup.key ? orgRole.role : null;
+    return canRejectJob(privilege, { role });
+}

@@ -113,29 +113,35 @@ is_job_staff if {
 }
 
 # === Reject restriction (INNO-126) ===
-# Only reviewers and admins may move a job to state "rejected". The requested
-# value comes from `input.request.state`; when it is absent the request is not
-# treated as a reject (keeps generated tests without a request axis unchanged).
+# Workers may not move a job to state "rejected"; everyone else keeps the
+# update:state access granted by the rules below. The requested value comes from
+# `input.request.state`; when it is absent the request is not treated as a
+# reject (keeps generated tests without a request axis unchanged).
+# 사용자 결정 2026-10-28 (Q1): worker만 차단.
 
 is_reject_request if {
     input.scope == utils.UPDATE_STATE
     input.request.state == "rejected"
 }
 
-# Who may reject. Widen the restriction by adding a `can_reject` rule here, e.g.
-# `can_reject if organizations.has_perm(organizations.MAINTAINER)`.
-# (가정(사용자 확인 대기) Q1: global "user" and org owner/maintainer cannot reject.)
+# Who may reject: anyone whose effective privilege for the job is not "worker".
+# This is the single place to change if the restriction is widened or narrowed.
 can_reject if {
     utils.is_admin
 }
 
+# Sandbox: the global privilege decides.
 can_reject if {
     utils.is_sandbox
-    utils.is_reviewer
+    input.auth.user.privilege != null
+    not utils.is_worker
 }
 
+# Organization: the membership role decides (roleless users are not members).
 can_reject if {
-    organizations.is_reviewer
+    utils.is_organization
+    input.auth.organization.user.role != null
+    input.auth.organization.user.role != organizations.WORKER
 }
 
 # Guard for the generic update rules: they grant update:state, but a reject

@@ -27,21 +27,21 @@ origin의 R1–R11을 그대로 따른다. 요약:
 - R1. 비허용 계정의 `→ rejected` 요청은 403, state 불변.
 - R2. 판단은 `jobs.rego` `update:state`에서 요청 값으로. 요청 값을 OPA input에 포함.
 - R3. 새 값이 `rejected`가 아니면 기존 규칙 그대로(`rejected →` 다른 상태 포함).
-- R4. 403 응답 메시지 `반려(rejected)는 검수자만 할 수 있습니다.` → 기존 알림 `Could not update job` / `Error: ...`.
+- R4. 403 응답 메시지 `반려(rejected)는 작업자 계정으로 할 수 없습니다.` → 기존 알림 `Could not update job` / `Error: ...`.
 - R5. 검수자·관리자 기존 권한 불변.
-- R6–R9. 작업자 화면: 세 진입점에서 `rejected` 비활성+툴팁 `반려(rejected)는 검수자만 할 수 있습니다`, 확인 창 없음, 현재값 ✓ 유지, 판정 기준은 서버와 동일(조직 reviewer 포함).
+- R6–R9. 작업자 화면: 세 진입점에서 `rejected` 비활성+툴팁 `반려(rejected)는 작업자 계정으로 할 수 없습니다`, 확인 창 없음, 현재값 ✓ 유지, 판정 기준은 서버와 동일(조직 reviewer 포함).
 - R10. 검수자·관리자 화면 불변.
 - R11. OPA 테스트로 거부/허용 매트릭스 검증.
 
-허용 계정(Actors A2, A3): 전역 privilege `admin`, 전역 privilege `reviewer`, 조직 role `reviewer`.
+허용 계정: ~~전역 privilege `admin`, 전역 privilege `reviewer`, 조직 role `reviewer`~~ → **사용자 결정 2026-10-28(Q1): worker만 차단** — 실효 privilege가 worker가 아닌 모든 계정.
 
 ---
 
 ## Assumptions
 
-origin의 미결정 사항을 권장안으로 채택했다. 모두 **가정(사용자 확인 대기)**이며, 바뀌면 U2의 조건과 U5의 판정만 달라진다.
+origin의 미결정 사항을 권장안으로 채택했다. Q1은 사용자가 결정했고(2026-10-28), Q2·Q3은 **가정(사용자 확인 대기)**이다. 바뀌면 U2의 조건과 U4의 판정만 달라진다.
 
-- Q1 → 전역 `user`, 조직 owner/maintainer/supervisor도 반려 불가(티켓 문구 그대로).
+- Q1 → **사용자 결정 2026-10-28: worker만 차단.** 실효 privilege가 worker인 계정(sandbox에서는 전역 privilege `worker`, 조직 안에서는 조직 role `worker` 또는 무역할)만 반려 불가. 전역 admin, 전역 `user`/`reviewer`, 조직 owner/maintainer/supervisor/reviewer는 기존처럼 가능. 판정은 `jobs.rego`의 `can_reject` 한 곳과 UI `canRejectJob` 한 곳에 있다.
 - Q2 → 작업자의 `rejected → rejected` no-op PATCH도 403.
 - Q3 → Task 상세 job 카드에도 비활성 처리 적용.
 
@@ -72,7 +72,7 @@ sequenceDiagram
   P->>OPA: input{scope, auth, resource, 요청 state}
   OPA-->>P: allow=false (비검수자 규칙의 가드)
   P-->>API: PermissionResult(allow=false, reasons=[한국어 메시지])
-  API-->>UI: 403 {"detail": "반려(rejected)는 검수자만 할 수 있습니다."}
+  API-->>UI: 403 {"detail": "반려(rejected)는 작업자 계정으로 할 수 없습니다."}
   UI->>UI: UPDATE_JOB_FAILED → "Could not update job" / "Error: ..."
 ```
 
@@ -130,10 +130,10 @@ sequenceDiagram
 
 **Test scenarios:**
 - sandbox worker 담당자 → `rejected` 거부, `in progress`/`completed`/`new` 허용.
-- sandbox `user` privilege task owner → `rejected` 거부(Q1 가정).
+- sandbox `user` privilege task owner → `rejected` 허용(Q1 사용자 결정: worker만 차단).
 - 조직 worker(privilege worker, role worker) job 담당자 → `rejected` 거부, `completed` 허용.
 - 조직 무역할 worker 담당자 → `rejected` 거부.
-- 조직 maintainer/owner(privilege user) → `rejected` 거부, `in progress` 허용(Q1 가정).
+- 조직 maintainer/owner/supervisor(privilege user) → `rejected` 허용(Q1 사용자 결정). 조직 role worker(privilege user 포함) → 거부.
 - 조직 reviewer(privilege user, role reviewer) → `rejected` 허용.
 - sandbox reviewer(privilege reviewer) → `rejected` 허용.
 - admin(sandbox·조직) → `rejected` 허용.
@@ -145,7 +145,7 @@ sequenceDiagram
 
 ### U3. 거부 사유를 403 응답으로 전달
 
-**Goal:** reject 요청이 거부되면 응답 `detail`이 `반려(rejected)는 검수자만 할 수 있습니다.`이다.
+**Goal:** reject 요청이 거부되면 응답 `detail`이 `반려(rejected)는 작업자 계정으로 할 수 없습니다.`이다.
 
 **Requirements:** R1, R4, AE3, AE6
 
@@ -189,22 +189,21 @@ sequenceDiagram
 **Approach:**
 - 실효 privilege = `groups` 중 `admin` > `user` > `reviewer` > `worker` 순서의 첫 번째(middleware와 동일).
 - 실효 privilege가 `admin`이면 가능.
-- 현재 조직이 없으면(sandbox) 실효 privilege가 `reviewer`일 때 가능.
-- 현재 조직이 있으면 자기 membership role이 `reviewer`일 때 가능. role은 `org.members` 필터로 조회하고, 모듈 수준 캐시(조직 id 키, 진행 중 요청 공유) 또는 Redux에 둬서 Task 상세의 여러 job 카드가 요청을 하나만 보내게 한다.
+- 현재 조직이 없으면(sandbox) 실효 privilege가 `worker`가 아닐 때 가능(Q1 사용자 결정).
+- 현재 조직이 있으면 자기 membership role이 있고 `worker`가 아닐 때 가능(Q1 사용자 결정). role은 `org.members` 필터로 조회하고, 모듈 수준 캐시(조직 id 키, 진행 중 요청 공유) 또는 Redux에 둬서 Task 상세의 여러 job 카드가 요청을 하나만 보내게 한다.
 - 조회 전/실패 시에는 비활성으로 둔다(서버가 최종 판단). 조직 reviewer는 조회가 끝날 때까지 잠깐 비활성을 본다 — R10과의 작은 차이로 수용한다(운영은 sandbox 위주).
 
 **Patterns to follow:** `cvat-ui/src/components/analytics-report/analytics-report-page.tsx`의 membership 조회.
 
 **Test expectation:** UI 단위 테스트 인프라가 없어 U5의 수동·Cypress 검증으로 갈음. 다만 아래 판정 표는 수동 검증에서 모두 확인한다.
 
-| 계정 | 컨텍스트 | 기대 |
+| 계정 | 컨텍스트 | 기대 (Q1 사용자 결정: worker만 차단) |
 |---|---|---|
 | `admin` | any | 가능 |
-| `reviewer` 단독 | sandbox | 가능 |
-| `user`+`reviewer` | sandbox | 불가(서버 privilege `user`) |
-| `reviewer` 단독, 조직 role worker | 조직 | 불가 |
-| 아무 privilege, 조직 role reviewer | 조직 | 가능 |
-| `worker` / `user` | any | 불가 |
+| `reviewer` / `user` / `user`+`reviewer` | sandbox | 가능 |
+| `worker` | sandbox | 불가 |
+| 조직 role owner/maintainer/supervisor/reviewer | 조직 | 가능 |
+| 조직 role worker (전역 privilege 무관, admin 제외) | 조직 | 불가 |
 
 **Verification:** type-check 통과, 위 표와 일치.
 
@@ -225,7 +224,7 @@ sequenceDiagram
 **Approach:**
 - 어노테이션 메뉴: 반려 불가면 `rejected` 항목을 `disabled`로, 라벨을 `CVATTooltip`으로 감싼다. `onClick`(확인 창)을 붙이지 않는다. 현재값 클래스(`cvat-submenu-current-job-state-item`)는 유지(AE4).
 - `JobStateSelector`: `rejected` 옵션을 `disabled`로 하고 툴팁을 단다. 현재값이 `rejected`면 선택값으로 그대로 표시된다. 일괄 모드(value=null)에서도 같은 비활성.
-- 툴팁 문구는 `반려(rejected)는 검수자만 할 수 있습니다`(마침표 없음), 서버 메시지는 마침표 포함 — 티켓 문구 그대로.
+- 툴팁 문구는 `반려(rejected)는 작업자 계정으로 할 수 없습니다`(마침표 없음), 서버 메시지는 마침표 포함 — Q1 사용자 결정에 맞춰 문구를 바꿨다.
 
 **Test scenarios:**
 - Covers AE1. 작업자 계정, annotation 메뉴 → `rejected` 항목에 disabled 클래스, 클릭해도 확인 모달이 뜨지 않음.
@@ -268,7 +267,7 @@ origin AE1–AE6을 위 단위 테스트 시나리오에 `Covers`로 연결했�
 ## Risks & Dependencies
 
 - **upstream 테스트 영향.** `tests/cypress/.../case_28_review_pipeline_feature.js`는 회원가입한 `reviewer` 사용자(기본 그룹 `user`)가 반려한다. 이 사용자는 반려 불가가 되어 테스트가 깨진다. 그룹만 바꿔서는 고칠 수 없다: `reviewer` 그룹을 추가해도 privilege는 `user`이고, `user`를 빼면 같은 테스트 앞부분의 어노테이션 저장 단계가 실패한다. 이슈 생성·저장은 기존 사용자로 두고, 마지막 반려 단계만 admin(요청자 계정)으로 로그인해 수행하도록 바꾼다. `tests/python/rest_api/test_webhooks_sender.py`의 state 순회 테스트도 실행 사용자를 확인해 필요하면 admin으로 바꾼다.
-- **Q1 가정이 뒤집힐 위험.** 실제로 `user` 계정이나 조직 maintainer가 반려해 왔다면 배포 즉시 업무가 막힌다. **머지 전에** 운영에서 최근 `state=rejected` 이벤트의 `user_id`별 실효 privilege(그룹 목록이 아니라 middleware 순서로 고른 하나)를 확인한다. `user`+`reviewer` 그룹을 함께 가진 검수자 계정도 여기서 드러난다 — 이런 계정은 `user` 그룹을 빼야 반려할 수 있다. (로컬 DB의 reviewer 계정은 `reviewer` 단독이다.)
+- **Q1 결정(worker만 차단) 반영됨.** 전역 `user`·조직 maintainer 등의 기존 반려는 그대로 동작한다. 남는 영향은 worker 계정(및 조직 role worker)의 반려 403뿐이다. 조직 안의 전역 reviewer라도 조직 role이 worker면 차단된다. Cypress `case_28`은 회원가입 계정(전역 `user`)이 반려하므로 수정이 필요 없어졌다.
 - **OPA 번들 갱신.** rego 변경은 서버의 `/api/auth/rules` 번들로 배포되므로 서버 재배포와 동시에 반영된다. 별도 조치 없음.
 - **사유 전달의 범위.** `PolicyEnforcer` 변경은 모든 뷰에 적용된다. 사유를 반환하는 권한 클래스는 현재 access token 플러그인뿐이라 영향은 좁다.
 
