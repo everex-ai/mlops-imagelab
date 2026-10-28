@@ -1195,20 +1195,26 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
             };
         }
         case AnnotationActionTypes.CHANGE_WORKSPACE: {
-            const { workspace } = action.payload;
+            const { workspace, preserveSelection } = action.payload;
             if (state.canvas.activeControl !== ActiveControl.CURSOR && state.workspace !== Workspace.SINGLE_SHAPE) {
                 return state;
             }
+
+            const states = state.annotations.states.filter((_state) => !_state.isGroundTruth);
+            // INNO-125: the reviewer toggle shortcut keeps the selection, but only for states that survive the filter
+            const keptIDs = preserveSelection ? new Set(states.map((_state) => _state.clientID)) : new Set();
+            const { activatedStateID, selectedStatesID } = state.annotations;
 
             return {
                 ...state,
                 workspace,
                 annotations: {
                     ...state.annotations,
-                    states: state.annotations.states.filter((_state) => !_state.isGroundTruth),
-                    activatedStateID: null,
+                    states,
+                    activatedStateID: activatedStateID !== null && keptIDs.has(activatedStateID) ?
+                        activatedStateID : null,
                     activatedAttributeID: null,
-                    selectedStatesID: [],
+                    selectedStatesID: selectedStatesID.filter((id) => keptIDs.has(id)),
                 },
                 canvas: {
                     ...state.canvas,

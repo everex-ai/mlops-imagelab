@@ -23,6 +23,7 @@ import { KeyMap } from 'utils/mousetrap-react';
 import { shortcutsActions } from 'actions/shortcuts-actions';
 import { useDispatch, useSelector } from 'react-redux';
 import { CombinedState } from 'reducers';
+import { hideReviewerOnlyShortcuts, useIsReviewer } from 'utils/is-reviewer';
 import MultipleShortcutsDisplay from './multiple-shortcuts-display';
 
 interface Props {
@@ -31,7 +32,10 @@ interface Props {
 }
 
 function ShortcutsSettingsComponent(props: Props): JSX.Element {
-    const { keyMap, onKeySequenceUpdate } = props;
+    const { keyMap: fullKeyMap, onKeySequenceUpdate } = props;
+    const isReviewer = useIsReviewer();
+    // INNO-125: reviewer-only shortcuts are neither listed nor conflict-checked for other users
+    const keyMap = useMemo(() => hideReviewerOnlyShortcuts(fullKeyMap, isReviewer), [fullKeyMap, isReviewer]);
     const [searchValue, setSearchValue] = useState('');
     const shortcuts = useSelector((state: CombinedState) => state.shortcuts);
     const [activeKeys, setActiveKeys] = useState<string[]>([]);
