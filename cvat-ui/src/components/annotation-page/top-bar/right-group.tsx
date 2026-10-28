@@ -123,6 +123,18 @@ function RightGroup(props: Props): JSX.Element {
         };
     }, []);
 
+    const onWorkspaceSelected = useCallback((ws: Workspace): void => {
+        changeWorkspace(ws);
+        // antd keeps focus in the Select search input after a choice, which makes Mousetrap ignore
+        // every shortcut (including the toggle) until the user clicks elsewhere
+        window.setTimeout(() => {
+            const { activeElement } = window.document;
+            if (activeElement instanceof HTMLElement && activeElement.closest('.cvat-workspace-selector')) {
+                activeElement.blur();
+            }
+        });
+    }, [changeWorkspace]);
+
     const handlers = {
         SWITCH_STANDARD_REVIEW_WORKSPACE: (event: KeyboardEvent) => {
             if (event?.repeat || pointerPressedRef.current) {
@@ -255,7 +267,7 @@ function RightGroup(props: Props): JSX.Element {
                 <Select
                     popupClassName='cvat-workspace-selector-dropdown'
                     className={`cvat-workspace-selector${highlighted ? ' cvat-workspace-selector-toggled' : ''}`}
-                    onChange={changeWorkspace}
+                    onChange={onWorkspaceSelected}
                     value={workspace}
                     optionLabelProp='title'
                 >
