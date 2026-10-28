@@ -322,6 +322,10 @@ class PolicyEnforcer(BasePermission):
                 checked_permissions.append(perm)
                 result = perm.check_access()
                 if not result.allow:
+                    if result.reasons:
+                        # Surface a permission-specific reason as the 403 detail
+                        # instead of DRF's generic message.
+                        raise PermissionDenied(result.reasons[0])
                     return False
 
             return True

@@ -58,7 +58,10 @@ import data.organizations
 #         } or null,
 #         "rq_job": { "owner": { "id": <num> } } or null,
 #         "destination": <"local" | "cloud_storage"> or undefined,
-#     }
+#     },
+#     "request": {
+#         "state": <"new"|"in progress"|"completed"|"rejected"> or null
+#     } or undefined (present only for the "update:state" scope)
 # }
 
 is_job_assignee if {
@@ -107,6 +110,53 @@ is_job_staff if {
 
 is_job_staff if {
     is_job_assignee
+}
+
+# === Reject restriction (INNO-126) ===
+# Workers may not move a job to state "rejected"; everyone else keeps the
+# update:state access granted by the rules below. The requested value comes from
+# `input.request.state`; when it is absent the request is not treated as a
+# reject (keeps generated tests without a request axis unchanged).
+# 사용자 결정 2026-10-28 (Q1): worker만 차단.
+
+is_reject_request if {
+    input.scope == utils.UPDATE_STATE
+    input.request.state == "rejected"
+}
+
+# Who may reject: anyone whose effective privilege for the job is not "worker".
+# This is the single place to change if the restriction is widened or narrowed.
+can_reject if {
+    utils.is_admin
+}
+
+# 사용자 결정 2026-10-28: 전역 reviewer는 조직 role과 무관하게 허용.
+can_reject if {
+    utils.is_reviewer
+}
+
+# Sandbox: the global privilege decides.
+can_reject if {
+    utils.is_sandbox
+    input.auth.user.privilege != null
+    not utils.is_worker
+}
+
+# Organization: the membership role decides (roleless users are not members).
+can_reject if {
+    utils.is_organization
+    input.auth.organization.user.role != null
+    input.auth.organization.user.role != organizations.WORKER
+}
+
+# Guard for the generic update rules: they grant update:state, but a reject
+# request additionally needs `can_reject`.
+reject_allowed if {
+    not is_reject_request
+}
+
+reject_allowed if {
+    can_reject
 }
 
 default allow := false
@@ -230,6 +280,7 @@ allow if {
     utils.is_sandbox
     utils.has_perm(utils.WORKER)
     is_job_staff
+    reject_allowed
 }
 
 allow if {
@@ -240,6 +291,7 @@ allow if {
     input.auth.organization.id == input.resource.organization.id
     utils.has_perm(utils.USER)
     organizations.has_perm(organizations.MAINTAINER)
+    reject_allowed
 }
 
 allow if {
@@ -251,6 +303,7 @@ allow if {
     utils.has_perm(utils.WORKER)
     organizations.has_perm(organizations.WORKER)
     is_job_staff
+    reject_allowed
 }
 
 allow if {
@@ -263,6 +316,7 @@ allow if {
     input.auth.user.privilege == utils.WORKER
     input.auth.organization.user.role == null
     is_job_assignee
+    reject_allowed
 }
 
 allow if {
@@ -334,6 +388,14 @@ allow if {
     input.scope in {utils.UPDATE_STAGE, utils.UPDATE_STATE, utils.UPDATE_ASSIGNEE}
     input.auth.organization.id == input.resource.organization.id
     organizations.is_reviewer
+}
+
+# A global reviewer may reject inside an organization even when its org role
+# (e.g. worker) grants no update:state through the rules above.
+allow if {
+    is_reject_request
+    utils.is_reviewer
+    input.auth.organization.id == input.resource.organization.id
 }
 
 # === Sandbox reviewer rules ===
