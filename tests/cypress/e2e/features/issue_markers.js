@@ -164,7 +164,32 @@ context('Issue markers on the player slider and the Issues tab badge', () => {
             cy.get('.cvat-objects-sidebar-issues-list-header').should('contain.text', 'Items: 1');
         });
 
+        it('Marker click on a collapsed sidebar expands it with the Issues tab (A1)', () => {
+            cy.goCheckFrameNumber(5);
+            openSidebarTab('Objects');
+            cy.get('.cvat-objects-sidebar-sider').click();
+            cy.get('.cvat-objects-sidebar').should('have.class', 'ant-layout-sider-collapsed');
+            clickMarker(0);
+            cy.checkFrameNum(0);
+            cy.get('.cvat-objects-sidebar').should('not.have.class', 'ant-layout-sider-collapsed');
+            cy.get('.cvat-objects-sidebar-tabs').within(() => {
+                cy.contains('.ant-tabs-tab', 'Issues').should('have.class', 'ant-tabs-tab-active');
+            });
+        });
+
+        it('Slider clicks away from markers keep the default behaviour (R10)', () => {
+            openSidebarTab('Objects');
+            // frame 9 is the last one; no marker is within the snap range of the rail end
+            cy.get('.cvat-player-slider .ant-slider-rail').click('right');
+            cy.checkFrameNum(9);
+            cy.get('.cvat-objects-sidebar-tabs').within(() => {
+                cy.contains('.ant-tabs-tab', 'Objects').should('have.class', 'ant-tabs-tab-active');
+            });
+            openSidebarTab('Issues');
+        });
+
         it('Removing issues removes markers and updates the badge (AE3)', () => {
+            cy.goCheckFrameNumber(0);
             cy.removeIssue(issueLabel(issueA.description));
             checkMarkers({ 5: 'resolved' });
             checkBadge('0/2', false);

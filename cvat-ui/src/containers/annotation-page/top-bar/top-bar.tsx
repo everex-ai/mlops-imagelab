@@ -42,6 +42,7 @@ import { writeLatestFrame } from 'utils/remember-latest-frame';
 import { finishDraw } from 'utils/drawing';
 import { toClipboard } from 'utils/to-clipboard';
 import { Chapter } from 'cvat-core/src/frames';
+import { getCVATStore } from 'cvat-store';
 
 interface StateToProps {
     chapters: Chapter[];
@@ -77,7 +78,7 @@ interface StateToProps {
 }
 
 interface DispatchToProps {
-    onChangeFrame(frame: number, fillBuffer?: boolean, frameStep?: number): void;
+    onChangeFrame(frame: number, fillBuffer?: boolean, frameStep?: number): Promise<void>;
     onSwitchPlay(playing: boolean): void;
     switchShowSearchPallet(visible: boolean): void;
     onSaveAnnotation(): void;
@@ -191,8 +192,8 @@ function mapStateToProps(state: CombinedState): StateToProps {
 
 function mapDispatchToProps(dispatch: any): DispatchToProps {
     return {
-        onChangeFrame(frame: number, fillBuffer?: boolean, frameStep?: number): void {
-            dispatch(changeFrameAsync(frame, fillBuffer, frameStep));
+        onChangeFrame(frame: number, fillBuffer?: boolean, frameStep?: number): Promise<void> {
+            return dispatch(changeFrameAsync(frame, fillBuffer, frameStep));
         },
         onSwitchPlay(playing: boolean): void {
             dispatch(switchPlay(playing));
@@ -601,9 +602,9 @@ class AnnotationTopBarContainer extends React.PureComponent<Props> {
     };
 
     // INNO-124: a click on an issue marker of the player slider
-    private onIssueMarkerClick = (frame: number): void => {
+    private onIssueMarkerClick = async (frame: number): Promise<void> => {
         const {
-            playing, onSwitchPlay, frameNumber, workspace, openIssuesTab,
+            playing, onSwitchPlay, frameNumber, workspace, onChangeFrame, openIssuesTab,
         } = this.props;
 
         if (playing) {
@@ -614,7 +615,13 @@ class AnnotationTopBarContainer extends React.PureComponent<Props> {
             if (!isAbleToChangeFrame(frame)) {
                 return;
             }
-            this.changeFrame(frame);
+
+            await onChangeFrame(frame);
+            // changeFrameAsync may refuse silently (e.g. statistics or propagate modal) or fail;
+            // the Issues tab is opened only when the player actually reached the marker frame
+            if (getCVATStore().getState().annotation.player.frame.number !== frame) {
+                return;
+            }
         }
 
         // only these workspaces render the objects sidebar with the Issues tab

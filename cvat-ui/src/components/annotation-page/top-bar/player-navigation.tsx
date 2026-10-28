@@ -213,7 +213,6 @@ function PlayerNavigation(props: Props): JSX.Element {
                         <IssueMarkers
                             startFrame={startFrame}
                             stopFrame={stopFrame}
-                            frameNumber={frameNumber}
                             interactive={workspace !== Workspace.SINGLE_SHAPE}
                             onMarkerClick={onIssueMarkerClick}
                         >

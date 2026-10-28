@@ -15,7 +15,6 @@ import {
 interface Props {
     startFrame: number;
     stopFrame: number;
-    frameNumber: number;
     // false where the slider itself is read-only (single shape workspace): markers are drawn, but not clickable
     interactive: boolean;
     onMarkerClick(frame: number): void;
@@ -32,10 +31,17 @@ interface RailGeometry {
 // pointer travel (px) under which a mousedown/mouseup on the slider handle still counts as a click
 const CLICK_TOLERANCE = 3;
 const LAYER_HEIGHT = 16;
+// vertical distance (px) from the rail centre within which the pointer snaps to markers
+const SNAP_BAND_HALF_HEIGHT = 10;
+
+interface CursorPoint {
+    x: number;
+    y: number;
+}
 
 function IssueMarkers(props: Props): JSX.Element {
     const {
-        startFrame, stopFrame, frameNumber, interactive, onMarkerClick, children,
+        startFrame, stopFrame, interactive, onMarkerClick, children,
     } = props;
 
     const issues = useSelector((state: CombinedState) => state.review.issues);
@@ -45,7 +51,7 @@ function IssueMarkers(props: Props): JSX.Element {
     const areaRef = useRef<HTMLDivElement>(null);
     const [rail, setRail] = useState<RailGeometry | null>(null);
     const [snappedFrame, setSnappedFrame] = useState<number | null>(null);
-    const cursorXRef = useRef<number | null>(null);
+    const cursorRef = useRef<CursorPoint | null>(null);
     const draggingRef = useRef(false);
 
     const getRailElement = useCallback((): HTMLElement | null => (
@@ -100,36 +106,53 @@ function IssueMarkers(props: Props): JSX.Element {
         return placeIssueMarkers(visible, startFrame, stopFrame, rail.width);
     }, [summary, issuesHidden, issuesResolvedHidden, startFrame, stopFrame, rail]);
 
-    const snapAt = useCallback((clientX: number): PlacedIssueMarker | null => {
+    const snapAt = useCallback((point: CursorPoint): PlacedIssueMarker | null => {
         const railElement = getRailElement();
         if (!interactive || !rail || !railElement || !markers.length) {
             return null;
         }
 
-        const cursorX = clientX - railElement.getBoundingClientRect().left;
-        return findSnappedIssueFrame(markers, cursorX, startFrame, stopFrame, rail.width);
+        // only the band around the rail snaps, so chapter marks above the rail and plugin
+        // content keep their own clicks
+        const railRect = railElement.getBoundingClientRect();
+        const railCenterY = railRect.top + railRect.height / 2;
+        if (Math.abs(point.y - railCenterY) > SNAP_BAND_HALF_HEIGHT) {
+            return null;
+        }
+
+        return findSnappedIssueFrame(markers, point.x - railRect.left, startFrame, stopFrame, rail.width);
     }, [interactive, rail, markers, startFrame, stopFrame, getRailElement]);
+
+    // the window mouseup listener outlives the render that registered it, so it reads the latest values
+    const snapAtRef = useRef(snapAt);
+    snapAtRef.current = snapAt;
+    const onMarkerClickRef = useRef(onMarkerClick);
+    onMarkerClickRef.current = onMarkerClick;
+    const removeMouseUpListenerRef = useRef<(() => void) | null>(null);
+    useEffect(() => () => {
+        removeMouseUpListenerRef.current?.();
+    }, []);
 
     // markers changed under a still cursor (new/resolved/deleted issue, "T R", "T I"):
     // recompute the snap so a marker that disappeared does not stay highlighted or clickable
     useEffect(() => {
-        if (cursorXRef.current === null || draggingRef.current) {
+        if (cursorRef.current === null || draggingRef.current) {
             setSnappedFrame(null);
             return;
         }
 
-        setSnappedFrame(snapAt(cursorXRef.current)?.frame ?? null);
+        setSnappedFrame(snapAt(cursorRef.current)?.frame ?? null);
     }, [snapAt]);
 
     const onMouseMove = useCallback((event: React.MouseEvent): void => {
-        cursorXRef.current = event.clientX;
+        cursorRef.current = { x: event.clientX, y: event.clientY };
         if (!draggingRef.current) {
-            setSnappedFrame(snapAt(event.clientX)?.frame ?? null);
+            setSnappedFrame(snapAt(cursorRef.current)?.frame ?? null);
         }
     }, [snapAt]);
 
     const onMouseLeave = useCallback((): void => {
-        cursorXRef.current = null;
+        cursorRef.current = null;
         setSnappedFrame(null);
     }, []);
 
@@ -138,13 +161,15 @@ function IssueMarkers(props: Props): JSX.Element {
             return;
         }
 
-        const snapped = snapAt(event.clientX);
+        const snapped = snapAt({ x: event.clientX, y: event.clientY });
         const onHandle = !!(event.target as HTMLElement).closest('.ant-slider-handle');
 
         if (snapped && !onHandle) {
-            // a marker click replaces the default slider jump
+            // a marker click replaces the default slider jump; the slider would also blur
+            // a focused input on its own mousedown, keep that so frame shortcuts keep working
             event.preventDefault();
             event.stopPropagation();
+            (window.document.activeElement as HTMLElement | null)?.blur?.();
             onMarkerClick(snapped.frame);
             return;
         }
@@ -153,26 +178,32 @@ function IssueMarkers(props: Props): JSX.Element {
         draggingRef.current = true;
         setSnappedFrame(null);
         const { clientX: startX, clientY: startY } = event;
-        // the current frame marker sits under the handle, so a still click on the handle opens its issues
-        const handleOverCurrentMarker = onHandle && snapped?.frame === frameNumber;
+        // markers under the handle (the current frame one and close neighbours) can only be reached
+        // through the handle: a still click on it counts as a click on the snapped marker
+        const handleClickTarget = onHandle && snapped ? snapped.frame : null;
 
+        removeMouseUpListenerRef.current?.();
         const onMouseUp = (upEvent: MouseEvent): void => {
-            window.removeEventListener('mouseup', onMouseUp);
+            removeMouseUpListenerRef.current?.();
             draggingRef.current = false;
             if (
-                handleOverCurrentMarker &&
+                handleClickTarget !== null &&
                 Math.abs(upEvent.clientX - startX) < CLICK_TOLERANCE &&
                 Math.abs(upEvent.clientY - startY) < CLICK_TOLERANCE
             ) {
-                onMarkerClick(frameNumber);
+                onMarkerClickRef.current(handleClickTarget);
             }
 
-            if (cursorXRef.current !== null) {
-                setSnappedFrame(snapAt(cursorXRef.current)?.frame ?? null);
+            if (cursorRef.current !== null) {
+                setSnappedFrame(snapAtRef.current(cursorRef.current)?.frame ?? null);
             }
         };
         window.addEventListener('mouseup', onMouseUp);
-    }, [interactive, snapAt, onMarkerClick, frameNumber]);
+        removeMouseUpListenerRef.current = () => {
+            window.removeEventListener('mouseup', onMouseUp);
+            removeMouseUpListenerRef.current = null;
+        };
+    }, [interactive, snapAt, onMarkerClick]);
 
     return (
         <div
