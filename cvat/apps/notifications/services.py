@@ -36,7 +36,7 @@ def resolve_recipient_ids(job: Job, trigger: str, actor_id: int | None) -> list[
         return [assignee.id]
 
     if trigger == JobSnapshotTrigger.SUBMITTED.value:
-        # R3 / 가정 Q1(사용자 확인 대기): the job organization's active reviewer
+        # R3 / Q1 (사용자 결정 2026-10-28): the job organization's active reviewer
         # members, or the global reviewer group for organization-less jobs.
         org_id = job.segment.task.organization_id
         if org_id is not None:
@@ -58,7 +58,8 @@ def resolve_recipient_ids(job: Job, trigger: str, actor_id: int | None) -> list[
 def create_job_notifications(
     *, job_id: int, trigger: str, actor_id: int | None, transitioned_at: datetime
 ) -> list[JobNotification]:
-    """One row per recipient for one committed boundary (Q4: one event = one row)."""
+    """One row per recipient for one committed boundary (Q4, 사용자 결정 2026-10-28:
+    one event = one row, never merged per job)."""
     job = Job.objects.select_related("assignee", "segment__task").filter(pk=job_id).first()
     if job is None:
         logger.info("Job %s no longer exists; skipping %s notifications", job_id, trigger)
