@@ -36,6 +36,16 @@ context('Delete issue shortcut', { scrollBehavior: false }, () => {
         secondY: 300,
     };
 
+    const rectangleParams = {
+        points: 'By 2 Points',
+        type: 'Shape',
+        labelName: 'label 1',
+        firstX: 150,
+        firstY: 350,
+        secondX: 250,
+        secondY: 450,
+    };
+
     const MAC = 'mac';
     const WINDOWS = 'windows';
 
@@ -78,12 +88,33 @@ context('Delete issue shortcut', { scrollBehavior: false }, () => {
         cy.get('.cvat-issue-dialog').should('be.visible');
     }
 
+    // negative assertions ("no confirmation appeared") would otherwise pass before the app reacts to the key
+    const SHORTCUT_SETTLE_MS = 300;
+
     function pressMacShortcut() {
         cy.realPress(['Meta', 'Backspace']);
+        cy.wait(SHORTCUT_SETTLE_MS);
     }
 
     function pressWindowsShortcut() {
         cy.realPress(['Control', 'Delete']);
+        cy.wait(SHORTCUT_SETTLE_MS);
+    }
+
+    // Two keydowns in the same task, before antd mounts the first confirmation,
+    // so the ant-modal check in stopCallback cannot be what prevents the second dialog
+    function pressWindowsShortcutTwiceSynchronously() {
+        cy.document().then((doc) => {
+            for (let i = 0; i < 2; i++) {
+                const event = new KeyboardEvent('keydown', {
+                    key: 'Delete', code: 'Delete', ctrlKey: true, bubbles: true, cancelable: true,
+                });
+                Object.defineProperty(event, 'keyCode', { get: () => 46 });
+                Object.defineProperty(event, 'which', { get: () => 46 });
+                doc.body.dispatchEvent(event);
+            }
+        });
+        cy.wait(SHORTCUT_SETTLE_MS);
     }
 
     function removeAllIssues() {
@@ -147,7 +178,7 @@ context('Delete issue shortcut', { scrollBehavior: false }, () => {
             openJob();
             createIssue();
             openIssueDialog();
-            cy.get('.cvat-issue-dialog').should('have.css', 'outline-color', 'rgb(24, 144, 255)');
+            cy.get('.cvat-issue-dialog').should('have.css', 'outline-style', 'solid');
             cy.get('.cvat-issue-dialog-remove-button').click();
             cy.get('.cvat-modal-confirm-remove-issue').should('have.length', 1).within(() => {
                 cy.contains('삭제한 이슈는 되돌릴 수 없습니다.').should('be.visible');
@@ -206,9 +237,15 @@ context('Delete issue shortcut', { scrollBehavior: false }, () => {
             openJob();
             createIssue();
             openIssueDialog();
-            pressMacShortcut();
+            pressWindowsShortcutTwiceSynchronously();
+            cy.get('.cvat-modal-confirm-remove-issue').should('have.length', 1);
             pressMacShortcut();
             pressWindowsShortcut();
+            cy.get('.cvat-modal-confirm-remove-issue').should('have.length', 1);
+            cy.realPress('Escape');
+            cy.get('.cvat-modal-confirm-remove-issue').should('not.exist');
+            // the guard is released after closing, so the shortcut works again
+            pressMacShortcut();
             cy.get('.cvat-modal-confirm-remove-issue').should('have.length', 1);
             cy.realPress('Escape');
             cy.get('.cvat-modal-confirm-remove-issue').should('not.exist');
@@ -226,13 +263,20 @@ context('Delete issue shortcut', { scrollBehavior: false }, () => {
             cy.get('@deleteIssue.all').should('have.length', 0);
         });
 
-        it('AE4: nothing happens when no issue dialog is opened', () => {
+        it('AE4: nothing happens when no issue dialog is opened, an active object is kept', () => {
             openJob();
             createIssue();
+            cy.changeWorkspace('Standard');
+            cy.createRectangle(rectangleParams);
+            cy.get('.cvat_canvas_shape').should('have.length', 1);
+            cy.get('.cvat_canvas_shape').first().trigger('mousemove');
+            cy.get('.cvat_canvas_shape').first().trigger('mouseover');
+            cy.get('.cvat_canvas_shape_activated').should('exist');
             cy.get('.cvat-issue-dialog').should('not.exist');
             pressMacShortcut();
             pressWindowsShortcut();
             cy.get('.cvat-modal-confirm-remove-issue').should('not.exist');
+            cy.get('.cvat_canvas_shape').should('have.length', 1);
             cy.get('.cvat-hidden-issue-label').should('have.length', 1);
         });
 
@@ -266,6 +310,7 @@ context('Delete issue shortcut', { scrollBehavior: false }, () => {
             cy.get('.cvat-modal-confirm-remove-issue').should('not.exist');
             cy.realPress('t');
             cy.realPress('i');
+            cy.get('.cvat-issue-dialog').should('be.visible');
         });
 
         it('AE2: a rejected deletion shows the error notification and keeps the issue', () => {
