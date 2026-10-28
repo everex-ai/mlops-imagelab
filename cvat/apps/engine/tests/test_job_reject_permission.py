@@ -15,6 +15,7 @@ from unittest import mock
 
 from django.contrib.auth.models import Group
 from django.test import SimpleTestCase, TestCase
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.test import APIClient
@@ -24,6 +25,7 @@ from cvat.apps.engine.models import JobAnnotationSnapshot, StateChoice
 from cvat.apps.engine.permissions import JobPermission
 from cvat.apps.engine.tests.test_issue_snapshots_capture import _make_job
 from cvat.apps.iam.permissions import PermissionResult, PolicyEnforcer
+from cvat.apps.organizations.models import Membership, Organization
 
 REJECT_DENIED = JobPermission.REJECT_DENIED_REASON
 
@@ -74,10 +76,13 @@ class JobPermissionPayloadTest(SimpleTestCase):
 class JobPermissionReasonTest(SimpleTestCase):
     """U3: the Korean reason is attached only to a denied reject request."""
 
-    def _check(self, perm, allow):
-        with mock.patch(
-            "cvat.apps.iam.permissions.OpenPolicyAgentPermission.check_access",
-            return_value=PermissionResult(allow=allow),
+    def _check(self, perm, allow, can_reject=False):
+        with (
+            mock.patch(
+                "cvat.apps.iam.permissions.OpenPolicyAgentPermission.check_access",
+                return_value=PermissionResult(allow=allow),
+            ),
+            mock.patch.object(JobPermission, "_opa_can_reject", return_value=can_reject),
         ):
             return perm.check_access()
 
@@ -85,6 +90,14 @@ class JobPermissionReasonTest(SimpleTestCase):
         result = self._check(_perm(JobPermission.Scopes.UPDATE_STATE, "rejected"), allow=False)
         self.assertFalse(result.allow)
         self.assertEqual(result.reasons, [REJECT_DENIED])
+
+    def test_reject_denied_for_another_cause_has_no_reason(self):
+        # can_reject holds, so the denial is not about the worker restriction
+        result = self._check(
+            _perm(JobPermission.Scopes.UPDATE_STATE, "rejected"), allow=False, can_reject=True
+        )
+        self.assertFalse(result.allow)
+        self.assertEqual(result.reasons, [])
 
     def test_allowed_reject_has_no_reason(self):
         result = self._check(_perm(JobPermission.Scopes.UPDATE_STATE, "rejected"), allow=True)
@@ -165,9 +178,7 @@ class JobRejectApiTest(TestCase):
         self.assertFalse(JobAnnotationSnapshot.objects.filter(job=self.job).exists())
 
     def test_worker_reject_with_other_fields_changes_nothing(self):  # AE6
-        response = self._patch(
-            self.worker, {"state": "rejected", "assignee": self.other_worker.id}
-        )
+        response = self._patch(self.worker, {"state": "rejected", "assignee": self.other_worker.id})
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.job.refresh_from_db()
         self.assertEqual(self.job.assignee_id, self.worker.id)
@@ -201,9 +212,79 @@ class JobRejectApiTest(TestCase):
         self.assertEqual(self._state(), StateChoice.REJECTED.value)
 
     def test_unrelated_denial_keeps_default_message(self):
-        response = self._patch(self.other_worker, {"state": "in progress"})
-        self.assertIn(
-            response.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND)
-        )
-        if response.status_code == status.HTTP_403_FORBIDDEN:
-            self.assertNotEqual(response.json()["detail"], REJECT_DENIED)
+        # A worker who is not job staff fails the `view` scope first, which carries
+        # no reason, so the generic DRF detail is kept even for a reject request.
+        response = self._patch(self.other_worker, {"state": "rejected"})
+        self.assertIn(response.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))
+        self.assertNotEqual(response.json().get("detail"), REJECT_DENIED)
+        self.assertEqual(self._state(), StateChoice.COMPLETED.value)
+
+
+class JobRejectOrgApiTest(TestCase):
+    """The organization role decides inside an organization (real OPA)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = models.User.objects.create_user(username="inno126_org_owner", password="x")
+        cls.org = Organization.objects.create(slug="inno126", owner=cls.owner)
+        cls.members = {}
+        for role, group in [
+            ("owner", "user"),
+            ("maintainer", "user"),
+            ("reviewer", "user"),
+            ("worker", "user"),  # global "user", but a worker in this organization
+            ("worker_worker", "worker"),
+        ]:
+            if role == "owner":
+                member = cls.owner
+            else:
+                member = models.User.objects.create_user(
+                    username=f"inno126_org_{role}", password="x"
+                )
+            member.groups.set([Group.objects.get_or_create(name=group)[0]])
+            Membership.objects.create(
+                user=member,
+                organization=cls.org,
+                role=role.split("_")[0],
+                is_active=True,
+                joined_date=timezone.now(),
+            )
+            cls.members[role] = member
+
+    def setUp(self):
+        task, self.job, _ = _make_job()
+        models.Task.objects.filter(pk=task.pk).update(organization=self.org)
+        models.Job.objects.filter(pk=self.job.pk).update(state=StateChoice.COMPLETED.value)
+
+    def _patch(self, user, data):
+        models.Job.objects.filter(pk=self.job.pk).update(assignee=user)
+        client = APIClient()
+        client.force_authenticate(user)
+        with mock.patch("cvat.apps.engine.job_snapshots.enqueue_job_snapshot"):
+            with self.captureOnCommitCallbacks(execute=True):
+                return client.patch(
+                    f"/api/jobs/{self.job.id}?org={self.org.slug}", data, format="json"
+                )
+
+    def test_org_workers_cannot_reject(self):
+        for role in ("worker", "worker_worker"):
+            with self.subTest(role=role):
+                response = self._patch(self.members[role], {"state": "rejected"})
+                self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+                self.assertEqual(response.json()["detail"], REJECT_DENIED)
+                self.job.refresh_from_db()
+                self.assertEqual(self.job.state, StateChoice.COMPLETED.value)
+
+    def test_org_worker_can_still_complete(self):
+        models.Job.objects.filter(pk=self.job.pk).update(state=StateChoice.IN_PROGRESS.value)
+        response = self._patch(self.members["worker"], {"state": "completed"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_org_non_workers_can_reject(self):
+        for role in ("owner", "maintainer", "reviewer"):
+            with self.subTest(role=role):
+                models.Job.objects.filter(pk=self.job.pk).update(state=StateChoice.COMPLETED.value)
+                response = self._patch(self.members[role], {"state": "rejected"})
+                self.assertEqual(response.status_code, status.HTTP_200_OK, response.content)
+                self.job.refresh_from_db()
+                self.assertEqual(self.job.state, StateChoice.REJECTED.value)

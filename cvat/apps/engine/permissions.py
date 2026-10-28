@@ -25,6 +25,7 @@ from cvat.apps.iam.permissions import (
     get_membership,
 )
 from cvat.apps.organizations.models import Organization
+from cvat.utils.http import make_requests_session
 
 from .location import StorageType, get_location_configuration
 from .models import (
@@ -906,9 +907,18 @@ class JobPermission(OpenPolicyAgentPermission, DownloadExportedExtension):
             payload['input']['request'] = {'state': self.requested_state}
         return payload
 
+    def _opa_can_reject(self) -> bool:
+        # Ask the same policy (`can_reject` in jobs.rego) why the reject was denied,
+        # so the worker-specific reason is not attached to unrelated denials.
+        with make_requests_session() as session:
+            response = session.post(
+                self.url.replace('/allow', '/can_reject'), json=self.payload
+            )
+            return response.json().get('result') is True
+
     def check_access(self) -> PermissionResult:
         result = super().check_access()
-        if not result.allow and self.is_reject_request:
+        if not result.allow and self.is_reject_request and not self._opa_can_reject():
             result = PermissionResult(allow=False, reasons=[self.REJECT_DENIED_REASON])
         return result
 

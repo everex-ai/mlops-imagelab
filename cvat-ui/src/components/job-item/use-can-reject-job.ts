@@ -35,21 +35,25 @@ export function canRejectJob(
     return organization.role !== null && organization.role !== MembershipRole.WORKER;
 }
 
-// One in-flight/finished membership lookup per (organization, user), shared by
+// The membership role of the current user, or `undefined` when it could not be
+// determined (request failed). One lookup per (organization, user) is shared by
 // every selector on the page (e.g. all job cards on the task page).
-const orgRoleCache = new Map<string, Promise<MembershipRole | null>>();
+type OrgRoleLookup = MembershipRole | null | undefined;
+const orgRoleCache = new Map<string, Promise<OrgRoleLookup>>();
 
-function fetchOrgRole(organization: Organization, username: string): Promise<MembershipRole | null> {
+function fetchOrgRole(organization: Organization, username: string): Promise<OrgRoleLookup> {
     const key = `${organization.id}:${username}`;
     let request = orgRoleCache.get(key);
     if (!request) {
         request = organization.members({
             filter: JSON.stringify({ and: [{ '==': [{ var: 'user' }, username] }] }),
-        }).then(
-            (memberships) => (memberships.length ? memberships[0].role : null),
-        ).catch(() => {
-            orgRoleCache.delete(key);
-            return null;
+        }).then((memberships) => {
+            // The server ignores inactive (not yet accepted) memberships
+            const active = memberships.find((membership) => membership.isActive);
+            return active ? active.role : null;
+        }).catch(() => {
+            orgRoleCache.delete(key); // retry on the next mount
+            return undefined;
         });
         orgRoleCache.set(key, request);
     }
@@ -67,7 +71,7 @@ export function useCanRejectJob(): boolean {
     const lookup = (user && organization && privilege !== 'admin') ?
         { organization, username: user.username, key: `${organization.id}:${user.username}` } :
         null;
-    const [orgRole, setOrgRole] = useState<{ key: string; role: MembershipRole | null } | null>(null);
+    const [orgRole, setOrgRole] = useState<{ key: string; role: OrgRoleLookup } | null>(null);
 
     useEffect(() => {
         if (!lookup) return undefined;
@@ -83,7 +87,9 @@ export function useCanRejectJob(): boolean {
     if (!organization) return canRejectJob(privilege, null);
     if (!lookup) return canRejectJob(privilege, { role: null });
 
-    // Until the role is known, keep the option disabled; the server decides anyway.
-    const role = orgRole?.key === lookup.key ? orgRole.role : null;
-    return canRejectJob(privilege, { role });
+    // While the role is loading keep the option disabled. If the lookup failed, leave
+    // it enabled: the server is authoritative and answers a worker with a 403 reason.
+    if (orgRole?.key !== lookup.key) return false;
+    if (orgRole.role === undefined) return true;
+    return canRejectJob(privilege, { role: orgRole.role });
 }

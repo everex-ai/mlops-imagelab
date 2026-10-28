@@ -220,7 +220,7 @@ function AnnotationMenuComponent(): JSX.Element {
                 label: JobState.REJECTED,
                 onClick: changeJobState(JobState.REJECTED),
             } : {
-                // INNO-126: disabled for non-reviewers, no confirmation modal
+                // INNO-126: disabled for workers, no confirmation modal
                 label: (
                     <CVATTooltip title={REJECT_DISABLED_TOOLTIP}>
                         <span>{JobState.REJECTED}</span>
