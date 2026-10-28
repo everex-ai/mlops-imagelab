@@ -161,6 +161,7 @@ const defaultState: AnnotationState = {
     },
     colors: [],
     sidebarCollapsed: false,
+    sidebarActiveTab: 'objects',
     appearanceCollapsed: false,
     filtersPanelVisible: false,
     workspace: Workspace.STANDARD,
@@ -474,6 +475,14 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
             return {
                 ...state,
                 sidebarCollapsed: !state.sidebarCollapsed,
+            };
+        }
+        case AnnotationActionTypes.SET_OBJECTS_SIDEBAR_TAB: {
+            const { tab, expand } = action.payload;
+            return {
+                ...state,
+                sidebarActiveTab: tab,
+                sidebarCollapsed: expand ? false : state.sidebarCollapsed,
             };
         }
         case AnnotationActionTypes.COLLAPSE_APPEARANCE: {

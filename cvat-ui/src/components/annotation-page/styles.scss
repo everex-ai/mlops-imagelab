@@ -198,6 +198,51 @@
     }
 }
 
+// INNO-124: issue frame markers drawn over the player slider rail, under the handle (z-index 100)
+.cvat-issue-markers-area {
+    position: relative;
+}
+
+.cvat-issue-markers {
+    position: absolute;
+    z-index: 3;
+    pointer-events: none;
+
+    > .cvat-issue-marker {
+        position: absolute;
+        top: 2px;
+        width: 2px;
+        height: 12px;
+    }
+
+    > .cvat-issue-marker-resolved {
+        background-color: #ccc;
+    }
+
+    > .cvat-issue-marker-unresolved {
+        background-color: $danger-icon-color;
+    }
+
+    > .cvat-issue-marker.cvat-issue-marker-snapped {
+        top: 0;
+        width: 4px;
+        height: 16px;
+        z-index: 1;
+    }
+
+    > .cvat-issue-marker-resolved.cvat-issue-marker-snapped {
+        background-color: $player-slider-color;
+    }
+
+    > .cvat-issue-marker-unresolved.cvat-issue-marker-snapped {
+        background-color: #cf1322; // antd red-7, a darker shade of $danger-icon-color
+    }
+}
+
+.cvat-issue-markers-area-snapped .cvat-player-slider.ant-slider {
+    cursor: pointer;
+}
+
 .cvat-player-filename-wrapper {
     max-width: $grid-unit-size * 30;
     max-height: $grid-unit-size * 3;

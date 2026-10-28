@@ -22,6 +22,7 @@ import {
     ContextMenuType,
     FrameSpeed,
     NavigationType,
+    ObjectsSidebarTab,
     OpenCVTool,
     Rotation,
     Workspace,
@@ -123,6 +124,7 @@ export enum AnnotationActionTypes {
     SLICE_ANNOTATIONS_FAILED = 'SLICE_ANNOTATIONS_FAILED',
     SPLIT_ANNOTATIONS_FAILED = 'SPLIT_ANNOTATIONS_FAILED',
     COLLAPSE_SIDEBAR = 'COLLAPSE_SIDEBAR',
+    SET_OBJECTS_SIDEBAR_TAB = 'SET_OBJECTS_SIDEBAR_TAB',
     COLLAPSE_APPEARANCE = 'COLLAPSE_APPEARANCE',
     COLLAPSE_OBJECT_ITEMS = 'COLLAPSE_OBJECT_ITEMS',
     ACTIVATE_OBJECT = 'ACTIVATE_OBJECT',
@@ -729,6 +731,14 @@ export function collapseSidebar(): AnyAction {
     return {
         type: AnnotationActionTypes.COLLAPSE_SIDEBAR,
         payload: {},
+    };
+}
+
+// expand=true also un-collapses the sidebar, e.g. when an issue marker on the player slider opens the Issues tab
+export function setObjectsSidebarTab(tab: ObjectsSidebarTab, expand = false): AnyAction {
+    return {
+        type: AnnotationActionTypes.SET_OBJECTS_SIDEBAR_TAB,
+        payload: { tab, expand },
     };
 }
 
