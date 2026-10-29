@@ -110,6 +110,41 @@ class SubmissionTest(TestCase):
         transition(self, job, actor=self.annotator, state="completed")
         self.assertEqual([r[0] for r in _rows()], ["admin_and_reviewer", "global_reviewer"])
 
+    def test_admins_are_notified_of_every_submission(self):
+        # 사용자 결정 2026-10-29: admins too, with or without an organization.
+        make_user("admin", "admin")
+        make_user("disabled_admin", "admin", is_active=False)
+        org = make_org("org", self.owner)
+        org_reviewer = make_user("org_reviewer", "worker")
+        add_member(org, org_reviewer, Membership.REVIEWER)
+        admin_reviewer = make_user("admin_reviewer", "admin")
+        add_member(org, admin_reviewer, Membership.REVIEWER)
+
+        transition(
+            self,
+            make_job(assignee=self.annotator, state="in progress"),
+            actor=self.annotator,
+            state="completed",
+        )
+        self.assertEqual([r[0] for r in _rows()], ["admin", "admin_reviewer"])
+
+        JobNotification.objects.all().delete()
+        transition(
+            self,
+            make_job(assignee=self.annotator, org=org, state="in progress"),
+            actor=self.annotator,
+            state="completed",
+        )
+        # One row each, even for an admin who is also the org's reviewer.
+        self.assertEqual([r[0] for r in _rows()], ["admin", "admin_reviewer", "org_reviewer"])
+
+    def test_an_admin_submitting_is_not_notified_of_it(self):
+        admin = make_user("admin", "admin")
+        make_user("other_admin", "admin")
+        job = make_job(assignee=admin, state="in progress")
+        transition(self, job, actor=admin, state="completed")
+        self.assertEqual([r[0] for r in _rows()], ["other_admin"])
+
     def test_a_reviewer_submitting_is_not_notified_of_it(self):
         reviewer = make_user("global_reviewer", "reviewer")
         job = make_job(assignee=reviewer, state="in progress")

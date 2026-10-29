@@ -194,6 +194,18 @@ class JobNotificationApiTest(ApiTestBase):
         self.assertEqual(self._ids(org_reviewer), [])
         self.assertEqual(self._get(SUMMARY, org_reviewer)["unread_count"], 0)
 
+    def test_admin_sees_submissions_of_organizations_they_are_not_in(self):
+        admin = make_user("admin", "admin")
+        org = make_org("org", make_user("owner", "user"))
+        n_org = notify(admin, make_job(assignee=self.annotator, org=org), event="submitted")
+        n_sandbox = notify(admin, self.job, event="submitted")
+        self.assertEqual(sorted(self._ids(admin)), sorted([n_org.id, n_sandbox.id]))
+        self.assertEqual(self._get(SUMMARY, admin)["unread_count"], 2)
+
+        admin.groups.clear()
+        admin.groups.add(Group.objects.get_or_create(name="worker")[0])
+        self.assertEqual(self._ids(admin), [])
+
     def test_reviewer_outranked_by_user_group_does_not_see_org_less_submissions(self):
         # The IAM middleware uses the highest-ranked group: "user" beats "reviewer",
         # and a "user" cannot read other people's organization-less jobs.

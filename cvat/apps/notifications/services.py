@@ -39,16 +39,20 @@ def resolve_recipient_ids(job: Job, trigger: str, actor_id: int | None) -> list[
     if trigger == JobSnapshotTrigger.SUBMITTED.value:
         # R3 / Q1 (사용자 결정 2026-10-28): the job organization's active reviewer
         # members, or the global reviewer group for organization-less jobs.
+        # 사용자 결정 2026-10-29: plus every admin, who reads every job.
         org_id = job.segment.task.organization_id
         if org_id is not None:
-            users = User.objects.filter(
+            reviewers = User.objects.filter(
                 memberships__organization_id=org_id,
                 memberships__is_active=True,
                 memberships__role=Membership.REVIEWER,
             )
         else:
-            users = _sandbox_reviewers()
-        users = users.filter(is_active=True)
+            reviewers = _sandbox_reviewers()
+        users = User.objects.filter(
+            Q(pk__in=reviewers.values("pk")) | Q(groups__name=settings.IAM_ADMIN_ROLE),
+            is_active=True,
+        )
         if actor_id is not None:
             users = users.exclude(pk=actor_id)
         return sorted(set(users.values_list("pk", flat=True)))
@@ -70,6 +74,10 @@ def _sandbox_reviewers():
         groups__name__in=[role for role in above if role != settings.IAM_ADMIN_ROLE]
     ).exclude(groups__name=settings.IAM_ADMIN_ROLE)
     return User.objects.filter(groups__name=REVIEWER_GROUP).exclude(pk__in=outranked.values("pk"))
+
+
+def _is_admin(user: User) -> bool:
+    return user.groups.filter(name=settings.IAM_ADMIN_ROLE).exists()
 
 
 def _acts_as_sandbox_reviewer(user: User) -> bool:
@@ -110,10 +118,17 @@ def visible_notifications(user: User) -> JobNotificationQuerySet:
     """The user's notifications they can still act on (R19, R26).
 
     Hidden, not deleted: a job removed from the user's reach (left the
-    organization, reassigned, no longer a reviewer) drops out of the
+    organization, reassigned, no longer a reviewer or admin) drops out of the
     list and the badge. Deleted jobs cascade their notifications away.
     """
     qs = JobNotification.objects.active().filter(recipient=user)
+
+    # The worker-facing events stay visible only while the user is still the assignee.
+    qs = qs.exclude(Q(event__in=_ASSIGNEE_EVENTS) & ~Q(job__assignee_id=user.id))
+
+    if _is_admin(user):
+        # Admins read every job, in any organization.
+        return qs
 
     has_membership = Exists(
         Membership.objects.filter(
@@ -138,9 +153,6 @@ def visible_notifications(user: User) -> JobNotificationQuerySet:
         & Q(job__segment__task__organization__isnull=False)
         & ~Q(is_org_reviewer)
     )
-
-    # The worker-facing events stay visible only while the user is still the assignee.
-    qs = qs.exclude(Q(event__in=_ASSIGNEE_EVENTS) & ~Q(job__assignee_id=user.id))
 
     if not _acts_as_sandbox_reviewer(user):
         qs = qs.exclude(
