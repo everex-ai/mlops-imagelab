@@ -10,14 +10,14 @@ import { MembershipRole, Organization } from 'cvat-core-wrapper';
 // INNO-125: who counts as a reviewer for reviewer-only shortcuts.
 // 사용자 결정 2026-10-28: 조직 reviewer 역할 포함 —
 // a user is a reviewer when either
-//   - they are in the system group `reviewer` (admins who are also in the group included), or
+//   - they are in the system group `reviewer` or `admin` (사용자 결정 2026-10-29: admins too), or
 //   - their membership role in the current organization is `reviewer`.
 // The current organization is the job's organization: the server only serves a job inside the
 // organization context it belongs to (IAM), so a job open in the annotation view shares it.
 // Note: this is intentionally broader than `isReviewerOnly` (reviewer group and not admin) used
 // when finishing a job; the two concepts are separate.
 export function isReviewerGroups(groups: readonly string[] | null | undefined): boolean {
-    return !!groups && groups.includes('reviewer');
+    return !!groups && (groups.includes('reviewer') || groups.includes('admin'));
 }
 
 export function selectIsReviewerGroup(state: CombinedState): boolean {
