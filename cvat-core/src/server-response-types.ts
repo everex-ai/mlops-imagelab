@@ -416,6 +416,28 @@ export interface SerializedApiToken {
     value?: string;
 }
 
+export interface SerializedJobNotification {
+    id: number;
+    event: string;
+    created_date: string;
+    is_read: boolean;
+    job_id: number;
+    task_id: number;
+    task_name: string;
+    actor: {
+        id: number;
+        username: string;
+        first_name: string;
+        last_name: string;
+    } | null;
+    target_frame: number;
+}
+
+export interface SerializedJobNotificationsSummary {
+    unread_count: number;
+    latest_id: number | null;
+}
+
 export interface SerializedShape {
     id?: number;
     clientID?: number;

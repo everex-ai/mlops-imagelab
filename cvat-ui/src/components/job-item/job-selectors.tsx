@@ -6,6 +6,8 @@ import React from 'react';
 import Select from 'antd/lib/select';
 import { JobStage, JobState } from 'cvat-core-wrapper';
 import { handleDropdownKeyDown } from 'utils/dropdown-utils';
+import CVATTooltip from 'components/common/cvat-tooltip';
+import { REJECT_DISABLED_TOOLTIP, useCanRejectJob } from './use-can-reject-job';
 
 interface JobStateSelectorProps {
     value: JobState | null;
@@ -13,6 +15,8 @@ interface JobStateSelectorProps {
 }
 
 export function JobStateSelector({ value, onSelect }: Readonly<JobStateSelectorProps>): JSX.Element {
+    const canReject = useCanRejectJob();
+
     return (
         <Select
             className='cvat-job-item-state'
@@ -24,7 +28,13 @@ export function JobStateSelector({ value, onSelect }: Readonly<JobStateSelectorP
         >
             <Select.Option value={JobState.NEW}>{JobState.NEW}</Select.Option>
             <Select.Option value={JobState.IN_PROGRESS}>{JobState.IN_PROGRESS}</Select.Option>
-            <Select.Option value={JobState.REJECTED}>{JobState.REJECTED}</Select.Option>
+            <Select.Option value={JobState.REJECTED} disabled={!canReject}>
+                {canReject ? JobState.REJECTED : (
+                    <CVATTooltip title={REJECT_DISABLED_TOOLTIP}>
+                        <span>{JobState.REJECTED}</span>
+                    </CVATTooltip>
+                )}
+            </Select.Option>
             <Select.Option value={JobState.COMPLETED}>{JobState.COMPLETED}</Select.Option>
         </Select>
     );

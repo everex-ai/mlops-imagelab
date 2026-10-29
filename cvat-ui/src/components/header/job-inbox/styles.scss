@@ -1,0 +1,165 @@
+// Copyright (C) CVAT.ai Corporation
+//
+// SPDX-License-Identifier: MIT
+
+@import 'base';
+
+.ant-btn.ant-btn-link.cvat-job-inbox-button {
+    .ant-badge {
+        color: inherit;
+        font-size: 24px;
+    }
+}
+
+.cvat-job-inbox-popover .ant-popover-inner {
+    padding: 0;
+}
+
+.cvat-job-inbox-panel {
+    width: 410px;
+    height: 480px;
+    display: flex;
+    flex-direction: column;
+}
+
+.cvat-job-inbox-header {
+    flex: none;
+    padding: $grid-unit-size $grid-unit-size * 1.5;
+    border-bottom: 1px solid $border-color-1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $grid-unit-size;
+}
+
+.cvat-job-inbox-header-title {
+    display: flex;
+    align-items: center;
+    gap: $grid-unit-size * 0.5;
+}
+
+.cvat-job-inbox-header-sort {
+    font-size: 12px;
+}
+
+.cvat-job-inbox-header-actions {
+    display: flex;
+    align-items: center;
+
+    .ant-btn-link {
+        padding-inline: $grid-unit-size * 0.5;
+    }
+}
+
+.cvat-job-inbox-info {
+    color: $text-color-secondary;
+}
+
+.cvat-job-inbox-error {
+    flex: none;
+    padding: $grid-unit-size * 0.5 $grid-unit-size * 1.5;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid $border-color-1;
+}
+
+.cvat-job-inbox-list {
+    flex: 1;
+    overflow-y: auto;
+}
+
+.cvat-job-inbox-state {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.cvat-job-inbox-item {
+    width: 100%;
+    display: flex;
+    align-items: flex-start;
+    gap: $grid-unit-size;
+    padding: $grid-unit-size $grid-unit-size * 1.5;
+    border: none;
+    border-bottom: 1px solid $border-color-1;
+    background: $background-color-1;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible {
+        background: $hover-menu-color;
+    }
+
+    &.cvat-job-inbox-item-unread {
+        background: $notification-background-color-1;
+
+        .cvat-job-inbox-item-dot {
+            background: $notification-border-color-1;
+        }
+    }
+}
+
+.cvat-job-inbox-item-dot {
+    flex: none;
+    width: $grid-unit-size;
+    height: $grid-unit-size;
+    margin-top: $grid-unit-size * 0.75;
+    border-radius: 50%;
+}
+
+.cvat-job-inbox-item-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.cvat-job-inbox-item-title {
+    display: flex;
+    align-items: center;
+    gap: $grid-unit-size;
+}
+
+.cvat-job-inbox-item-tag {
+    margin-inline-end: 0;
+}
+
+.cvat-job-inbox-item-time {
+    margin-left: auto;
+    flex: none;
+    font-size: 12px;
+}
+
+.cvat-job-inbox-item-task {
+    max-width: 100%;
+}
+
+.cvat-job-inbox-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+.cvat-job-inbox-permission {
+    flex: none;
+    padding: $grid-unit-size * 0.5 $grid-unit-size * 1.5;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $grid-unit-size;
+    border-bottom: 1px solid $border-color-1;
+    background: $background-color-2;
+    font-size: 12px;
+    word-break: keep-all;
+
+    .ant-btn-link {
+        flex: none;
+        padding-inline: 0;
+    }
+}

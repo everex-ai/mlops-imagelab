@@ -40,6 +40,9 @@ class StrEnum(str, Enum):
 class PermissionResult:
     allow: bool
     reasons: list[str] = field(factory=list)
+    # INNO-126: a message meant for the client. Only a permission that sets it explicitly
+    # changes the 403 detail; `reasons` alone keep DRF's generic message, as before.
+    public_detail: str | None = None
 
 
 def get_organization(request, obj):
@@ -322,6 +325,10 @@ class PolicyEnforcer(BasePermission):
                 checked_permissions.append(perm)
                 result = perm.check_access()
                 if not result.allow:
+                    if result.public_detail:
+                        # Surface an explicitly public denial message (the INNO-126 reject
+                        # reason) as the 403 detail instead of DRF's generic message.
+                        raise PermissionDenied(result.public_detail)
                     return False
 
             return True

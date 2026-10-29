@@ -67,13 +67,29 @@
         }
 
         .ant-tabs-tab {
-            padding: $grid-unit-size $grid-unit-size * 2 $grid-unit-size $grid-unit-size * 2;
+            // 12px sides leave room for a three-digit Issues badge ("100/114") in the 300px sidebar
+            padding: $grid-unit-size $grid-unit-size * 1.5;
             background: none;
             border: none;
             user-select: none;
             border-radius: $grid-unit-size $grid-unit-size 0 0;
         }
     }
+}
+
+.cvat-objects-sidebar-issues-badge {
+    display: inline-block;
+    margin-left: $grid-unit-size * 0.5;
+    padding: 0 $grid-unit-size * 0.75;
+    border-radius: $grid-unit-size;
+    font-size: 12px;
+    line-height: 16px;
+    color: #fff;
+    background-color: $player-slider-color;
+}
+
+.cvat-objects-sidebar-issues-badge.cvat-objects-sidebar-issues-badge-unresolved {
+    background-color: $danger-icon-color;
 }
 
 .cvat-objects-sidebar-labels-list-header {

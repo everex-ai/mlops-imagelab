@@ -161,6 +161,7 @@ const defaultState: AnnotationState = {
     },
     colors: [],
     sidebarCollapsed: false,
+    sidebarActiveTab: 'objects',
     appearanceCollapsed: false,
     filtersPanelVisible: false,
     workspace: Workspace.STANDARD,
@@ -474,6 +475,14 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
             return {
                 ...state,
                 sidebarCollapsed: !state.sidebarCollapsed,
+            };
+        }
+        case AnnotationActionTypes.SET_OBJECTS_SIDEBAR_TAB: {
+            const { tab, expand } = action.payload;
+            return {
+                ...state,
+                sidebarActiveTab: tab,
+                sidebarCollapsed: expand ? false : state.sidebarCollapsed,
             };
         }
         case AnnotationActionTypes.COLLAPSE_APPEARANCE: {
@@ -1186,20 +1195,26 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
             };
         }
         case AnnotationActionTypes.CHANGE_WORKSPACE: {
-            const { workspace } = action.payload;
+            const { workspace, preserveSelection } = action.payload;
             if (state.canvas.activeControl !== ActiveControl.CURSOR && state.workspace !== Workspace.SINGLE_SHAPE) {
                 return state;
             }
+
+            const states = state.annotations.states.filter((_state) => !_state.isGroundTruth);
+            // INNO-125: the reviewer toggle shortcut keeps the selection, but only for states that survive the filter
+            const keptIDs = preserveSelection ? new Set(states.map((_state) => _state.clientID)) : new Set();
+            const { activatedStateID, selectedStatesID } = state.annotations;
 
             return {
                 ...state,
                 workspace,
                 annotations: {
                     ...state.annotations,
-                    states: state.annotations.states.filter((_state) => !_state.isGroundTruth),
-                    activatedStateID: null,
+                    states,
+                    activatedStateID: activatedStateID !== null && keptIDs.has(activatedStateID) ?
+                        activatedStateID : null,
                     activatedAttributeID: null,
-                    selectedStatesID: [],
+                    selectedStatesID: selectedStatesID.filter((id) => keptIDs.has(id)),
                 },
                 canvas: {
                     ...state.canvas,

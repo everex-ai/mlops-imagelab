@@ -198,6 +198,55 @@
     }
 }
 
+// INNO-124: issue frame markers drawn over the player slider rail, under the handle (z-index 100)
+.cvat-issue-markers-area {
+    position: relative;
+    // a new block formatting context, like the Col it wraps the slider for: without it the slider's
+    // negative margin-top collapses through this div and the progress svg (top: 0) lands 4px above the rail
+    display: flow-root;
+}
+
+.cvat-issue-markers {
+    position: absolute;
+    z-index: 3;
+    pointer-events: none;
+
+    > .cvat-issue-marker {
+        position: absolute;
+        top: 2px;
+        width: 2px;
+        height: 12px;
+    }
+
+    // colors are the INNO-124 시안 tokens: unresolved #ff4d4f → #cf1322, resolved #8c8c8c → #595959 (snapped)
+    > .cvat-issue-marker-resolved {
+        background-color: #8c8c8c;
+    }
+
+    > .cvat-issue-marker-unresolved {
+        background-color: #ff4d4f;
+    }
+
+    > .cvat-issue-marker.cvat-issue-marker-snapped {
+        top: 0;
+        width: 4px;
+        height: 16px;
+        z-index: 1;
+    }
+
+    > .cvat-issue-marker-resolved.cvat-issue-marker-snapped {
+        background-color: #595959;
+    }
+
+    > .cvat-issue-marker-unresolved.cvat-issue-marker-snapped {
+        background-color: #cf1322;
+    }
+}
+
+.cvat-issue-markers-area-snapped .cvat-player-slider.ant-slider {
+    cursor: pointer;
+}
+
 .cvat-player-filename-wrapper {
     max-width: $grid-unit-size * 30;
     max-height: $grid-unit-size * 3;
@@ -273,6 +322,18 @@
 
 .cvat-workspace-selector {
     width: 150px;
+
+    // INNO-125: brief highlight after the reviewer toggle shortcut switched the workspace
+    &.cvat-workspace-selector-toggled .ant-select-selector {
+        border-color: $border-color-hover !important;
+        box-shadow: 0 0 0 2px rgba(24, 144, 255, 35%);
+    }
+}
+
+.cvat-workspace-selector-shortcut {
+    float: right;
+    color: $text-color-secondary;
+    font-size: 12px;
 }
 
 .cvat-job-info-modal-window {

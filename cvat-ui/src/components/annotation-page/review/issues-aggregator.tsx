@@ -15,10 +15,26 @@ import {
 } from 'cvat-core-wrapper';
 import { Canvas } from 'cvat-canvas-wrapper';
 import { highlightConflict } from 'actions/annotation-actions';
+import { registerComponentShortcuts } from 'actions/shortcuts-actions';
+import GlobalHotKeys from 'utils/mousetrap-react';
+import { ShortcutScope } from 'utils/enums';
+import { subKeyMap } from 'utils/component-subkeymap';
 import CreateIssueDialog from './create-issue-dialog';
 import HiddenIssueLabel from './hidden-issue-label';
 import IssueDialog from './issue-dialog';
 import ConflictLabel from './conflict-label';
+import { confirmIssueDeletion } from './confirm-issue-deletion';
+
+const componentShortcuts = {
+    DELETE_ISSUE: {
+        name: 'Delete issue',
+        description: 'Delete the issue whose dialog is open (asks for confirmation)',
+        sequences: ['ctrl+del', 'command+backspace'],
+        scope: ShortcutScope.ANNOTATION_PAGE,
+    },
+};
+
+registerComponentShortcuts(componentShortcuts);
 
 interface ConflictMappingElement {
     description: string;
@@ -63,6 +79,7 @@ export default function IssueAggregatorComponent(): JSX.Element | null {
         highlightedConflict: state.annotation.annotations.highlightedConflict,
         activeControl: state.annotation.canvas.activeControl,
     }), shallowEqual);
+    const keyMap = useSelector((state: CombinedState) => state.shortcuts.keyMap);
 
     const [expandedIssue, setExpandedIssue] = useState<number | null>(null);
     const [geometry, setGeometry] = useState<Canvas['geometry'] | null>(null);
@@ -185,14 +202,31 @@ export default function IssueAggregatorComponent(): JSX.Element | null {
         }
     }, [geometry, objectStates, showConflicts, canvasReady, qualityConflicts, annotationsZLayer]);
 
+    // Issues rendered on the canvas: both the labels/dialogs below and the DELETE_ISSUE shortcut use this list,
+    // because expandedIssue is not reset on frame change or when issues get hidden
+    const visibleIssues = canvasReady && geometry && !issuesHidden ?
+        frameIssues.filter((issue) => !issuesResolvedHidden || !issue.resolved) : [];
+    const renderedExpandedIssue = visibleIssues.find((issue) => issue.id === expandedIssue) ?? null;
+
+    const handlers: Record<keyof typeof componentShortcuts, (event?: KeyboardEvent) => void> = {
+        DELETE_ISSUE: (event?: KeyboardEvent) => {
+            if (event?.repeat || !renderedExpandedIssue) {
+                return;
+            }
+
+            confirmIssueDeletion(renderedExpandedIssue.id, () => setExpandedIssue(null), dispatch);
+        },
+    };
+
+    // keep the shortcut mounted even when the canvas is not ready, so that it is always listed in F1
+    const hotKeys = <GlobalHotKeys keyMap={subKeyMap(componentShortcuts, keyMap)} handlers={handlers} />;
+
     if (!canvasReady || !geometry) {
-        return null;
+        return hotKeys;
     }
 
-    for (const issue of frameIssues) {
-        if (issuesHidden) break;
+    for (const issue of visibleIssues) {
         const issueResolved = issue.resolved;
-        if (issuesResolvedHidden && issueResolved) continue;
         const offset = 15;
         const translated = issue.position.map((coord: number): number => coord + geometry.offset);
         const minX = Math.min(...translated.filter((_: number, idx: number): boolean => idx % 2 === 0)) + offset;
@@ -294,6 +328,7 @@ export default function IssueAggregatorComponent(): JSX.Element | null {
 
     return (
         <>
+            {hotKeys}
             {newIssueSource === NewIssueSource.ISSUE_TOOL && createLeft !== null && createTop !== null ? (
                 <CreateIssueDialog
                     top={createTop}

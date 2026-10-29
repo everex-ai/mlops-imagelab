@@ -27,6 +27,7 @@ import { ShortcutScope } from 'utils/enums';
 import { subKeyMap } from 'utils/component-subkeymap';
 import { Chapter } from 'cvat-core/src/frames';
 import { usePlugins } from 'utils/hooks';
+import IssueMarkers from './issue-markers';
 
 interface Props {
     startFrame: number;
@@ -46,6 +47,7 @@ interface Props {
     keyMap: KeyMap;
     workspace: Workspace;
     onSliderChange(value: number): void;
+    onIssueMarkerClick(frame: number): void;
     onInputChange(value: number): void;
     onURLIconClick(): void;
     onCopyFilenameIconClick(): void;
@@ -97,6 +99,7 @@ function PlayerNavigation(props: Props): JSX.Element {
         keyMap,
         workspace,
         onSliderChange,
+        onIssueMarkerClick,
         onInputChange,
         onURLIconClick,
         onCopyFilenameIconClick,
@@ -207,34 +210,41 @@ function PlayerNavigation(props: Props): JSX.Element {
             <Col className='cvat-player-controls'>
                 <Row align='bottom'>
                     <Col style={{ position: 'relative' }}>
-                        <Slider
-                            className='cvat-player-slider'
-                            min={startFrame}
-                            max={stopFrame}
-                            marks={marks}
-                            value={frameNumber || 0}
-                            onChange={workspace !== Workspace.SINGLE_SHAPE ? onSliderChange : undefined}
-                        />
-                        {!!ranges && (
-                            <svg className='cvat-player-slider-progress' viewBox='0 0 1000 16' xmlns='http://www.w3.org/2000/svg'>
-                                {ranges.split(';').map((range) => {
-                                    const [rangeStart, rangeStop] = range.split(':').map((num) => +num);
-                                    const totalSegments = stopFrame - startFrame + 1;
-                                    const segmentWidth = 1000 / totalSegments;
-                                    const width = (rangeStop - rangeStart + 1) * segmentWidth;
-                                    const offset = (Math.max((rangeStart - startFrame), 0) / totalSegments) * 1000;
-                                    return (
-                                        <rect rx={10} key={rangeStart} x={offset} y={0} height={16} width={width} />
-                                    );
+                        <IssueMarkers
+                            startFrame={startFrame}
+                            stopFrame={stopFrame}
+                            interactive={workspace !== Workspace.SINGLE_SHAPE}
+                            onMarkerClick={onIssueMarkerClick}
+                        >
+                            <Slider
+                                className='cvat-player-slider'
+                                min={startFrame}
+                                max={stopFrame}
+                                marks={marks}
+                                value={frameNumber || 0}
+                                onChange={workspace !== Workspace.SINGLE_SHAPE ? onSliderChange : undefined}
+                            />
+                            {!!ranges && (
+                                <svg className='cvat-player-slider-progress' viewBox='0 0 1000 16' xmlns='http://www.w3.org/2000/svg'>
+                                    {ranges.split(';').map((range) => {
+                                        const [rangeStart, rangeStop] = range.split(':').map((num) => +num);
+                                        const totalSegments = stopFrame - startFrame + 1;
+                                        const segmentWidth = 1000 / totalSegments;
+                                        const width = (rangeStop - rangeStart + 1) * segmentWidth;
+                                        const offset = (Math.max((rangeStart - startFrame), 0) / totalSegments) * 1000;
+                                        return (
+                                            <rect rx={10} key={rangeStart} x={offset} y={0} height={16} width={width} />
+                                        );
+                                    })}
+                                </svg>
+                            )}
+                            {playerSliderPlugins
+                                .sort((a, b) => a.weight - b.weight)
+                                .map(({ component: Component }, index) => {
+                                    const ComponentToRender = Component as React.ComponentType<any>;
+                                    return <ComponentToRender key={index} targetProps={props} />;
                                 })}
-                            </svg>
-                        )}
-                        {playerSliderPlugins
-                            .sort((a, b) => a.weight - b.weight)
-                            .map(({ component: Component }, index) => {
-                                const ComponentToRender = Component as React.ComponentType<any>;
-                                return <ComponentToRender key={index} targetProps={props} />;
-                            })}
+                        </IssueMarkers>
                     </Col>
                 </Row>
                 <Row justify='center'>

@@ -4,17 +4,23 @@
 // SPDX-License-Identifier: MIT
 
 import './styles.scss';
-import React, { Dispatch, TransitionEvent } from 'react';
+import React, {
+    Dispatch, useEffect, useMemo, useRef,
+} from 'react';
 import { AnyAction } from 'redux';
 import { connect } from 'react-redux';
 import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 import Tabs from 'antd/lib/tabs';
 import Layout from 'antd/lib/layout';
 
-import { CombinedState } from 'reducers';
+import { CombinedState, ObjectsSidebarTab } from 'reducers';
 import { DimensionType } from 'cvat-core-wrapper';
 import LabelsList from 'components/annotation-page/standard-workspace/objects-side-bar/labels-list';
-import { collapseSidebar as collapseSidebarAction } from 'actions/annotation-actions';
+import {
+    collapseSidebar as collapseSidebarAction,
+    setObjectsSidebarTab as setObjectsSidebarTabAction,
+} from 'actions/annotation-actions';
+import { summarizeIssues } from 'utils/issue-markers';
 import AppearanceBlock from 'components/annotation-page/appearance-block';
 import IssuesListComponent from 'components/annotation-page/standard-workspace/objects-side-bar/issues-list';
 
@@ -24,24 +30,31 @@ interface OwnProps {
 
 interface StateToProps {
     sidebarCollapsed: boolean;
+    sidebarActiveTab: ObjectsSidebarTab;
     jobInstance: any;
+    issues: any[];
 }
 
 interface DispatchToProps {
     collapseSidebar(): void;
+    setSidebarTab(tab: ObjectsSidebarTab): void;
 }
 
 function mapStateToProps(state: CombinedState): StateToProps {
     const {
         annotation: {
             sidebarCollapsed,
+            sidebarActiveTab,
             job: { instance: jobInstance },
         },
+        review: { issues },
     } = state;
 
     return {
         sidebarCollapsed,
+        sidebarActiveTab,
         jobInstance,
+        issues,
     };
 }
 
@@ -50,31 +63,61 @@ function mapDispatchToProps(dispatch: Dispatch<AnyAction>): DispatchToProps {
         collapseSidebar(): void {
             dispatch(collapseSidebarAction());
         },
+        setSidebarTab(tab: ObjectsSidebarTab): void {
+            dispatch(setObjectsSidebarTabAction(tab));
+        },
     };
 }
 
 function ObjectsSideBar(props: StateToProps & DispatchToProps & OwnProps): JSX.Element {
     const {
-        sidebarCollapsed, collapseSidebar, objectsList, jobInstance,
+        sidebarCollapsed, sidebarActiveTab, collapseSidebar, setSidebarTab, objectsList, jobInstance, issues,
     } = props;
 
-    const collapse = (): void => {
+    // The canvas has to be fitted again once the sidebar width transition ends. This runs for
+    // every collapse/expand, including the one triggered by an issue marker click on the player slider.
+    const isFirstRender = useRef(true);
+    useEffect(() => {
+        if (isFirstRender.current) {
+            isFirstRender.current = false;
+            return undefined;
+        }
+
         const [collapser] = window.document.getElementsByClassName('cvat-objects-sidebar');
-        const listener = (event: TransitionEvent): void => {
-            if (event.target && event.propertyName === 'width' && event.target === collapser) {
+        if (!collapser) {
+            return undefined;
+        }
+
+        const listener = (event: Event): void => {
+            const { target, propertyName } = event as TransitionEvent;
+            if (target === collapser && propertyName === 'width') {
                 window.dispatchEvent(new Event('resize'));
-                (collapser as HTMLElement).removeEventListener('transitionend', listener as any);
+                collapser.removeEventListener('transitionend', listener);
             }
         };
 
-        if (collapser) {
-            (collapser as HTMLElement).addEventListener('transitionend', listener as any);
-        }
+        collapser.addEventListener('transitionend', listener);
+        return () => collapser.removeEventListener('transitionend', listener);
+    }, [sidebarCollapsed]);
 
-        collapseSidebar();
-    };
+    const { counts: issueCounts } = useMemo(() => summarizeIssues(issues), [issues]);
 
     const is2D = jobInstance ? jobInstance.dimension === DimensionType.DIMENSION_2D : true;
+    const issuesLabel = (
+        <span className='cvat-objects-sidebar-issues-tab-label'>
+            Issues
+            {issueCounts.total > 0 && (
+                <span
+                    className={`cvat-objects-sidebar-issues-badge ${
+                        issueCounts.unresolved > 0 ? 'cvat-objects-sidebar-issues-badge-unresolved' : ''
+                    }`}
+                >
+                    {`${issueCounts.unresolved}/${issueCounts.total}`}
+                </span>
+            )}
+        </span>
+    );
+
     return (
         <Layout.Sider
             className='cvat-objects-sidebar'
@@ -89,14 +132,15 @@ function ObjectsSideBar(props: StateToProps & DispatchToProps & OwnProps): JSX.E
             {/* eslint-disable-next-line */}
             <span
                 className='cvat-objects-sidebar-sider'
-                onClick={collapse}
+                onClick={collapseSidebar}
             >
                 {sidebarCollapsed ? <MenuFoldOutlined title='Show' /> : <MenuUnfoldOutlined title='Hide' />}
             </span>
 
             <Tabs
                 type='card'
-                defaultActiveKey='objects'
+                activeKey={sidebarActiveTab === 'issues' && !is2D ? 'objects' : sidebarActiveTab}
+                onChange={(key: string) => setSidebarTab(key as ObjectsSidebarTab)}
                 className='cvat-objects-sidebar-tabs'
                 items={[{
                     key: 'objects',
@@ -107,7 +151,7 @@ function ObjectsSideBar(props: StateToProps & DispatchToProps & OwnProps): JSX.E
                     label: 'Labels',
                     forceRender: true,
                     children: <LabelsList />,
-                }, ...(is2D ? [{ key: 'issues', label: 'Issues', children: <IssuesListComponent /> }] : [])]}
+                }, ...(is2D ? [{ key: 'issues', label: issuesLabel, children: <IssuesListComponent /> }] : [])]}
             />
             {!sidebarCollapsed && <AppearanceBlock />}
         </Layout.Sider>

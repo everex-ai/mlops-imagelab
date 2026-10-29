@@ -1,0 +1,213 @@
+// Copyright (C) CVAT.ai Corporation
+//
+// SPDX-License-Identifier: MIT
+
+import './styles.scss';
+import 'dayjs/locale/ko';
+import React, { useCallback, useRef, useState } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import { useHistory } from 'react-router';
+import { BellOutlined, InfoCircleOutlined } from '@ant-design/icons';
+import Badge from 'antd/lib/badge';
+import Button from 'antd/lib/button';
+import Checkbox from 'antd/lib/checkbox';
+import Popover from 'antd/lib/popover';
+import Spin from 'antd/lib/spin';
+import Text from 'antd/lib/typography/Text';
+import message from 'antd/lib/message';
+
+import { JobNotification } from 'cvat-core-wrapper';
+import { CombinedState } from 'reducers';
+import { changeFrameAsync } from 'actions/annotation-actions';
+import CVATTooltip from 'components/common/cvat-tooltip';
+
+import { BrowserNotificationPermission } from './browser-notifications';
+import JobInboxItem from './job-inbox-item';
+import { useJobInbox } from './use-job-inbox';
+import { useNotificationPermission } from './use-notification-permission';
+
+const MARK_READ_WAIT_MS = 1000;
+
+function PermissionNotice({ permission, onEnable }: {
+    permission: BrowserNotificationPermission;
+    onEnable(): void;
+}): JSX.Element | null {
+    if (permission === 'granted') {
+        return null;
+    }
+
+    let text: string;
+    if (permission === 'default') {
+        text = 'OS 알림이 꺼져 있습니다.';
+    } else if (permission === 'denied') {
+        text = '브라우저에서 이 사이트의 알림이 차단되어 있습니다. 주소창 왼쪽 사이트 정보 아이콘에서 알림을 허용하세요.';
+    } else if (!window.isSecureContext) {
+        text = 'OS 알림은 https 주소로 접속했을 때만 받을 수 있습니다.';
+    } else {
+        text = '이 브라우저는 OS 알림을 지원하지 않습니다.';
+    }
+
+    return (
+        <div className='cvat-job-inbox-permission'>
+            <Text type='secondary'>{text}</Text>
+            {permission === 'default' && (
+                <Button type='link' size='small' onClick={onEnable}>알림 켜기</Button>
+            )}
+        </div>
+    );
+}
+
+export default function JobInbox(): JSX.Element {
+    const history = useHistory();
+    const dispatch = useDispatch();
+    const openedJobId = useSelector((state: CombinedState) => state.annotation.job.instance?.id ?? null);
+    const openedJobIdRef = useRef(openedJobId);
+    openedJobIdRef.current = openedJobId;
+
+    const [open, setOpen] = useState(false);
+    const [unreadOnly, setUnreadOnly] = useState(false);
+    const bellRef = useRef<HTMLButtonElement>(null);
+
+    const navigate = useCallback((item: JobNotification): void => {
+        const path = `/tasks/${item.taskId}/jobs/${item.jobId}`;
+        const openedJob = openedJobIdRef.current;
+        if (openedJob === item.jobId && history.location.pathname === path) {
+            // The annotation page reads ?frame= only when it loads a job, so for the job
+            // that is already open just move the player.
+            dispatch(changeFrameAsync(item.targetFrame));
+            return;
+        }
+        const url = `${path}?frame=${item.targetFrame}`;
+        if (openedJob !== null) {
+            // Another job is open: the job route is not keyed by id, so an in-app push
+            // would swap jobs under a mounted annotation page without closing the old
+            // one. Load the page afresh; the top bar's beforeunload handler still asks
+            // about unsaved changes.
+            window.location.assign(url);
+            return;
+        }
+        history.push(url);
+    }, [history, dispatch]);
+
+    const inboxRef = useRef<ReturnType<typeof useJobInbox>>();
+    const openItem = useCallback(async (item: JobNotification): Promise<void> => {
+        setOpen(false);
+        const marking = inboxRef.current?.markRead(item) ?? Promise.resolve('ok' as const);
+        // Wait briefly so a deleted or no-longer-accessible job is caught before
+        // navigating, but never let a slow server make the click look dead.
+        const result = await Promise.race([
+            marking,
+            new Promise<'timeout'>((resolve) => { window.setTimeout(() => resolve('timeout'), MARK_READ_WAIT_MS); }),
+        ]);
+        if (result === 'gone') {
+            message.warning('더 이상 접근할 수 없는 Job입니다');
+            return;
+        }
+        navigate(item);
+    }, [navigate]);
+
+    const onMarkAllRead = useCallback(async (): Promise<void> => {
+        const ok = await inboxRef.current?.markAllRead();
+        if (ok === false) {
+            message.error('알림을 읽음 처리하지 못했습니다');
+        }
+    }, []);
+
+    const inbox = useJobInbox({
+        open,
+        unreadOnly,
+        onBrowserNotificationClick: openItem,
+        onBrowserDigestClick: () => setOpen(true),
+    });
+    inboxRef.current = inbox;
+    const {
+        unreadCount, items, loading, failed, reload,
+    } = inbox;
+    const notificationPermission = useNotificationPermission();
+
+    const onOpenChange = (nextOpen: boolean): void => {
+        setOpen(nextOpen);
+        if (nextOpen) {
+            // The permission may have changed in the browser's site settings since.
+            notificationPermission.refresh();
+        } else {
+            bellRef.current?.focus();
+        }
+    };
+
+    let list: React.ReactNode;
+    if (items === null && loading) {
+        list = <div className='cvat-job-inbox-state'><Spin /></div>;
+    } else if (items === null && failed) {
+        list = null;
+    } else if (!items?.length) {
+        list = (
+            <div className='cvat-job-inbox-state'>
+                <Text type='secondary'>{unreadOnly ? '안 읽은 알림이 없습니다' : '알림이 없습니다'}</Text>
+            </div>
+        );
+    } else {
+        list = items.map((item) => <JobInboxItem key={item.id} item={item} onClick={openItem} />);
+    }
+
+    const panel = (
+        <div className='cvat-job-inbox-panel'>
+            <div className='cvat-job-inbox-header'>
+                <span className='cvat-job-inbox-header-title'>
+                    <Text strong>알림</Text>
+                    <Text type='secondary' className='cvat-job-inbox-header-sort'>최신순</Text>
+                    <CVATTooltip overlay='알림은 30일이 지나면 자동으로 삭제됩니다.'>
+                        <InfoCircleOutlined className='cvat-job-inbox-info' />
+                    </CVATTooltip>
+                </span>
+                <span className='cvat-job-inbox-header-actions'>
+                    <Checkbox
+                        checked={unreadOnly}
+                        onChange={(event) => setUnreadOnly(event.target.checked)}
+                    >
+                        읽은 알림 제외
+                    </Checkbox>
+                    <Button type='link' size='small' disabled={!unreadCount} onClick={onMarkAllRead}>
+                        모두 읽음
+                    </Button>
+                </span>
+            </div>
+            <PermissionNotice
+                permission={notificationPermission.permission}
+                onEnable={notificationPermission.request}
+            />
+            {failed && (
+                <div className='cvat-job-inbox-error'>
+                    <Text type='danger'>불러오지 못했습니다</Text>
+                    <Button type='link' size='small' onClick={reload}>다시 시도</Button>
+                </div>
+            )}
+            <div className='cvat-job-inbox-list'>{list}</div>
+        </div>
+    );
+
+    return (
+        <Popover
+            trigger='click'
+            placement='bottomRight'
+            open={open}
+            onOpenChange={onOpenChange}
+            content={panel}
+            arrow={false}
+            overlayClassName='cvat-job-inbox-popover'
+        >
+            <Button
+                ref={bellRef}
+                type='link'
+                size='large'
+                className='cvat-job-inbox-button cvat-header-button'
+                aria-label={unreadCount ? `알림, 안 읽은 알림 ${unreadCount}개` : '알림'}
+                icon={(
+                    <Badge count={unreadCount} overflowCount={99} size='small'>
+                        <BellOutlined />
+                    </Badge>
+                )}
+            />
+        </Popover>
+    );
+}

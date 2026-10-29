@@ -24,7 +24,7 @@ from crum import get_current_user
 from django.conf import settings
 from django.db import transaction
 from django.db.models.signals import post_save, pre_save
-from django.dispatch import receiver
+from django.dispatch import Signal, receiver
 from django.utils import timezone
 
 from cvat.apps.engine.issue_snapshots import load_job_data, serialize_frame
@@ -40,6 +40,11 @@ from cvat.apps.engine.models import (
 from cvat.apps.engine.utils import transaction_with_repeatable_read
 
 logger = logging.getLogger(__name__)
+
+# Sent after a round boundary commits, alongside the snapshot enqueue. Lets other
+# apps (job notifications) react to the same boundary without the engine
+# importing them. kwargs: job_id, trigger, actor_id, transitioned_at.
+job_round_boundary = Signal()
 
 _ACCEPTANCE = StageChoice.ACCEPTANCE.value
 _COMPLETED = StateChoice.COMPLETED.value
@@ -249,3 +254,26 @@ def schedule_job_snapshot(sender, instance: Job, created: bool, **kwargs):
     if created or capture_kwargs is None:
         return
     transaction.on_commit(lambda: enqueue_job_snapshot(**capture_kwargs), robust=True)
+    transaction.on_commit(lambda: announce_job_round_boundary(**capture_kwargs), robust=True)
+
+
+def announce_job_round_boundary(
+    *, job_id: int, trigger: str, actor_id: int | None, transitioned_at: datetime, **_
+) -> None:
+    """Tell subscribers a boundary committed. Receiver failures are only logged:
+    like the snapshot, nothing here may fail or undo the transition."""
+    results = job_round_boundary.send_robust(
+        sender=Job,
+        job_id=job_id,
+        trigger=trigger,
+        actor_id=actor_id,
+        transitioned_at=transitioned_at,
+    )
+    for receiver_fn, result in results:
+        if isinstance(result, Exception):
+            logger.error(
+                "job_round_boundary receiver %r failed for job %s",
+                receiver_fn,
+                job_id,
+                exc_info=(type(result), result, result.__traceback__),
+            )

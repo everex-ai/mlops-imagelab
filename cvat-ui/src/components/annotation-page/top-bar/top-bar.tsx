@@ -67,6 +67,7 @@ interface Props {
     onSelectChapter(id: number): void;
     setHoveredChapter(id: number | null): void;
     onSliderChange(value: number): void;
+    onIssueMarkerClick(frame: number): void;
     onInputChange(value: number): void;
     onURLIconClick(): void;
     onCopyFilenameIconClick(): void;
@@ -131,6 +132,7 @@ export default function AnnotationTopBarComponent(props: Props): JSX.Element {
         onSelectChapter,
         setHoveredChapter,
         onSliderChange,
+        onIssueMarkerClick,
         onInputChange,
         onURLIconClick,
         onCopyFilenameIconClick,
@@ -195,6 +197,7 @@ export default function AnnotationTopBarComponent(props: Props): JSX.Element {
             keyMap={keyMap}
             workspace={workspace}
             onSliderChange={onSliderChange}
+            onIssueMarkerClick={onIssueMarkerClick}
             onInputChange={onInputChange}
             onURLIconClick={onURLIconClick}
             onCopyFilenameIconClick={onCopyFilenameIconClick}

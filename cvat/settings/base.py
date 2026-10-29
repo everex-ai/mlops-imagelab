@@ -119,6 +119,7 @@ INSTALLED_APPS = [
     "cvat.apps.consensus",
     "cvat.apps.access_tokens",
     "cvat.apps.production_stats",
+    "cvat.apps.notifications",
 ]
 
 SITE_ID = 1
@@ -240,6 +241,7 @@ OBJECTS_NOT_RELATED_WITH_ORG = [
     "server",
     "request",
     "access_token",
+    "job_notification",
 ]
 
 # ORG settings
@@ -395,6 +397,13 @@ PERIODIC_RQ_JOBS = [
         "id": "clear_unusable_access_tokens",
         "func": "cvat.apps.access_tokens.cron.clear_unusable_access_tokens",
         "cron_string": "0 0 * * 0",
+    },
+    {
+        "queue": CVAT_QUEUES.CLEANING.value,
+        "id": "soft_delete_expired_job_notifications",
+        "func": "cvat.apps.notifications.cron.soft_delete_expired_job_notifications",
+        # Once a day, at 03:00 KST
+        "cron_string": "0 18 * * *",
     },
 ]
 
