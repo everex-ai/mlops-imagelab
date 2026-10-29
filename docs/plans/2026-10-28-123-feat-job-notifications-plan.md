@@ -10,7 +10,7 @@ origin: docs/brainstorms/2026-10-28-inno-123-job-notifications-requirements.md
 
 ## Summary
 
-Job 라운드 경계(작업 완료·검수 반려·검수 완료)가 커밋되면 서버가 수신자별 알림 행을 만든다. 신규 `cvat/apps/notifications` 앱이 모델·API·30일 soft delete cron을 맡고, 엔진은 기존 `job_snapshots.py`의 경계 판별 결과를 커스텀 시그널로 내보내기만 한다. UI는 헤더 종 아이콘이 30초 폴링으로 배지·드롭다운을 갱신하고, 탭이 열려 있는 동안 새 알림을 OS 브라우저 알림으로 띄운다.
+Job 라운드 경계(작업 완료·검수 반려·검수 완료)가 커밋되면 서버가 수신자별 알림 행을 만든다. 신규 `cvat/apps/notifications` 앱이 모델·API·30일 soft delete cron을 맡고, 엔진은 기존 `job_snapshots.py`의 경계 판별 결과를 커스텀 시그널로 내보내기만 한다. UI는 헤더 종 아이콘이 10초 폴링(2026-10-29 30초→10초)으로 배지·드롭다운을 갱신하고, 탭이 열려 있는 동안 새 알림을 OS 브라우저 알림으로 띄운다.
 
 ---
 
@@ -38,7 +38,7 @@ origin Acceptance Examples AE1–AE6은 아래 단위 테스트 시나리오에 
 
 origin "미결정 사항"의 권장안을 채택했다. Q1~Q6 모두 사용자 결정 2026-10-28. 바뀌어도 영향 범위는 표시한 단위에 한정된다.
 
-- Q1 (사용자 결정 2026-10-28) `작업 완료` 수신자 = 그 Job의 조직에서 활성 `reviewer` 멤버(조직 Job), 또는 Django 그룹 `reviewer` 사용자(조직 밖 Job). 행위자와 비활성 사용자 제외. — U2의 수신자 함수만 바뀐다.
+- Q1 (사용자 결정 2026-10-28) `작업 완료` 수신자 = 그 Job의 조직에서 활성 `reviewer` 멤버(조직 Job), 또는 Django 그룹 `reviewer` 사용자(조직 밖 Job). 2026-10-29 추가: 조직과 무관하게 `admin` 그룹 전원(모든 Job을 볼 수 있음, 조직 멤버가 아니어도 목록에 보임). 행위자와 비활성 사용자 제외. — U2의 수신자 함수만 바뀐다.
 - Q2 (사용자 결정 2026-10-28: 3종 모두) OS 알림 대상 = `검수 반려`(작업자), `작업 완료`(검수자), `검수 완료`(작업자). 문구는 시안(mock_toast) 기준: 제목 `ImageLab · Job #N <이벤트>`, 본문 예 `'<Task>' Task의 Job #N이 반려되었습니다. 반려 사유를 확인하세요.` — U7의 필터 한 줄.
 - Q3 (사용자 결정 2026-10-28, 2026-10-29 변경) 권한 요청 = 로그인 후 화면 어디든 첫 클릭·키 입력 시(브라우저당 1회) + 드롭다운 상단 권한 상태 안내. — U7.
 - Q4 (사용자 결정 2026-10-28) 이벤트 1건 = 알림 1건. — U1/U3. Job당 1건으로 바꾸면 모델에 upsert 키가 생긴다.
@@ -57,7 +57,7 @@ origin "미결정 사항"의 권장안을 채택했다. Q1~Q6 모두 사용자 �
 - **API는 수신자 본인 범위, 조직 컨텍스트 무시.** 목록은 현재 `X-Organization`과 무관하게 `recipient = request.user`로 필터한다. 사용자가 조직을 바꿔도 배지가 흔들리지 않는다. R19는 Job 삭제 시 FK cascade와, 목록·summary 쿼리에서 수신자가 접근을 잃은 행을 제외하는 것으로 처리한다: 조직 Job인데 활성 멤버십 없음, `rejected`/`accepted`인데 수신자가 현재 담당자가 아님, 조직 밖 `submitted`인데 수신자가 `reviewer` 그룹에 없음.
 - **OPA 권한 클래스는 둔다, 규칙은 "인증된 사용자 + 본인 리소스".** fork의 `reviewer`는 `get_priority`에 없어서 `utils.has_perm(utils.WORKER)`가 거짓이다(`cvat/apps/organizations/rules/organizations.rego` 주석). `access_tokens.rego`를 그대로 복사하면 검수자가 거부되므로, 역할 우선순위가 아니라 `input.auth.user` 존재와 소유 여부로 허용한다.
 - **OpenAPI 스키마에서 제외.** `production_stats`와 같은 `extend_schema(exclude=True)`. cvat-core가 axios로 직접 호출하고 SDK 클라이언트가 필요 없으며, CI 스키마 diff 부담을 피한다.
-- **폴링 2단계.** 30초마다 경량 `summary`(안 읽은 수 + 최신 알림 id)만 조회한다. 목록은 드롭다운을 열 때와 `latest_id`가 바뀔 때만 가져온다. 목록은 최신 100건으로 제한한다(30일 보존 기준 충분, 무한 스크롤은 후속).
+- **폴링 2단계.** 10초마다(2026-10-29 사용자 요청으로 30초→10초) 경량 `summary`(안 읽은 수 + 최신 알림 id)만 조회한다. 목록은 드롭다운을 열 때와 `latest_id`가 바뀔 때만 가져온다. 목록은 최신 100건으로 제한한다(30일 보존 기준 충분, 무한 스크롤은 후속).
 - **OS 알림은 `Notification` API + 알림 id 기반 `tag`.** 같은 tag는 OS가 하나로 합치므로 여러 탭에서 같은 알림을 띄워도 한 번만 보인다(R24). 페이지 로드 첫 summary의 `latest_id`를 기준선으로 삼아 그보다 큰 id만 OS 알림을 띄운다(R23). Service Worker/Web Push는 쓰지 않는다.
 - **UI 상태는 Redux 대신 헤더 전용 훅.** 기존 Redux `notifications` 슬라이스는 오류 토스트용이라 이름이 겹친다. 알림 상태는 헤더에서만 쓰므로 컴포넌트 훅(`useJobInbox` 류)으로 두어 리듀서 추가를 피한다. 코드 식별자는 `jobInbox`/`JobNotification` 계열로 써서 기존 `notifications`와 구분한다.
 
@@ -80,7 +80,7 @@ sequenceDiagram
   ENG->>ENG: on_commit: 스냅샷 enqueue
   ENG-->>N: job_round_boundary(job_id, trigger, actor_id, at)
   N->>DB: 수신자 계산 → JobNotification bulk_create
-  loop 30초
+  loop 10초
     UI->>N: GET summary
     N-->>UI: unread_count, latest_id
   end
@@ -249,7 +249,7 @@ sequenceDiagram
 - `cvat-ui/src/components/header/header.tsx` (`cvat-right-header`의 GitHub 버튼 왼쪽에 삽입)
 
 **Approach:**
-- 훅: 로그인 상태에서 30초마다 `summary`. `latest_id`가 바뀌었거나 드롭다운이 열릴 때 목록을 다시 가져온다. 로그아웃 시 타이머 해제.
+- 훅: 로그인 상태에서 10초마다 `summary`. `latest_id`가 바뀌었거나 드롭다운이 열릴 때 목록을 다시 가져온다. 로그아웃 시 타이머 해제.
 - antd `Badge`(`overflowCount=99`) + `Dropdown`/`Popover`. 패널은 고정 높이, 헤더 행(`알림 · 최신순 · ⓘ`, `읽은 알림 제외` 체크박스, `모두 읽음`) 고정, 목록만 `overflow-y: auto`.
 - 항목: `#<Job id>`, 태그(`검수 반려` 빨강, `검수 완료` 초록, `작업 완료` 파랑 — 색은 구현 시 조정), Task 이름, `dayjs` 상대 시간(ko). `작업 완료`는 행위자 이름 표시. 안 읽음은 파란 점 + 배경색.
 - 훅은 드롭다운이 열려 있는 동안 매 폴링마다 목록도 다시 가져온다(`target_frame` 최신화). 열린 상태에서 갱신될 때 스크롤 위치를 유지한다.
@@ -265,7 +265,7 @@ sequenceDiagram
 **Patterns to follow:** `header.tsx`의 기존 헤더 버튼(`cvat-header-button`, `CVATTooltip`), `cvat-ui/src/containers/annotation-page/annotation-page.tsx`의 `?frame=` 처리.
 
 **Test scenarios (수동 + 선택적 Cypress `tests/cypress/e2e/`):**
-- Covers F1. 작업자 계정 탭을 열어 두고 다른 브라우저에서 검수자가 반려 → 30초 안에 배지 +1.
+- Covers F1. 작업자 계정 탭을 열어 두고 다른 브라우저에서 검수자가 반려 → 10초 안에 배지 +1.
 - Covers AE3. 반려 항목 클릭 → 첫 미해결 이슈 프레임에서 열림, 배지 -1, 드롭다운 닫힘.
 - `검수 완료`/`작업 완료` 클릭 → Job 시작 프레임.
 - Covers AE5. `읽은 알림 제외` 체크 후 클릭한 항목이 다시 열었을 때 안 보임.
@@ -339,7 +339,7 @@ origin Scope Boundaries를 그대로 유지한다: 알림 상세 페이지, Web 
 ## System-Wide Impact
 
 - **Job 전이 경로:** `job_snapshots.py`의 `on_commit` 콜백에 시그널 발신이 추가된다. `send_robust`와 try/except로 스냅샷·전이에 영향이 없어야 한다.
-- **API 부하:** 로그인 사용자당 30초에 1회 경량 쿼리. 현재 사용자 규모(수십 명)에서 무시 가능. 인덱스(U1)로 안 읽은 수 조회를 인덱스 스캔으로 유지한다.
+- **API 부하:** 로그인 사용자당 10초에 1회 경량 쿼리. 현재 사용자 규모(수십 명)에서 무시 가능. 인덱스(U1)로 안 읽은 수 조회를 인덱스 스캔으로 유지한다.
 - **배포:** 서버 이미지 rebuild + 신규 앱 마이그레이션 적용. cron 스케줄은 서버 init(`syncperiodicjobs`)이 재시작 시 등록하고, cron 함수를 import할 수 있도록 utils 워커 이미지도 rebuild한다. UI 이미지도 rebuild.
 - **IAM:** 새 rego 패키지는 `NotificationsConfig.ready()`의 `load_app_iam_rules` 호출로 OPA 번들(`/api/auth/rules`)에 포함된다. reviewer 허용이 `has_perm`에 의존하지 않음을 OPA 테스트로 고정한다.
 

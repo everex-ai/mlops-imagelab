@@ -156,7 +156,11 @@
     border-bottom: 1px solid $border-color-1;
     background: $background-color-2;
     font-size: 12px;
-    word-break: keep-all;
+
+    // antd Typography sets its own word-break, so the parent's would not reach the text.
+    .ant-typography {
+        word-break: keep-all;
+    }
 
     .ant-btn-link {
         flex: none;

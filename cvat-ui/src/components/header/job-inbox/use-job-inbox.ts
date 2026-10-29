@@ -14,7 +14,7 @@ import {
 
 const core = getCore();
 
-export const POLL_INTERVAL_MS = 30 * 1000;
+export const POLL_INTERVAL_MS = 10 * 1000;
 
 // A bulk state change can create dozens of notifications at once: show a few
 // individually and fold the rest into one digest.
@@ -38,7 +38,7 @@ interface Options {
 }
 
 /**
- * Header bell state (R20-R25). Polls the cheap summary every 30s and refetches the
+ * Header bell state (R20-R25). Polls the cheap summary every 10s and refetches the
  * list while there are unannounced notifications or while the dropdown is open, so
  * that a rejection's target frame reflects issues resolved since (R17).
  */
