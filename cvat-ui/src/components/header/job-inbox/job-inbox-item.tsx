@@ -38,7 +38,10 @@ export default function JobInboxItem({ item, onClick }: Props): JSX.Element {
                         {EVENT_LABELS[item.event]}
                     </Tag>
                     {!item.isRead && <span className='cvat-job-inbox-visually-hidden'>읽지 않음</span>}
-                    <CVATTooltip overlay={created.format('YYYY-MM-DD HH:mm:ss')}>
+                    <CVATTooltip
+                        overlay={created.format('YYYY-MM-DD HH:mm:ss')}
+                        overlayStyle={{ maxWidth: 'none', whiteSpace: 'nowrap' }}
+                    >
                         <Text type='secondary' className='cvat-job-inbox-item-time'>
                             {created.locale('ko').fromNow()}
                         </Text>

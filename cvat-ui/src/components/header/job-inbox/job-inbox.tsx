@@ -156,7 +156,10 @@ export default function JobInbox(): JSX.Element {
                 <span className='cvat-job-inbox-header-title'>
                     <Text strong>알림</Text>
                     <Text type='secondary' className='cvat-job-inbox-header-sort'>최신순</Text>
-                    <CVATTooltip overlay='알림은 30일이 지나면 자동으로 삭제됩니다.'>
+                    <CVATTooltip
+                        overlay='알림은 30일이 지나면 자동으로 삭제됩니다.'
+                        overlayStyle={{ maxWidth: 'none', whiteSpace: 'nowrap' }}
+                    >
                         <InfoCircleOutlined className='cvat-job-inbox-info' />
                     </CVATTooltip>
                 </span>
