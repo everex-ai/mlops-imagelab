@@ -32,6 +32,7 @@ interface StateToProps {
     sidebarCollapsed: boolean;
     sidebarActiveTab: ObjectsSidebarTab;
     jobInstance: any;
+    issues: any[];
     frameIssues: any[];
 }
 
@@ -47,13 +48,14 @@ function mapStateToProps(state: CombinedState): StateToProps {
             sidebarActiveTab,
             job: { instance: jobInstance },
         },
-        review: { frameIssues },
+        review: { issues, frameIssues },
     } = state;
 
     return {
         sidebarCollapsed,
         sidebarActiveTab,
         jobInstance,
+        issues,
         frameIssues,
     };
 }
@@ -71,7 +73,8 @@ function mapDispatchToProps(dispatch: Dispatch<AnyAction>): DispatchToProps {
 
 function ObjectsSideBar(props: StateToProps & DispatchToProps & OwnProps): JSX.Element {
     const {
-        sidebarCollapsed, sidebarActiveTab, collapseSidebar, setSidebarTab, objectsList, jobInstance, frameIssues,
+        sidebarCollapsed, sidebarActiveTab, collapseSidebar, setSidebarTab, objectsList, jobInstance, issues,
+        frameIssues,
     } = props;
 
     // The canvas has to be fitted again once the sidebar width transition ends. This runs for
@@ -100,20 +103,20 @@ function ObjectsSideBar(props: StateToProps & DispatchToProps & OwnProps): JSX.E
         return () => collapser.removeEventListener('transitionend', listener);
     }, [sidebarCollapsed]);
 
-    // The badge counts the current frame's issues; the slider markers show the rest of the job.
-    const { counts: issueCounts } = useMemo(() => summarizeIssues(frameIssues), [frameIssues]);
+    // "this frame's issues / the job's issues" (사용자 결정 2026-10-29); red while this frame has an open one.
+    const { counts: frameIssueCounts } = useMemo(() => summarizeIssues(frameIssues), [frameIssues]);
 
     const is2D = jobInstance ? jobInstance.dimension === DimensionType.DIMENSION_2D : true;
     const issuesLabel = (
         <span className='cvat-objects-sidebar-issues-tab-label'>
             Issues
-            {issueCounts.total > 0 && (
+            {issues.length > 0 && (
                 <span
                     className={`cvat-objects-sidebar-issues-badge ${
-                        issueCounts.unresolved > 0 ? 'cvat-objects-sidebar-issues-badge-unresolved' : ''
+                        frameIssueCounts.unresolved > 0 ? 'cvat-objects-sidebar-issues-badge-unresolved' : ''
                     }`}
                 >
-                    {`${issueCounts.unresolved}/${issueCounts.total}`}
+                    {`${frameIssueCounts.total}/${issues.length}`}
                 </span>
             )}
         </span>
