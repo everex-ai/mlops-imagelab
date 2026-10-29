@@ -51,11 +51,45 @@ export function browserNotificationsSupported(): boolean {
     return typeof window !== 'undefined' && 'Notification' in window && window.isSecureContext;
 }
 
-// 사용자 결정 2026-10-28 (Q3): asked once, on the first bell click (a user gesture).
-// A denied permission is never asked again: the browser keeps it as 'denied'.
-export function requestBrowserNotificationPermission(): void {
-    if (browserNotificationsSupported() && Notification.permission === 'default') {
-        Notification.requestPermission().catch(() => {});
+export type BrowserNotificationPermission = NotificationPermission | 'unsupported';
+
+export function browserNotificationPermission(): BrowserNotificationPermission {
+    return browserNotificationsSupported() ? Notification.permission : 'unsupported';
+}
+
+// Firefox and Safari ignore a permission request made outside a user gesture, so the
+// caller must invoke this from an event handler. A denied permission is never asked
+// again: the browser keeps it as 'denied'.
+export async function requestBrowserNotificationPermission(): Promise<BrowserNotificationPermission> {
+    if (browserNotificationPermission() === 'default') {
+        try {
+            await Notification.requestPermission();
+        } catch {
+            // Old Safari only supports the callback form; the state below is still right.
+        }
+    }
+    return browserNotificationPermission();
+}
+
+const AUTO_ASKED_KEY = 'imagelabNotificationPermissionAsked';
+
+// 사용자 결정 2026-10-29 (Q3 변경): ask on the first click or key press anywhere after
+// sign-in, once per browser, so that users who never open the bell still get OS
+// notifications. A dismissed prompt is not repeated automatically; the dropdown offers
+// a button instead.
+export function autoRequestAllowed(): boolean {
+    try {
+        return window.localStorage.getItem(AUTO_ASKED_KEY) === null;
+    } catch {
+        return true;
+    }
+}
+
+export function rememberAutoRequest(): void {
+    try {
+        window.localStorage.setItem(AUTO_ASKED_KEY, 'asked');
+    } catch {
+        // Storage blocked: the prompt may be offered again on the next visit.
     }
 }
 

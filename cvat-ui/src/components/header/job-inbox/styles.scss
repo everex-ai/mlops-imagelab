@@ -145,3 +145,21 @@
     clip: rect(0 0 0 0);
     white-space: nowrap;
 }
+
+.cvat-job-inbox-permission {
+    flex: none;
+    padding: $grid-unit-size * 0.5 $grid-unit-size * 1.5;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: $grid-unit-size;
+    border-bottom: 1px solid $border-color-1;
+    background: $background-color-2;
+    font-size: 12px;
+    word-break: keep-all;
+
+    .ant-btn-link {
+        flex: none;
+        padding-inline: 0;
+    }
+}

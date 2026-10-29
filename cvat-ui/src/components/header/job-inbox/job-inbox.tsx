@@ -21,11 +21,41 @@ import { CombinedState } from 'reducers';
 import { changeFrameAsync } from 'actions/annotation-actions';
 import CVATTooltip from 'components/common/cvat-tooltip';
 
-import { requestBrowserNotificationPermission } from './browser-notifications';
+import { BrowserNotificationPermission } from './browser-notifications';
 import JobInboxItem from './job-inbox-item';
 import { useJobInbox } from './use-job-inbox';
+import { useNotificationPermission } from './use-notification-permission';
 
 const MARK_READ_WAIT_MS = 1000;
+
+function PermissionNotice({ permission, onEnable }: {
+    permission: BrowserNotificationPermission;
+    onEnable(): void;
+}): JSX.Element | null {
+    if (permission === 'granted') {
+        return null;
+    }
+
+    let text: string;
+    if (permission === 'default') {
+        text = 'OS 알림이 꺼져 있습니다.';
+    } else if (permission === 'denied') {
+        text = '브라우저에서 이 사이트의 알림이 차단되어 있습니다. 주소창 왼쪽 사이트 정보 아이콘에서 알림을 허용하세요.';
+    } else if (!window.isSecureContext) {
+        text = 'OS 알림은 https 주소로 접속했을 때만 받을 수 있습니다.';
+    } else {
+        text = '이 브라우저는 OS 알림을 지원하지 않습니다.';
+    }
+
+    return (
+        <div className='cvat-job-inbox-permission'>
+            <Text type='secondary'>{text}</Text>
+            {permission === 'default' && (
+                <Button type='link' size='small' onClick={onEnable}>알림 켜기</Button>
+            )}
+        </div>
+    );
+}
 
 export default function JobInbox(): JSX.Element {
     const history = useHistory();
@@ -93,11 +123,13 @@ export default function JobInbox(): JSX.Element {
     const {
         unreadCount, items, loading, failed, reload,
     } = inbox;
+    const notificationPermission = useNotificationPermission();
 
     const onOpenChange = (nextOpen: boolean): void => {
         setOpen(nextOpen);
         if (nextOpen) {
-            requestBrowserNotificationPermission();
+            // The permission may have changed in the browser's site settings since.
+            notificationPermission.refresh();
         } else {
             bellRef.current?.focus();
         }
@@ -140,6 +172,10 @@ export default function JobInbox(): JSX.Element {
                     </Button>
                 </span>
             </div>
+            <PermissionNotice
+                permission={notificationPermission.permission}
+                onEnable={notificationPermission.request}
+            />
             {failed && (
                 <div className='cvat-job-inbox-error'>
                     <Text type='danger'>불러오지 못했습니다</Text>

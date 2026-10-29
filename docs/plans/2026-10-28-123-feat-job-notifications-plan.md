@@ -40,7 +40,7 @@ origin "미결정 사항"의 권장안을 채택했다. Q1~Q6 모두 사용자 �
 
 - Q1 (사용자 결정 2026-10-28) `작업 완료` 수신자 = 그 Job의 조직에서 활성 `reviewer` 멤버(조직 Job), 또는 Django 그룹 `reviewer` 사용자(조직 밖 Job). 행위자와 비활성 사용자 제외. — U2의 수신자 함수만 바뀐다.
 - Q2 (사용자 결정 2026-10-28: 3종 모두) OS 알림 대상 = `검수 반려`(작업자), `작업 완료`(검수자), `검수 완료`(작업자). 문구는 시안(mock_toast) 기준: 제목 `ImageLab · Job #N <이벤트>`, 본문 예 `'<Task>' Task의 Job #N이 반려되었습니다. 반려 사유를 확인하세요.` — U7의 필터 한 줄.
-- Q3 (사용자 결정 2026-10-28: 구현대로) 권한 요청 = 종 아이콘 첫 클릭 시. — U7.
+- Q3 (사용자 결정 2026-10-28, 2026-10-29 변경) 권한 요청 = 로그인 후 화면 어디든 첫 클릭·키 입력 시(브라우저당 1회) + 드롭다운 상단 권한 상태 안내. — U7.
 - Q4 (사용자 결정 2026-10-28) 이벤트 1건 = 알림 1건. — U1/U3. Job당 1건으로 바꾸면 모델에 upsert 키가 생긴다.
 - Q5 (사용자 결정 2026-10-28: 구현대로) 행위자(username)는 `작업 완료` 항목에만 `Task · username` 형태로 표시. API는 모든 항목에 행위자를 내려주므로 UI 표시만 바꾸면 된다.
 - Q6 (사용자 결정 2026-10-28) 'Finish the job'(stage→acceptance) 분류는 현행 유지 — 3/20~8/24 ClickHouse 덤프에서 작업자가 acceptance를 찍은 사례 0건(677건 모두 d/test_reviewer). 작업자가 'Finish the job'을 눌러도 `검수 완료`로 분류되는 이론상 경우는 운영 데이터상 발생하지 않으므로 `classify_job_transition`의 acceptance 판정을 바꾸지 않는다.
@@ -291,7 +291,7 @@ sequenceDiagram
 
 **Approach:**
 - 지원 판정: `'Notification' in window && window.isSecureContext`. 보안 컨텍스트가 아니면(LAN `http://192.168.1.101:8081` 접속) OS 알림 없이 배지·목록만 동작한다.
-- 권한: 종 아이콘 첫 클릭(사용자 제스처) 때 드롭다운을 연 뒤 `Notification.permission === 'default'`이면 요청한다. `denied`면 다시 묻지 않는다.
+- 권한: 로그인 후 첫 `click`/`keydown`(Escape·수정자 키 단독 제외, capture 단계)에서 `Notification.permission === 'default'`이면 요청한다. 자동 요청은 브라우저당 1회(localStorage 표시) — 닫기로 넘긴 사용자는 드롭다운의 `알림 켜기` 버튼으로 다시 요청한다. `denied`면 다시 묻지 않고 해제 방법을 안내한다.
 - 기준선: 페이지 로드 후 첫 `summary`의 `latest_id`. 이후 목록에서 id > 기준선이고 아직 띄우지 않은 항목 중 `rejected`·`submitted`만 OS 알림을 띄운다.
 - `new Notification(title, { body, tag: 'imagelab-job-notification-<id>' })`. 제목 예: `검수 반려 · Job #123`, 본문: Task 이름(+ 작업 완료면 작업자명).
 - 클릭: `window.focus()` → U6의 클릭 처리(읽음 + 이동) 재사용 → 알림 닫기.
@@ -303,7 +303,7 @@ sequenceDiagram
 - 권한 `denied` → OS 알림 없음, 배지·목록 정상. 새로고침 후 재요청 없음.
 - `accepted` 알림 → 배지만 증가, OS 알림 없음.
 - OS 알림 클릭 → 탭 포커스, 해당 Job·프레임으로 이동, 읽음 처리.
-- macOS Chrome·Safari, Firefox에서 권한 요청이 첫 종 클릭으로 뜬다.
+- macOS Chrome·Safari, Firefox에서 권한 요청이 로그인 후 첫 클릭·키 입력으로 뜬다.
 
 **Verification:** macOS Chrome에서 F1 흐름 전체를 OS 알림 포함해 재현.
 
