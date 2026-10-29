@@ -32,7 +32,7 @@ interface StateToProps {
     sidebarCollapsed: boolean;
     sidebarActiveTab: ObjectsSidebarTab;
     jobInstance: any;
-    issues: any[];
+    frameIssues: any[];
 }
 
 interface DispatchToProps {
@@ -47,14 +47,14 @@ function mapStateToProps(state: CombinedState): StateToProps {
             sidebarActiveTab,
             job: { instance: jobInstance },
         },
-        review: { issues },
+        review: { frameIssues },
     } = state;
 
     return {
         sidebarCollapsed,
         sidebarActiveTab,
         jobInstance,
-        issues,
+        frameIssues,
     };
 }
 
@@ -71,7 +71,7 @@ function mapDispatchToProps(dispatch: Dispatch<AnyAction>): DispatchToProps {
 
 function ObjectsSideBar(props: StateToProps & DispatchToProps & OwnProps): JSX.Element {
     const {
-        sidebarCollapsed, sidebarActiveTab, collapseSidebar, setSidebarTab, objectsList, jobInstance, issues,
+        sidebarCollapsed, sidebarActiveTab, collapseSidebar, setSidebarTab, objectsList, jobInstance, frameIssues,
     } = props;
 
     // The canvas has to be fitted again once the sidebar width transition ends. This runs for
@@ -100,7 +100,8 @@ function ObjectsSideBar(props: StateToProps & DispatchToProps & OwnProps): JSX.E
         return () => collapser.removeEventListener('transitionend', listener);
     }, [sidebarCollapsed]);
 
-    const { counts: issueCounts } = useMemo(() => summarizeIssues(issues), [issues]);
+    // The badge counts the current frame's issues; the slider markers show the rest of the job.
+    const { counts: issueCounts } = useMemo(() => summarizeIssues(frameIssues), [frameIssues]);
 
     const is2D = jobInstance ? jobInstance.dimension === DimensionType.DIMENSION_2D : true;
     const issuesLabel = (
