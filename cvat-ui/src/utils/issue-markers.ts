@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT
 
 // Pure helpers behind the player slider issue markers and the Issues tab badge (INNO-124).
+// The markers summarize the whole job, the badge only the current frame.
 // They depend only on the issue list and plain geometry, never on React or Redux.
 
 export interface IssueLike {
