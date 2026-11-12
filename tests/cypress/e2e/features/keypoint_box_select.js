@@ -53,7 +53,11 @@ context('Keypoint box selection', { scrollBehavior: false }, () => {
     function createPeople() {
         cy.window().then(async ($win) => {
             const [job] = await $win.cvat.jobs.get({ jobID });
+            // start every test from an empty job: clear({ reload: true }) only reloads from the
+            // server, the objects of the previous test have to be removed and saved
             await job.annotations.clear({ reload: true });
+            await job.annotations.clear();
+            await job.annotations.save();
             const [label] = job.labels;
             const sublabel = (name) => label.structure.sublabels.find((_label) => _label.name === name);
             const shapes = PEOPLE_X.map((x) => ({
@@ -61,6 +65,8 @@ context('Keypoint box selection', { scrollBehavior: false }, () => {
                 type: 'skeleton',
                 label_id: label.id,
                 points: [],
+                // a bbox with a margin around the keypoints, so no keypoint sits under a bbox handle
+                bbox: [x - 60, KEYPOINT_Y.head - 40, x + 60, KEYPOINT_Y.ankle + 40],
                 occluded: false,
                 outside: false,
                 source: 'manual',
@@ -124,7 +130,8 @@ context('Keypoint box selection', { scrollBehavior: false }, () => {
             const origin = $container[0].getBoundingClientRect();
             const rel = (point) => [point.x - origin.x, point.y - origin.y];
             cy.get('#cvat_canvas_content').trigger('mousedown', ...rel(from), { button: 0, shiftKey: true });
-            cy.get('#cvat_canvas_content').trigger('mousemove', ...rel(to), { shiftKey: true });
+            // buttons: 1 - the left button is still held (a box gesture ends on a move without it)
+            cy.get('#cvat_canvas_content').trigger('mousemove', ...rel(to), { buttons: 1, shiftKey: true });
             cy.get('#cvat_canvas_content').trigger('mouseup', ...rel(to), { button: 0, shiftKey: true });
         });
     }
@@ -145,9 +152,11 @@ context('Keypoint box selection', { scrollBehavior: false }, () => {
         cy.get('.cvat_canvas_shape_activated').should('exist');
         const at = (x, y) => ({ clientX: x, clientY: y });
         cy.wrap($element).trigger('mousedown', { button: 0, which: 1, ...at(start.x, start.y) });
-        cy.wrap($element).trigger('mousemove', { buttons: 1, ...at(start.x + dx / 2, start.y + dy / 2) });
-        cy.wrap($element).trigger('mousemove', { buttons: 1, ...at(start.x + dx, start.y + dy) });
-        cy.wrap($element).trigger('mouseup', { button: 0, ...at(start.x + dx, start.y + dy) });
+        // once the drag runs, the moving keypoint may pass under other elements (e.g. a bbox handle);
+        // svg.draggable listens on the window, so the hit target of the moves does not matter
+        cy.wrap($element).trigger('mousemove', { buttons: 1, force: true, ...at(start.x + dx / 2, start.y + dy / 2) });
+        cy.wrap($element).trigger('mousemove', { buttons: 1, force: true, ...at(start.x + dx, start.y + dy) });
+        cy.wrap($element).trigger('mouseup', { button: 0, force: true, ...at(start.x + dx, start.y + dy) });
     }
 
     function ankleYs() {
@@ -186,7 +195,7 @@ context('Keypoint box selection', { scrollBehavior: false }, () => {
                 const origin = $container[0].getBoundingClientRect();
                 const [x, y] = [from.x - origin.x, from.y - origin.y];
                 cy.get('#cvat_canvas_content').trigger('mousedown', x - 20, y - 20, { button: 0, shiftKey: true });
-                cy.get('#cvat_canvas_content').trigger('mousemove', x + 20, y + 20, { shiftKey: true });
+                cy.get('#cvat_canvas_content').trigger('mousemove', x + 20, y + 20, { buttons: 1, shiftKey: true });
             });
             cy.get('.cvat_canvas_multiselect_box').should('exist');
             cy.get('body').trigger('keydown', { code: 'Escape', key: 'Escape' });

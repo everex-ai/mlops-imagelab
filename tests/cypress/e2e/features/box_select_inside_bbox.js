@@ -44,7 +44,11 @@ context('Box selection started inside objects', { scrollBehavior: false }, () =>
     function createObjects() {
         cy.window().then(async ($win) => {
             const [job] = await $win.cvat.jobs.get({ jobID });
+            // start every test from an empty job: clear({ reload: true }) only reloads from the
+            // server, the objects of the previous test have to be removed and saved
             await job.annotations.clear({ reload: true });
+            await job.annotations.clear();
+            await job.annotations.save();
             const skeletonLabel = job.labels.find((label) => label.name === 'person');
             const boxLabel = job.labels.find((label) => label.name === 'box');
             const common = {
@@ -93,19 +97,28 @@ context('Box selection started inside objects', { scrollBehavior: false }, () =>
         return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
     }
 
-    // Shift press on `selector` at its center, moves by the given screen offsets, release at the last one
+    // Shift press at the center of `selector`, moves by the given screen offsets, release at the last one.
+    // Events go to the element the browser would hit at that point (an inactive skeleton's wrapping rect
+    // is `visibility: hidden`, a box being drawn covers what is under it), as with a real mouse.
     function shiftGesture(selector, moves) {
         cy.get(selector).then(($element) => {
             const start = centerOf($element[0]);
             const at = ([dx, dy]) => ({ clientX: start.x + dx, clientY: start.y + dy });
             const last = moves.length ? moves[moves.length - 1] : [0, 0];
-            cy.get(selector).trigger('mousedown', {
-                button: 0, which: 1, shiftKey: true, ...at([0, 0]),
+            const fire = (type, offset, options) => cy.document().then((doc) => {
+                const { clientX, clientY } = at(offset);
+                const target = doc.elementFromPoint(clientX, clientY);
+                cy.wrap(target).trigger(type, {
+                    eventConstructor: 'MouseEvent', force: true, shiftKey: true, ...at(offset), ...options,
+                });
             });
-            moves.forEach((move) => {
-                cy.get(selector).trigger('mousemove', { buttons: 1, shiftKey: true, ...at(move) });
-            });
-            cy.get(selector).trigger('mouseup', { button: 0, shiftKey: true, ...at(last) });
+            // the pointer arrives first, before Shift is held: hovering a person's bbox activates it, as
+            // with a real mouse before any press (a Shift move does not change the active object)
+            cy.get('#cvat_canvas_content').trigger('mousemove', at([0, 0]));
+            cy.get('.cvat_canvas_shape_skeleton').should('have.class', 'cvat_canvas_shape_activated');
+            fire('mousedown', [0, 0], { button: 0, which: 1 });
+            moves.forEach((move) => fire('mousemove', move, { buttons: 1 }));
+            fire('mouseup', last, { button: 0 });
         });
     }
 
@@ -149,8 +162,9 @@ context('Box selection started inside objects', { scrollBehavior: false }, () =>
                     buttons: 1, shiftKey: true, clientX: start.x + 40, clientY: start.y + 40,
                 });
                 cy.get('.cvat_canvas_multiselect_box').should('exist');
-                cy.get(rectangle).trigger('mouseup', {
-                    button: 0, shiftKey: true, clientX: start.x + 40, clientY: start.y + 40,
+                // the box being drawn now covers the rectangle under the pointer
+                cy.get('.cvat_canvas_multiselect_box').trigger('mouseup', {
+                    button: 0, shiftKey: true, clientX: start.x + 40, clientY: start.y + 40, force: true,
                 });
             });
             cy.get('.cvat_canvas_multiselect_box').should('not.exist');
@@ -159,7 +173,7 @@ context('Box selection started inside objects', { scrollBehavior: false }, () =>
         });
     });
 
-    it('Shift+click inside an inactive skeleton bbox toggles the person (AE5)', () => {
+    it('Shift+click inside a skeleton bbox that was not active before toggles the person (AE5)', () => {
         const wrappingRect = '.cvat_canvas_skeleton_wrapping_rect';
         shiftGesture(wrappingRect, [[3, 0]]);
         cy.get('.cvat_canvas_shape_skeleton').should('have.class', 'cvat_canvas_shape_multiselected');
@@ -177,7 +191,10 @@ context('Box selection started inside objects', { scrollBehavior: false }, () =>
 
     it('Shift+drag inside an active skeleton bbox does not move the person (AE1)', () => {
         const wrappingRect = '.cvat_canvas_skeleton_wrapping_rect';
-        cy.get(wrappingRect).trigger('mousemove');
+        cy.get(wrappingRect).then(($rect) => {
+            const center = centerOf($rect[0]);
+            cy.get('#cvat_canvas_content').trigger('mousemove', { clientX: center.x, clientY: center.y });
+        });
         cy.get('.cvat_canvas_shape_skeleton').should('have.class', 'cvat_canvas_shape_activated');
         geometryOf(wrappingRect).then((before) => {
             shiftGesture(wrappingRect, [[20, 20], [60, 60]]);
@@ -190,10 +207,10 @@ context('Box selection started inside objects', { scrollBehavior: false }, () =>
         cy.get(wrappingRect).then(($rect) => {
             const start = centerOf($rect[0]);
             cy.get(wrappingRect).trigger('mousedown', {
-                button: 0, which: 1, shiftKey: true, clientX: start.x, clientY: start.y,
+                button: 0, which: 1, shiftKey: true, clientX: start.x, clientY: start.y, force: true,
             });
             cy.get(wrappingRect).trigger('mousemove', {
-                buttons: 1, shiftKey: true, clientX: start.x + 30, clientY: start.y + 30,
+                buttons: 1, shiftKey: true, clientX: start.x + 30, clientY: start.y + 30, force: true,
             });
         });
         cy.get('.cvat_canvas_multiselect_box').should('exist');
