@@ -28,6 +28,30 @@ function updateActivatedStateID(newStates: any[], prevActivatedStateID: number |
         null;
 }
 
+// INNO-156 helpers for the keypoint selection (selectedElementIDs)
+function findElementParent(states: any[], elementID: number): any | null {
+    return states.find((_state: any) => (_state.elements || [])
+        .some((element: any) => element.clientID === elementID)) ?? null;
+}
+
+function isShownElement(parent: any, element: any): boolean {
+    return !parent.hidden && !parent.outside && !element.hidden && !element.outside;
+}
+
+// keeps keypoints that still exist and are shown (hidden/outside drop out)
+function filterLiveElementIDs(states: any[], elementIDs: number[]): number[] {
+    return elementIDs.filter((elementID: number) => {
+        const parent = findElementParent(states, elementID);
+        const element = parent?.elements.find((_element: any) => _element.clientID === elementID);
+        return !!element && isShownElement(parent, element);
+    });
+}
+
+function elementIDsOf(states: any[], parentID: number): number[] {
+    const parent = states.find((_state: any) => _state.clientID === parentID);
+    return (parent?.elements || []).map((element: any) => element.clientID);
+}
+
 export function labelShapeType(labelData?: Label | Partial<LabelType>): ShapeType | null {
     const labelType = labelData instanceof Label ? labelData.type : labelData;
     if (labelType) {
@@ -119,6 +143,7 @@ const defaultState: AnnotationState = {
         activatedElementID: null,
         activatedAttributeID: null,
         selectedStatesID: [],
+        selectedElementIDs: [],
         highlightedConflict: null,
         saving: {
             forceExit: false,
@@ -374,6 +399,7 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                     ...state.annotations,
                     activatedStateID: updateActivatedStateID(states, activatedStateID),
                     selectedStatesID: [],
+                    selectedElementIDs: [],
                     highlightedConflict: null,
                     states,
                     history,
@@ -676,10 +702,14 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 return state;
             }
 
-            const { selectedStatesID: currentSelectedIDs } = state.annotations;
+            const {
+                selectedStatesID: currentSelectedIDs, selectedElementIDs: currentElementIDs,
+            } = state.annotations;
             // Keep selection if there is an active selection
             // Selection is only cleared when explicitly clicking empty canvas (without Shift)
-            const keepSelection = currentSelectedIDs.length > 0;
+            // INNO-156: a keypoints-only selection must survive the hover activation
+            // that precedes every keypoint drag
+            const keepSelection = currentSelectedIDs.length > 0 || currentElementIDs.length > 0;
 
             return {
                 ...state,
@@ -689,6 +719,7 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                     activatedElementID,
                     activatedAttributeID,
                     selectedStatesID: keepSelection ? currentSelectedIDs : [],
+                    selectedElementIDs: keepSelection ? currentElementIDs : [],
                 },
             };
         }
@@ -737,6 +768,9 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                     selectedStatesID: state.annotations.selectedStatesID.filter(
                         (id: number) => id !== objectState.clientID,
                     ),
+                    selectedElementIDs: state.annotations.selectedElementIDs.filter(
+                        (id: number) => !elementIDsOf(state.annotations.states, objectState.clientID).includes(id),
+                    ),
                     states: state.annotations.states.filter(
                         (_objectState: any) => _objectState.clientID !== objectState.clientID,
                     ),
@@ -767,32 +801,91 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
             };
         }
         case AnnotationActionTypes.SELECT_OBJECTS: {
-            const { stateIDs } = action.payload;
+            const { stateIDs, elementIDs } = action.payload;
+            // a person selected as a whole absorbs its keypoint entries
+            const absorbed = new Set(stateIDs.flatMap((id: number) => elementIDsOf(state.annotations.states, id)));
             return {
                 ...state,
                 annotations: {
                     ...state.annotations,
                     selectedStatesID: stateIDs,
+                    selectedElementIDs: (elementIDs || []).filter((id: number) => !absorbed.has(id)),
                 },
             };
         }
         case AnnotationActionTypes.TOGGLE_OBJECT_SELECTION: {
             const { stateID } = action.payload;
-            const { selectedStatesID, activatedStateID } = state.annotations;
+            const {
+                selectedStatesID, selectedElementIDs, activatedStateID, states,
+            } = state.annotations;
             // On first toggle, include the currently activated object in selection
             let currentSelected = [...selectedStatesID];
-            if (currentSelected.length === 0 && activatedStateID !== null) {
+            if (currentSelected.length === 0 && selectedElementIDs.length === 0 && activatedStateID !== null) {
                 currentSelected = [activatedStateID];
             }
-            const index = currentSelected.indexOf(stateID);
-            const newSelected = index >= 0 ?
-                currentSelected.filter((id: number) => id !== stateID) :
-                [...currentSelected, stateID];
+
+            // INNO-156: the person's keypoint entries never stay next to the person itself
+            const ownElementIDs = elementIDsOf(states, stateID);
+            const restElementIDs = selectedElementIDs.filter((id: number) => !ownElementIDs.includes(id));
+            const parent = states.find((_state: any) => _state.clientID === stateID);
+            const shownElementIDs = (parent?.elements || [])
+                .filter((element: any) => isShownElement(parent, element))
+                .map((element: any) => element.clientID);
+            const allShownSelected = shownElementIDs.length > 0 &&
+                shownElementIDs.every((id: number) => selectedElementIDs.includes(id));
+
+            let newSelected: number[];
+            if (currentSelected.includes(stateID)) {
+                newSelected = currentSelected.filter((id: number) => id !== stateID);
+            } else if (allShownSelected) {
+                // every shown keypoint is selected = the person is selected: deselect it
+                newSelected = currentSelected;
+            } else {
+                newSelected = [...currentSelected, stateID];
+            }
+
             return {
                 ...state,
                 annotations: {
                     ...state.annotations,
                     selectedStatesID: newSelected,
+                    selectedElementIDs: restElementIDs,
+                },
+            };
+        }
+        case AnnotationActionTypes.TOGGLE_ELEMENT_SELECTION: {
+            const { elementID } = action.payload;
+            const { selectedStatesID, selectedElementIDs, states } = state.annotations;
+            const parent = findElementParent(states, elementID);
+            if (!parent) return state;
+
+            if (selectedStatesID.includes(parent.clientID)) {
+                // INNO-156 R5: removing a keypoint from a person selected as a whole
+                // turns it into "its other shown keypoints are selected"
+                const others = parent.elements
+                    .filter((element: any) => element.clientID !== elementID && isShownElement(parent, element))
+                    .map((element: any) => element.clientID);
+                return {
+                    ...state,
+                    annotations: {
+                        ...state.annotations,
+                        selectedStatesID: selectedStatesID.filter((id: number) => id !== parent.clientID),
+                        selectedElementIDs: [...new Set([...selectedElementIDs, ...others])],
+                    },
+                };
+            }
+
+            const element = parent.elements.find((_element: any) => _element.clientID === elementID);
+            const selected = selectedElementIDs.includes(elementID);
+            if (!selected && !isShownElement(parent, element)) return state;
+
+            return {
+                ...state,
+                annotations: {
+                    ...state.annotations,
+                    selectedElementIDs: selected ?
+                        selectedElementIDs.filter((id: number) => id !== elementID) :
+                        [...selectedElementIDs, elementID],
                 },
             };
         }
@@ -820,6 +913,7 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                     history,
                     activatedStateID: null,
                     selectedStatesID: [],
+                    selectedElementIDs: [],
                     states: state.annotations.states.filter(
                         (_objectState: any) => !removedIDs.has(_objectState.clientID),
                     ),
@@ -1087,6 +1181,7 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                     ...state.annotations,
                     activatedStateID: updateActivatedStateID(states, activatedStateID),
                     selectedStatesID: preservedSelectedIDs,
+                    selectedElementIDs: filterLiveElementIDs(states, state.annotations.selectedElementIDs),
                     states,
                     history,
                     initialized: true,
@@ -1215,6 +1310,10 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                         activatedStateID : null,
                     activatedAttributeID: null,
                     selectedStatesID: selectedStatesID.filter((id) => keptIDs.has(id)),
+                    selectedElementIDs: state.annotations.selectedElementIDs.filter((id) => {
+                        const parent = findElementParent(states, id);
+                        return !!parent && keptIDs.has(parent.clientID);
+                    }),
                 },
                 canvas: {
                     ...state.canvas,
