@@ -26,7 +26,7 @@ import { ZoomHandler, ZoomHandlerImpl } from './zoomHandler';
 import { InteractionHandler, InteractionHandlerImpl } from './interactionHandler';
 import { AutoborderHandler, AutoborderHandlerImpl } from './autoborderHandler';
 import consts from './consts';
-import { GroupDragHost, GroupDragSession } from './groupDrag';
+import { DragStartSnapshot, GroupDragHost, GroupDragSession } from './groupDrag';
 import {
     translateToSVG, translateFromSVG, translateToCanvas, translateFromCanvas,
     pointsToNumberArray, parsePoints, displayShapeSize, scalarProduct,
@@ -36,6 +36,10 @@ import {
     composeShapeDimensions, getRoundedRotation,
     clamp,
 } from './shared';
+import {
+    Bounds, Extent, clampGroupDelta, clampEdges, unwrapAngle, clampRotationAngle, boundsFromGeometry,
+    snapNearBorder, clampMovedPoint,
+} from './imageBounds';
 import {
     CanvasModel, Geometry, UpdateReasons, FrameZoom, ActiveElement,
     DrawData, MergeData, SplitData, Mode, Size, Configuration,
@@ -167,6 +171,14 @@ export class CanvasViewImpl implements CanvasView, Listener {
     private translateFromCanvas(points: number[]): number[] {
         const { offset } = this.controller.geometry;
         return translateFromCanvas(offset, points);
+    }
+
+    // INNO-158: edits clamped to the border compute "start + (border - start)",
+    // which can land a float ulp outside the image (e.g. -4.5e-7). Snap such
+    // coordinates onto the border so no out-of-image value is emitted.
+    private translateFromCanvasSnapped(points: number[]): number[] {
+        const { image } = this.controller.geometry;
+        return snapNearBorder(this.translateFromCanvas(points), image.width, image.height);
     }
 
     private translatePointsFromRotatedShape(
@@ -1193,32 +1205,62 @@ export class CanvasViewImpl implements CanvasView, Listener {
         }
     }
 
+    // Snapshot of a companion shape at multi-drag start. Companions are placed
+    // at "start position + clamped delta" on every tick (INNO-158), so they
+    // move in the same tick and by the same delta as the primary shape.
+    // skipLockedKeypoints: the primary skeleton drag does not move locked
+    // keypoints (companion moves do).
+    private captureDragStart(
+        selectedShape: SVG.Shape,
+        selectedState: DrawnState,
+        skipLockedKeypoints = false,
+    ): DragStartSnapshot {
+        const bbox = selectedShape.bbox();
+        const snapshot: DragStartSnapshot = { x: bbox.x, y: bbox.y };
+        if (selectedState.shapeType === 'skeleton') {
+            const wrapRect = (selectedShape as any).children().find(
+                (child: SVG.Element) => child.type === 'rect',
+            );
+            if (wrapRect) {
+                snapshot.xtl = +wrapRect.attr('data-xtl');
+                snapshot.ytl = +wrapRect.attr('data-ytl');
+            }
+            snapshot.circles = new Map();
+            for (const child of (selectedShape as SVG.G).children()) {
+                if (child.type === 'circle') {
+                    const childClientID = child.attr('data-client-id');
+                    const elementState = (selectedState.elements || [])
+                        .find((el: any) => el.clientID === childClientID);
+                    if (skipLockedKeypoints && (!elementState || elementState.lock)) continue;
+                    snapshot.circles.set(child, {
+                        cx: child.cx(), cy: child.cy(), outside: !!elementState?.outside,
+                    });
+                }
+            }
+        } else if (['polygon', 'polyline', 'points'].includes(selectedState.shapeType)) {
+            const plotPoints = (selectedShape as SVG.PolyLine).array().value as unknown as number[][];
+            snapshot.points = plotPoints.map((pt: number[]) => [pt[0], pt[1]]);
+        } else if (selectedState.shapeType === 'cuboid') {
+            snapshot.cuboidPoints = parsePoints(selectedShape.attr('points'));
+        }
+        return snapshot;
+    }
+
     private moveShapeVisually(
         selectedShape: SVG.Shape,
         selectedState: DrawnState,
-        startPos: { cx: number; cy: number },
+        start: DragStartSnapshot,
         dx: number,
         dy: number,
     ): void {
-        const targetCx = startPos.cx + dx;
-        const targetCy = startPos.cy + dy;
-
         if (selectedState.shapeType === 'skeleton') {
             // For skeletons, move the wrapping rect and reposition children
             const wrapRect = (selectedShape as any).children().find(
                 (child: SVG.Element) => child.type === 'rect',
             );
-            if (wrapRect) {
-                const bbox = selectedShape.bbox();
-                const currentCx = bbox.cx;
-                const currentCy = bbox.cy;
-                const childDx = targetCx - currentCx;
-                const childDy = targetCy - currentCy;
-
-                const prevXtl = +wrapRect.attr('data-xtl');
-                const prevYtl = +wrapRect.attr('data-ytl');
-                const newXtl = prevXtl + childDx;
-                const newYtl = prevYtl + childDy;
+            if (wrapRect && start.xtl !== undefined) {
+                const newXtl = start.xtl + dx;
+                const newYtl = start.ytl + dy;
 
                 wrapRect.move(newXtl, newYtl);
                 wrapRect.attr('data-xtl', newXtl);
@@ -1226,11 +1268,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
                 wrapRect.attr('data-xbr', newXtl + wrapRect.width());
                 wrapRect.attr('data-ybr', newYtl + wrapRect.height());
 
-                for (const child of (selectedShape as SVG.G).children()) {
-                    if (child.type === 'circle') {
-                        child.center(child.cx() + childDx, child.cy() + childDy);
-                    }
-                }
+                this.moveSkeletonCircles(start.circles, dx, dy);
 
                 const skeletonSVGTemplate = makeSVGFromTemplate(
                     this.controller.objects.find(
@@ -1242,30 +1280,104 @@ export class CanvasViewImpl implements CanvasView, Listener {
                 }
             }
         } else if (selectedState.shapeType === 'mask') {
-            const bbox = selectedShape.bbox();
-            const newX = bbox.x + (targetCx - bbox.cx);
-            const newY = bbox.y + (targetCy - bbox.cy);
-            selectedShape.move(Math.trunc(newX), Math.trunc(newY));
+            selectedShape.move(Math.trunc(start.x + dx), Math.trunc(start.y + dy));
         } else if (['rectangle', 'ellipse'].includes(selectedState.shapeType)) {
-            const bbox = selectedShape.bbox();
-            const newX = bbox.x + (targetCx - bbox.cx);
-            const newY = bbox.y + (targetCy - bbox.cy);
-            selectedShape.move(newX, newY);
-        } else if (['polygon', 'polyline', 'points'].includes(selectedState.shapeType)) {
-            const bbox = selectedShape.bbox();
-            const shapeDx = targetCx - bbox.cx;
-            const shapeDy = targetCy - bbox.cy;
-            const plotPoints = (selectedShape as SVG.PolyLine).array().value as unknown as number[][];
-            const movedPoints = plotPoints.map((pt: number[]) => [pt[0] + shapeDx, pt[1] + shapeDy]);
+            selectedShape.move(start.x + dx, start.y + dy);
+        } else if (['polygon', 'polyline', 'points'].includes(selectedState.shapeType) && start.points) {
+            const movedPoints = start.points.map((pt: number[]) => [pt[0] + dx, pt[1] + dy]);
             (selectedShape as SVG.PolyLine).plot(movedPoints as any);
-        } else if (selectedState.shapeType === 'cuboid') {
-            const currentPoints = parsePoints(selectedShape.attr('points'));
-            const bbox = selectedShape.bbox();
-            const shapeDx = targetCx - bbox.cx;
-            const shapeDy = targetCy - bbox.cy;
-            const movedPoints = currentPoints.map((pt) => `${pt.x + shapeDx},${pt.y + shapeDy}`).join(' ');
+        } else if (selectedState.shapeType === 'cuboid' && start.cuboidPoints) {
+            const movedPoints = start.cuboidPoints.map((pt) => `${pt.x + dx},${pt.y + dy}`).join(' ');
             selectedShape.attr('points', movedPoints);
         }
+    }
+
+    // INNO-158: move skeleton keypoint circles to "start + delta". `outside`
+    // keypoints do not limit the group delta; they are clamped one by one so
+    // they slide along the border instead of leaving the image.
+    private moveSkeletonCircles(
+        circles: Map<SVG.Element, { cx: number; cy: number; outside: boolean }>,
+        dx: number,
+        dy: number,
+    ): void {
+        const bounds = this.imageBounds();
+        for (const [circle, center] of circles) {
+            if (center.outside) {
+                circle.center(...clampMovedPoint(center.cx, center.cy, center.cx + dx, center.cy + dy, bounds));
+            } else {
+                circle.center(center.cx + dx, center.cy + dy);
+            }
+        }
+    }
+
+    // INNO-158: the current image in canvas coordinates (borders inclusive,
+    // same convention as cvat-core fitPoints).
+    private imageBounds(): Bounds {
+        return boundsFromGeometry(this.geometry);
+    }
+
+    // INNO-158: the extent (canvas coordinates) a drag of this object moves and
+    // that has to stay inside the image, or null for shapes that are not
+    // clamped (rotated rectangles, polygons, masks, ...), which then do not
+    // take part in the stop decision of a group.
+    // includeLockedKeypoints: whether locked skeleton keypoints move along on
+    // the calling path (primary skeleton drag skips them, companion moves and
+    // rotation do not).
+    private collectClampExtent(state: any, shape: SVG.Shape, includeLockedKeypoints: boolean): Extent | null {
+        if (!state || !shape) return null;
+
+        if (state.shapeType === 'skeleton') {
+            const extent: Extent = {
+                xmin: Number.POSITIVE_INFINITY,
+                ymin: Number.POSITIVE_INFINITY,
+                xmax: Number.NEGATIVE_INFINITY,
+                ymax: Number.NEGATIVE_INFINITY,
+            };
+            const include = (x: number, y: number): void => {
+                extent.xmin = Math.min(extent.xmin, x);
+                extent.ymin = Math.min(extent.ymin, y);
+                extent.xmax = Math.max(extent.xmax, x);
+                extent.ymax = Math.max(extent.ymax, y);
+            };
+
+            for (const child of (shape as SVG.G).children()) {
+                if (child.type === 'rect') {
+                    include(+child.attr('data-xtl'), +child.attr('data-ytl'));
+                    include(+child.attr('data-xbr'), +child.attr('data-ybr'));
+                } else if (child.type === 'circle') {
+                    const childClientID = child.attr('data-client-id');
+                    const elementState = (state.elements || [])
+                        .find((el: any) => el.clientID === childClientID);
+                    // outside keypoints carry no meaningful position (COCO
+                    // invisible keypoints are often (0, 0)); they must not
+                    // block the drag
+                    if (!elementState || elementState.outside) continue;
+                    if (elementState.lock && !includeLockedKeypoints) continue;
+                    include(child.cx(), child.cy());
+                }
+            }
+
+            return Number.isFinite(extent.xmin) && Number.isFinite(extent.ymin) ? extent : null;
+        }
+
+        if (state.shapeType === 'rectangle' && !state.rotation) {
+            const x = shape.x();
+            const y = shape.y();
+            return {
+                xmin: x, ymin: y, xmax: x + shape.width(), ymax: y + shape.height(),
+            };
+        }
+
+        if (Number.isInteger(state.parentID) && shape.type === 'circle') {
+            // a single skeleton keypoint: zero-size extent at its center
+            const cx = (shape as SVG.Circle).cx();
+            const cy = (shape as SVG.Circle).cy();
+            return {
+                xmin: cx, ymin: cy, xmax: cx, ymax: cy,
+            };
+        }
+
+        return null;
     }
 
     private collectShapePoints(objState: any, svgShape: SVG.Shape): number[] {
@@ -1288,7 +1400,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
         if (rotation) {
             points = this.translatePointsFromRotatedShape(svgShape, points);
         }
-        return this.translateFromCanvas(points);
+        return this.translateFromCanvasSnapped(points);
     }
 
     // Collect a skeleton's keypoint coordinates (image space) in element
@@ -1302,7 +1414,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
             const elementShape = svgGroup.children()
                 .find((child: SVG.Shape) => child.id() === `cvat_canvas_shape_${element.clientID}`);
             if (elementShape) {
-                points.push(...this.translateFromCanvas(readPointsFromShape(elementShape)));
+                points.push(...this.translateFromCanvasSnapped(readPointsFromShape(elementShape)));
             } else {
                 points.push(...element.points);
             }
@@ -1318,8 +1430,8 @@ export class CanvasViewImpl implements CanvasView, Listener {
         const ytl = +wrapRect.attr('data-ytl');
         const xbr = +wrapRect.attr('data-xbr');
         const ybr = +wrapRect.attr('data-ybr');
-        const origin = this.translateFromCanvas([xtl, ytl]);
-        const far = this.translateFromCanvas([xbr, ybr]);
+        const origin = this.translateFromCanvasSnapped([xtl, ytl]);
+        const far = this.translateFromCanvasSnapped([xbr, ybr]);
         return [origin[0], origin[1], far[0], far[1]];
     }
 
@@ -1332,6 +1444,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
             selectedClientIDs: () => this.selectedClientIDs,
             selectedElementClientIDs: () => this.selectedElementClientIDs,
             moveShapeVisually: this.moveShapeVisually.bind(this),
+            captureDragStart: this.captureDragStart.bind(this),
             collectShapePoints: this.collectShapePoints.bind(this),
             collectSkeletonBbox: this.collectSkeletonBbox.bind(this),
             redrawSkeletonEdges: (clientID: number): void => {
@@ -1367,9 +1480,32 @@ export class CanvasViewImpl implements CanvasView, Listener {
             let aborted = false;
             let skeletonSVGTemplate: SVG.G = null;
             shape.addClass('cvat_canvas_shape_draggable');
-            (draggableInstance as any).draggable({
-                ...(state.shapeType === 'mask' ? { snapToGrid: 1 } : {}),
-            });
+
+            // INNO-158: image-bounds clamp. Every tick the raw delta (cursor -
+            // grab point, as svg.draggable computes it) is clamped once with
+            // clampGroupDelta over the start extents of everything that moves;
+            // the primary shape, its keypoints and all group members are then
+            // placed at "start + clamped delta" in the same tick.
+            let clampExtents: Extent[] = [];
+            let clampBounds: Bounds = null;
+            let clampedDelta = { dx: 0, dy: 0 };
+            let skeletonStart: DragStartSnapshot = null;
+
+            if (state.shapeType === 'cuboid') {
+                // the cuboid drives its own face/edge dragging; keep the
+                // library default (not clamped, see plan scope boundaries)
+                (draggableInstance as any).draggable({});
+            } else {
+                (draggableInstance as any).draggable(function constraint(x: number, y: number) {
+                    const handler = this.remember('_draggable');
+                    const startBox = handler?.startPoints?.box;
+                    if (!startBox) return { x, y };
+                    return {
+                        x: startBox.x + clampedDelta.dx,
+                        y: startBox.y + clampedDelta.dy,
+                    };
+                });
+            }
 
             // INNO-157: Shift+drag on an object body starts a box selection
             // instead of moving the object — cancelling svg.draggable here lets
@@ -1394,31 +1530,52 @@ export class CanvasViewImpl implements CanvasView, Listener {
                 const { cx, cy } = shape.bbox();
                 startCenter = { x: cx, y: cy };
                 start = Date.now();
+                clampedDelta = { dx: 0, dy: 0 };
+                clampBounds = this.imageBounds();
+                clampExtents = [];
+                const primaryExtent = this.collectClampExtent(state, shape, false);
+                if (primaryExtent) clampExtents.push(primaryExtent);
+
+                skeletonStart = state.shapeType === 'skeleton' ? this.captureDragStart(shape, state, true) : null;
+
                 groupDrag = GroupDragSession.begin(
                     this.groupDragHost, state, shape, !!(e.detail as any)?.event?.shiftKey,
                 );
             }).on('dragmove', (e: CustomEvent): void => {
-                onDragMove();
-                if (state.shapeType === 'skeleton' && e.target) {
-                    const { instance } = e.target as any;
-                    const [x, y] = [instance.x(), instance.y()];
-                    const prevXtl = +draggableInstance.attr('data-xtl');
-                    const prevYtl = +draggableInstance.attr('data-ytl');
-
-                    for (const child of (shape as SVG.G).children()) {
-                        if (child.type === 'circle') {
-                            const childClientID = child.attr('data-client-id');
-                            if (state.elements.find((el: any) => el.clientID === childClientID).lock || false) {
-                                continue;
-                            }
-                            child.center(child.cx() - prevXtl + x, child.cy() - prevYtl + y);
-                        }
+                // dragmove fires before the library moves the element; compute
+                // the clamped delta here so the constraint function, the
+                // keypoints and the companions all use the same value
+                const { handler, p } = (e.detail || {}) as any;
+                if (handler?.startPoints && p) {
+                    const rawDx = p.x - handler.startPoints.point.x;
+                    const rawDy = p.y - handler.startPoints.point.y;
+                    clampedDelta = clampGroupDelta(clampExtents, rawDx, rawDy, clampBounds);
+                    if (state.shapeType === 'mask') {
+                        // integer grid, as snapToGrid: 1 did; snap towards the
+                        // start position so the snapped delta never leaves the
+                        // clamp interval (companions must not overshoot a wall)
+                        const { box } = handler.startPoints;
+                        const snap = (origin: number, delta: number): number => (
+                            (delta < 0 ? Math.ceil(origin + delta) : Math.floor(origin + delta)) - origin
+                        );
+                        clampedDelta = {
+                            dx: snap(box.x, clampedDelta.dx),
+                            dy: snap(box.y, clampedDelta.dy),
+                        };
                     }
+                }
 
+                onDragMove();
+                const { dx, dy } = clampedDelta;
+                if (state.shapeType === 'skeleton' && skeletonStart?.xtl !== undefined) {
+                    this.moveSkeletonCircles(skeletonStart.circles, dx, dy);
+
+                    const x = skeletonStart.xtl + dx;
+                    const y = skeletonStart.ytl + dy;
                     draggableInstance.attr('data-xtl', x);
                     draggableInstance.attr('data-ytl', y);
-                    draggableInstance.attr('data-xbr', x + instance.width());
-                    draggableInstance.attr('data-ybr', y + instance.height());
+                    draggableInstance.attr('data-xbr', x + draggableInstance.width());
+                    draggableInstance.attr('data-ybr', y + draggableInstance.height());
 
                     skeletonSVGTemplate = skeletonSVGTemplate ?? makeSVGFromTemplate(state.label.structure.svg);
                     setupSkeletonEdges(shape as SVG.G, skeletonSVGTemplate);
@@ -1494,7 +1651,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
                             points = this.translatePointsFromRotatedShape(shape, points);
                         }
 
-                        this.onEditDone(state, this.translateFromCanvas(points));
+                        this.onEditDone(state, this.translateFromCanvasSnapped(points));
                     }
 
                     this.canvas.dispatchEvent(
@@ -1601,6 +1758,12 @@ export class CanvasViewImpl implements CanvasView, Listener {
             // transform on resizedone and must be tracked here. On mouseup
             // cvat-core bakes the angle into keypoint coordinates.
             let skeletonGestureRotation = 0;
+            // INNO-158: image-bounds clamp state of the ongoing skeleton
+            // resize/rotation gesture, captured on resizestart
+            let gestureBounds: Bounds = null;
+            let gestureStartBox: Extent = null;
+            let gestureStartKeypoints: number[] = [];
+            let gestureUnwrappedRotation = 0;
 
             // make attaching idempotent — re-activation must never stack a
             // second set of handlers on the same element
@@ -1619,6 +1782,30 @@ export class CanvasViewImpl implements CanvasView, Listener {
                     resized = false;
                     start = Date.now();
                     skeletonGestureRotation = 0;
+                    gestureUnwrappedRotation = 0;
+                    if (state.shapeType === 'skeleton') {
+                        gestureBounds = this.imageBounds();
+                        gestureStartBox = {
+                            xmin: +resizableInstance.attr('data-xtl'),
+                            ymin: +resizableInstance.attr('data-ytl'),
+                            xmax: +resizableInstance.attr('data-xbr'),
+                            ymax: +resizableInstance.attr('data-ybr'),
+                        };
+                        // cvat-core bakes the rotation into every element, so
+                        // locked ones limit it too; outside ones carry no
+                        // meaningful position and are ignored
+                        gestureStartKeypoints = [];
+                        for (const child of (shape as SVG.G).children()) {
+                            if (child.type === 'circle') {
+                                const childClientID = child.attr('data-client-id');
+                                const elementState = state.elements
+                                    .find((el: any) => el.clientID === childClientID);
+                                if (elementState && !elementState.outside) {
+                                    gestureStartKeypoints.push(child.cx(), child.cy());
+                                }
+                            }
+                        }
+                    }
                     this.resizableShape = shape;
                 })
                 .on('resizing', (e: CustomEvent): void => {
@@ -1634,7 +1821,6 @@ export class CanvasViewImpl implements CanvasView, Listener {
                         // transient visual rotation around the bbox center
                         // below instead.
                         const { rotation } = resizableInstance.transform();
-                        skeletonGestureRotation = rotation;
                         if (rotation) {
                             resizableInstance.rotate(0);
                         }
@@ -1642,6 +1828,41 @@ export class CanvasViewImpl implements CanvasView, Listener {
                         let [x, y] = [instance.x(), instance.y()];
                         let width = instance.width();
                         let height = instance.height();
+                        let geometryAdjusted = false;
+
+                        if (gestureBounds && gestureStartBox) {
+                            // INNO-158: rotation stops at the last whole degree
+                            // at which every keypoint stays inside the image
+                            // (start-relative: an already-outside keypoint
+                            // only may not go further out). The raw angle is
+                            // unwrapped first, svg.js reports (-270, 90].
+                            gestureUnwrappedRotation = unwrapAngle(rotation, gestureUnwrappedRotation);
+                            skeletonGestureRotation = clampRotationAngle(
+                                gestureStartKeypoints,
+                                (gestureStartBox.xmin + gestureStartBox.xmax) / 2,
+                                (gestureStartBox.ymin + gestureStartBox.ymax) / 2,
+                                gestureUnwrappedRotation,
+                                gestureBounds,
+                            );
+
+                            // INNO-158: bbox handles stop at the image border;
+                            // the keypoint containment below still wins (R20)
+                            const clampedBox = clampEdges(gestureStartBox, {
+                                xmin: x, ymin: y, xmax: x + width, ymax: y + height,
+                            }, gestureBounds);
+                            if (
+                                clampedBox.xmin !== x || clampedBox.ymin !== y ||
+                                clampedBox.xmax !== x + width || clampedBox.ymax !== y + height
+                            ) {
+                                x = clampedBox.xmin;
+                                y = clampedBox.ymin;
+                                width = clampedBox.xmax - clampedBox.xmin;
+                                height = clampedBox.ymax - clampedBox.ymin;
+                                geometryAdjusted = true;
+                            }
+                        } else {
+                            skeletonGestureRotation = rotation;
+                        }
 
                         // Clamp: bbox must still contain every visible/occluded
                         // keypoint. outside=true keypoints are excluded because
@@ -1683,6 +1904,9 @@ export class CanvasViewImpl implements CanvasView, Listener {
                             if (y + height < kpMaxY) {
                                 height = kpMaxY - y;
                             }
+                            geometryAdjusted = true;
+                        }
+                        if (geometryAdjusted) {
                             // Apply the clamped geometry back to the SVG rect.
                             (instance as any).move(x, y);
                             (instance as any).size(width, height);
@@ -1717,7 +1941,21 @@ export class CanvasViewImpl implements CanvasView, Listener {
                         const pivotY = y + height / 2;
                         for (const child of (shape as SVG.G).children()) {
                             if (child.type === 'circle' || child.type === 'line') {
-                                if (skeletonGestureRotation) {
+                                const isOutsideKeypoint = child.type === 'circle' &&
+                                    !!state.elements.find(
+                                        (el: any) => el.clientID === child.attr('data-client-id'),
+                                    )?.outside;
+                                if (skeletonGestureRotation && isOutsideKeypoint && gestureBounds) {
+                                    // INNO-158: an outside keypoint does not
+                                    // limit the angle but is clamped into the
+                                    // image on its own (cvat-core does the same)
+                                    const [rx, ry] = rotate2DPoints(
+                                        pivotX, pivotY, skeletonGestureRotation, [child.cx(), child.cy()],
+                                    );
+                                    const [px, py] = clampMovedPoint(child.cx(), child.cy(), rx, ry, gestureBounds);
+                                    child.untransform();
+                                    (child as any).transform({ x: px - child.cx(), y: py - child.cy() });
+                                } else if (skeletonGestureRotation) {
                                     child.rotate(skeletonGestureRotation, pivotX, pivotY);
                                 } else {
                                     child.untransform();

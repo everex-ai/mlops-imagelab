@@ -19,6 +19,18 @@ export interface Point {
     y: number;
 }
 
+// Start state of a shape moved by a drag (canvasView.captureDragStart); every
+// tick the shape is placed at "start + delta" (INNO-158)
+export interface DragStartSnapshot {
+    x: number;
+    y: number;
+    points?: number[][];
+    cuboidPoints?: { x: number; y: number }[];
+    xtl?: number;
+    ytl?: number;
+    circles?: Map<SVG.Element, { cx: number; cy: number; outside: boolean }>;
+}
+
 export interface GroupDragEdit {
     state: any;
     points: number[];
@@ -33,8 +45,9 @@ export interface GroupDragHost {
     selectedClientIDs: () => number[];
     selectedElementClientIDs: () => number[];
     moveShapeVisually: (
-        shape: SVG.Shape, state: DrawnState, startPos: { cx: number; cy: number }, dx: number, dy: number,
+        shape: SVG.Shape, state: DrawnState, start: DragStartSnapshot, dx: number, dy: number,
     ) => void;
+    captureDragStart: (shape: SVG.Shape, state: DrawnState) => DragStartSnapshot;
     redrawSkeletonEdges: (clientID: number) => void;
     collectShapePoints: (objState: any, shape: SVG.Shape) => number[];
     collectSkeletonBbox: (group: SVG.G) => number[] | undefined;
@@ -70,7 +83,7 @@ interface SkeletonMember {
 interface ShapeMember {
     kind: 'shape';
     clientID: number;
-    start: { cx: number; cy: number };
+    start: DragStartSnapshot;
 }
 
 type Member = SkeletonMember | ShapeMember;
@@ -169,8 +182,9 @@ export class GroupDragSession {
 
             if (obj.shapeType !== 'skeleton') {
                 if (isPrimaryTop) continue;
-                const { cx, cy } = shape.bbox();
-                members.push({ kind: 'shape', clientID: topID, start: { cx, cy } });
+                const drawnState = host.drawnStates[topID];
+                if (!drawnState) continue;
+                members.push({ kind: 'shape', clientID: topID, start: host.captureDragStart(shape, drawnState) });
                 movesSomethingElse = true;
                 continue;
             }
@@ -281,8 +295,8 @@ export class GroupDragSession {
 
         const drawnState = host.drawnStates[this.primaryState.clientID];
         if (drawnState) {
-            const { cx, cy } = this.primaryShape.bbox();
-            host.moveShapeVisually(this.primaryShape, drawnState, { cx, cy }, cdx, cdy);
+            const current = host.captureDragStart(this.primaryShape, drawnState);
+            host.moveShapeVisually(this.primaryShape, drawnState, current, cdx, cdy);
         }
     }
 
