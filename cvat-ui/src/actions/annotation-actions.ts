@@ -1361,8 +1361,9 @@ export function updateAnnotationsAsync(statesToUpdate: any[]): ThunkAction {
 export function updateMultipleAnnotationsAsync(statesToUpdate: any[]): ThunkAction {
     return async (dispatch: ThunkDispatch): Promise<void> => {
         try {
-            const promises = statesToUpdate.map((objectState: any): Promise<any> => objectState.save());
-            await Promise.all(promises);
+            // INNO-156: one batch save = one undo/redo entry for the whole group move
+            const { jobInstance, frame } = receiveAnnotationsParameters();
+            await jobInstance.annotations.batchSave(statesToUpdate, frame);
 
             dispatch(fetchAnnotationsAsync());
         } catch (error) {
