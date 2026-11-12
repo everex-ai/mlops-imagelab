@@ -110,6 +110,14 @@ export class CanvasViewImpl implements CanvasView, Listener {
     private lastPointer: { x: number; y: number } | null = null;
     // keypoint last activated by the Shift hover (avoids re-sending it)
     private shiftHoverElementID: number | null = null;
+    // INNO-157: a Shift press on a keypoint whose person was not active yet
+    // (no Shift mousemove happened before the press). The owner is activated
+    // and the press is replayed on the keypoint once it becomes draggable.
+    private pendingKeypointPress: {
+        elementID: number;
+        clientX: number;
+        clientY: number;
+    } | null = null;
     private boxCursorFrame: number | null = null;
     private ctrlPressed: boolean;
     private innerObjectsFlags: {
@@ -1767,6 +1775,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
                             this.mode = Mode.IDLE;
                             showElementText();
                         });
+                        this.resumePendingKeypointPress(clientID, element as SVG.Element);
                     }
                 } else {
                     this.draggable(null, element);
@@ -2089,6 +2098,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
         if (code.includes('shift')) {
             this.shiftPressed = true;
             this.updateBoxSelectCursor();
+            this.activateKeypointUnderPointer();
             this.snapToAngleResize = consts.SNAP_TO_ANGLE_RESIZE_SHIFT;
             if (this.activeElement) {
                 const shape = this.svgShapes[this.activeElement.clientID];
@@ -2314,6 +2324,17 @@ export class CanvasViewImpl implements CanvasView, Listener {
         }
     }
 
+    // INNO-157: pressing Shift over a still pointer activates the keypoint
+    // under it like a Shift mousemove would (covered / inactive person)
+    private activateKeypointUnderPointer(): void {
+        if (this.mode !== Mode.IDLE || !this.lastPointer || this.shiftGesture || this.multiSelectBox) return;
+        const { x, y } = this.lastPointer;
+        const keypoint = this.findKeypointAt(window.document.elementFromPoint(x, y), x, y);
+        if (keypoint && this.activeElement.clientID !== keypoint.parentID) {
+            this.requestKeypointActivation(keypoint, x, y);
+        }
+    }
+
     // INNO-157 R17: crosshair while Shift is held over a place a box would start from
     private updateBoxSelectCursor(target?: Element | null): void {
         let ready = false;
@@ -2422,8 +2443,21 @@ export class CanvasViewImpl implements CanvasView, Listener {
                 }
 
                 if (kind === 'keypoint') {
-                    // a covered keypoint before its person got activated by
-                    // the Shift hover: neither a box nor a pan
+                    // a covered keypoint, or one of an inactive person, before
+                    // its person got activated by a Shift hover (the pointer
+                    // did not move with Shift held): neither a box nor a pan.
+                    // Activate the owner now and replay this press on the
+                    // keypoint as soon as it becomes draggable.
+                    const keypoint = this.findKeypointAt(target, event.clientX, event.clientY);
+                    if (keypoint && this.activeElement.clientID !== keypoint.parentID) {
+                        this.pendingKeypointPress = {
+                            elementID: keypoint.elementID,
+                            clientX: event.clientX,
+                            clientY: event.clientY,
+                        };
+                        window.addEventListener('mouseup', this.clearPendingKeypointPress, { once: true });
+                        this.requestKeypointActivation(keypoint, event.clientX, event.clientY);
+                    }
                     event.preventDefault();
                     return;
                 }
@@ -2451,6 +2485,53 @@ export class CanvasViewImpl implements CanvasView, Listener {
             }
         }
     };
+
+    private clearPendingKeypointPress = (): void => {
+        this.pendingKeypointPress = null;
+    };
+
+    // asks cvat-ui to activate the keypoint's person (and the keypoint), the
+    // same request a Shift mousemove over it sends
+    private requestKeypointActivation(
+        keypoint: { elementID: number; parentID: number }, clientX: number, clientY: number,
+    ): void {
+        const { offset } = this.controller.geometry;
+        const [x, y] = translateToSVG(this.content, [clientX, clientY]);
+        this.shiftHoverElementID = keypoint.elementID;
+        this.canvas.dispatchEvent(new CustomEvent('canvas.moved', {
+            bubbles: false,
+            cancelable: true,
+            detail: {
+                x: x - offset,
+                y: y - offset,
+                states: this.controller.objects,
+                shiftKey: true,
+                activatedStateID: keypoint.parentID,
+                activatedElementID: keypoint.elementID,
+            },
+        }));
+    }
+
+    // replays a pending Shift press (see onCanvasMouseDown) on the keypoint
+    // that has just become draggable, while the button is still held
+    private resumePendingKeypointPress(elementID: number, element: SVG.Element): void {
+        const pending = this.pendingKeypointPress;
+        if (!pending || pending.elementID !== elementID) return;
+        this.pendingKeypointPress = null;
+        window.removeEventListener('mouseup', this.clearPendingKeypointPress);
+        setTimeout(() => {
+            if (this.mode !== Mode.IDLE || !element.node.isConnected) return;
+            element.node.dispatchEvent(new MouseEvent('mousedown', {
+                bubbles: true,
+                cancelable: true,
+                clientX: pending.clientX,
+                clientY: pending.clientY,
+                button: 0,
+                buttons: 1,
+                shiftKey: true,
+            }));
+        });
+    }
 
     private onCanvasMouseMove = (e: MouseEvent): void => {
         this.lastPointer = { x: e.clientX, y: e.clientY };
