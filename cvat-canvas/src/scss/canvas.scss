@@ -85,6 +85,16 @@ image.cvat_canvas_shape_selection {
     stroke-dasharray: 6 3 !important;
 }
 
+.cvat_canvas_keypoint_selected {
+    // INNO-156: a keypoint selected on its own. A white ring with a blue halo,
+    // so it reads differently from hover (thicker stroke) and from a selected
+    // person (dashed outline) even in grayscale.
+    stroke: white !important;
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+    filter: drop-shadow(0 0 1.5px #40a9ff) drop-shadow(0 0 1.5px #40a9ff);
+}
+
 .cvat_canvas_selection_box {
     fill: white;
     fill-opacity: 0.1;

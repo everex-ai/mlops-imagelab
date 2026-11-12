@@ -26,6 +26,7 @@ import { ZoomHandler, ZoomHandlerImpl } from './zoomHandler';
 import { InteractionHandler, InteractionHandlerImpl } from './interactionHandler';
 import { AutoborderHandler, AutoborderHandlerImpl } from './autoborderHandler';
 import consts from './consts';
+import { GroupDragHost, GroupDragSession } from './groupDrag';
 import {
     translateToSVG, translateFromSVG, translateToCanvas, translateFromCanvas,
     pointsToNumberArray, parsePoints, displayShapeSize, scalarProduct,
@@ -90,6 +91,9 @@ export class CanvasViewImpl implements CanvasView, Listener {
     private draggableShape: SVG.Shape | null;
     private resizableShape: SVG.Shape | null;
     private selectedClientIDs: number[];
+    // INNO-156: skeleton keypoints selected individually (element clientIDs)
+    private selectedElementClientIDs: number[] = [];
+    private groupDragHost: GroupDragHost;
     private multiSelectBox: SVG.Rect | null = null;
     private multiSelectStart: { x: number; y: number } | null = null;
     private ctrlPressed: boolean;
@@ -1303,6 +1307,33 @@ export class CanvasViewImpl implements CanvasView, Listener {
         return [origin[0], origin[1], far[0], far[1]];
     }
 
+    private createGroupDragHost(): GroupDragHost {
+        const templates: Map<string, SVG.G> = new Map();
+        return {
+            svgShapes: this.svgShapes,
+            drawnStates: this.drawnStates,
+            objects: () => this.controller.objects,
+            selectedClientIDs: () => this.selectedClientIDs,
+            selectedElementClientIDs: () => this.selectedElementClientIDs,
+            moveShapeVisually: this.moveShapeVisually.bind(this),
+            resetViewPosition: this.resetViewPosition.bind(this),
+            collectShapePoints: this.collectShapePoints.bind(this),
+            collectSkeletonBbox: this.collectSkeletonBbox.bind(this),
+            redrawSkeletonEdges: (clientID: number): void => {
+                const shape = this.svgShapes[clientID];
+                const obj = this.controller.objects.find((_obj: any) => _obj.clientID === clientID);
+                const svg = obj?.label?.structure?.svg;
+                if (!shape || !svg) return;
+                let template = templates.get(svg);
+                if (!template) {
+                    template = makeSVGFromTemplate(svg);
+                    templates.set(svg, template);
+                }
+                setupSkeletonEdges(shape as SVG.G, template);
+            },
+        };
+    }
+
     private draggable(
         state: any,
         shape: SVG.Shape,
@@ -1326,29 +1357,18 @@ export class CanvasViewImpl implements CanvasView, Listener {
             });
 
             let startCenter = null;
-            // Multi-drag: store starting centers of selected shapes
-            let selectedStartData: Map<number, { cx: number; cy: number }> = new Map();
+            // INNO-156: group drag of the selected objects and keypoints (groupDrag.ts)
+            let groupDrag: GroupDragSession | null = null;
 
-            draggableInstance.on('dragstart', (): void => {
+            draggableInstance.on('dragstart', (e: CustomEvent): void => {
                 onDragStart();
                 this.draggableShape = shape;
                 const { cx, cy } = shape.bbox();
                 startCenter = { x: cx, y: cy };
                 start = Date.now();
-
-                // Record start positions of other selected shapes for multi-drag
-                selectedStartData = new Map();
-                if (this.selectedClientIDs.includes(state.clientID) && this.selectedClientIDs.length > 1) {
-                    for (const id of this.selectedClientIDs) {
-                        if (id !== state.clientID && this.svgShapes[id]) {
-                            const otherState = this.drawnStates[id];
-                            if (otherState && !otherState.pinned && !otherState.lock) {
-                                const otherBbox = this.svgShapes[id].bbox();
-                                selectedStartData.set(id, { cx: otherBbox.cx, cy: otherBbox.cy });
-                            }
-                        }
-                    }
-                }
+                groupDrag = GroupDragSession.begin(
+                    this.groupDragHost, state, shape, !!(e.detail as any)?.event?.shiftKey,
+                );
             }).on('dragmove', (e: CustomEvent): void => {
                 onDragMove();
                 if (state.shapeType === 'skeleton' && e.target) {
@@ -1376,28 +1396,12 @@ export class CanvasViewImpl implements CanvasView, Listener {
                     setupSkeletonEdges(shape as SVG.G, skeletonSVGTemplate);
                 }
 
-                // Multi-drag: move other selected shapes by the same delta
-                if (selectedStartData.size > 0 && startCenter) {
-                    const currentBbox = shape.bbox();
-                    const dx = currentBbox.cx - startCenter.x;
-                    const dy = currentBbox.cy - startCenter.y;
-
-                    for (const [id, startPos] of selectedStartData) {
-                        const selectedShape = this.svgShapes[id];
-                        const selectedState = this.drawnStates[id];
-                        if (selectedShape && selectedState) {
-                            this.moveShapeVisually(selectedShape, selectedState, startPos, dx, dy);
-                        }
-                    }
-                }
+                groupDrag?.move();
             }).on('dragend', (): void => {
                 if (aborted) {
                     this.resetViewPosition(state.clientID);
-                    // Also reset selected shapes positions on abort
-                    for (const [id] of selectedStartData) {
-                        this.resetViewPosition(id);
-                    }
-                    selectedStartData.clear();
+                    groupDrag?.abort();
+                    groupDrag = null;
                     return;
                 }
 
@@ -1409,39 +1413,8 @@ export class CanvasViewImpl implements CanvasView, Listener {
                 const dy2 = (startCenter.y - cy) ** 2;
                 const hasMoved = Math.sqrt(dx2 + dy2) > 0;
 
-                if (hasMoved && selectedStartData.size > 0) {
-                    // Multi-drag completion: collect points for all moved shapes.
-                    // For skeletons the wrapping bbox translated with the
-                    // keypoints, so carry it too — otherwise cvat-core seeds the
-                    // soft-snap from the OLD bbox and expands it to span both the
-                    // old and new locations instead of translating it.
-                    const edits: { state: any; points: number[]; bbox?: number[] }[] = [];
-                    const collectEdit = (editState: any, editShape: SVG.Shape): typeof edits[0] => {
-                        const edit: typeof edits[0] = {
-                            state: editState,
-                            points: this.collectShapePoints(editState, editShape),
-                        };
-                        if (editState.shapeType === 'skeleton') {
-                            const bbox = this.collectSkeletonBbox(editShape as SVG.G);
-                            if (bbox) edit.bbox = bbox;
-                        }
-                        return edit;
-                    };
-
-                    // Primary shape
-                    edits.push(collectEdit(state, shape));
-
-                    // Selected shapes
-                    const { objects } = this.controller;
-                    for (const [id] of selectedStartData) {
-                        const selectedShape = this.svgShapes[id];
-                        const selectedObjState = objects.find((obj: any) => obj.clientID === id);
-                        if (selectedShape && selectedObjState) {
-                            edits.push(collectEdit(selectedObjState, selectedShape));
-                        }
-                    }
-
-                    // Dispatch multi-edited event
+                if (hasMoved && groupDrag) {
+                    const edits = groupDrag.commit();
                     this.canvas.dispatchEvent(
                         new CustomEvent('canvas.multiedited', {
                             bubbles: false,
@@ -1450,16 +1423,11 @@ export class CanvasViewImpl implements CanvasView, Listener {
                         }),
                     );
 
-                    // Mark all shapes as updated for canvas redraw
-                    for (const edit of edits) {
-                        if (Number.isInteger(edit.state.parentID)) {
-                            if (this.drawnStates[edit.state.parentID]) {
-                                this.drawnStates[edit.state.parentID].updated = 0;
-                                this.drawnStates[edit.state.parentID].points = [];
-                            }
-                        } else if (this.drawnStates[edit.state.clientID]) {
-                            this.drawnStates[edit.state.clientID].updated = 0;
-                            this.drawnStates[edit.state.clientID].points = [];
+                    // Mark all moved objects as updated for canvas redraw
+                    for (const id of groupDrag.topLevelIDs) {
+                        if (this.drawnStates[id]) {
+                            this.drawnStates[id].updated = 0;
+                            this.drawnStates[id].points = [];
                         }
                     }
 
@@ -1473,8 +1441,6 @@ export class CanvasViewImpl implements CanvasView, Listener {
                             },
                         }),
                     );
-
-                    selectedStartData.clear();
                 } else if (hasMoved) {
                     // Single-drag (original logic)
                     if (state.shapeType === 'mask') {
@@ -1513,19 +1479,14 @@ export class CanvasViewImpl implements CanvasView, Listener {
                             },
                         }),
                     );
-                    selectedStartData.clear();
-                } else {
-                    selectedStartData.clear();
                 }
+                groupDrag = null;
             }).on('dragabort', (): void => {
                 onDragEnd();
                 this.draggableShape = null;
                 aborted = true;
-                // Reset selected shapes positions on abort
-                for (const [id] of selectedStartData) {
-                    this.resetViewPosition(id);
-                }
-                selectedStartData.clear();
+                groupDrag?.abort();
+                groupDrag = null;
                 // disable internal drag events of SVG.js
                 // call chain is (mouseup -> SVG.handler.end -> SVG.handler.drag -> dragend)
                 window.dispatchEvent(new MouseEvent('mouseup'));
@@ -1905,12 +1866,35 @@ export class CanvasViewImpl implements CanvasView, Listener {
             if (Math.sqrt(box.width ** 2 + box.height ** 2) < 5) return;
 
             const selectedIDs: number[] = [];
+            const selectedElementIDs: number[] = [];
             const { objects } = this.controller;
             for (const obj of objects) {
                 const id = obj.clientID;
                 if (obj.hidden || obj.outside) continue;
                 const shape = this.svgShapes[id];
                 if (!shape) continue;
+
+                if (obj.shapeType === 'skeleton') {
+                    // INNO-156: for skeletons the box selects keypoints, not the
+                    // person. A keypoint counts when its circle center is inside
+                    // the box and it is shown (not hidden / outside). A person
+                    // already selected as a whole adds nothing.
+                    if (this.selectedClientIDs.includes(id)) continue;
+                    for (const element of obj.elements) {
+                        if (element.hidden || element.outside) continue;
+                        const circle = this.svgShapes[element.clientID] as SVG.Circle;
+                        if (!circle || circle.hasClass('cvat_canvas_hidden')) continue;
+                        const [cx, cy] = [circle.cx(), circle.cy()];
+                        if (
+                            cx >= box.x && cx <= box.x + box.width &&
+                            cy >= box.y && cy <= box.y + box.height
+                        ) {
+                            selectedElementIDs.push(element.clientID);
+                        }
+                    }
+                    continue;
+                }
+
                 const shapeBbox = shape.bbox();
                 if (
                     shapeBbox.x < box.x + box.width &&
@@ -1925,13 +1909,20 @@ export class CanvasViewImpl implements CanvasView, Listener {
                 }
             }
 
-            const mergedIDs = [...new Set([...this.selectedClientIDs, ...selectedIDs])];
+            const newIDs = selectedIDs.filter((id) => !this.selectedClientIDs.includes(id));
+            const newElementIDs = selectedElementIDs
+                .filter((id) => !this.selectedElementClientIDs.includes(id));
+            // nothing new in the box: the selection does not change (INNO-156 R3)
+            if (!newIDs.length && !newElementIDs.length) return;
 
             this.canvas.dispatchEvent(
                 new CustomEvent('canvas.multiselected', {
                     bubbles: false,
                     cancelable: true,
-                    detail: { clientIDs: mergedIDs },
+                    detail: {
+                        clientIDs: [...this.selectedClientIDs, ...newIDs],
+                        elementClientIDs: [...this.selectedElementClientIDs, ...newElementIDs],
+                    },
                 }),
             );
         }
@@ -2030,6 +2021,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
         this.draggableShape = null;
         this.resizableShape = null;
         this.selectedClientIDs = [];
+        this.groupDragHost = this.createGroupDragHost();
 
         // Create HTML elements
         this.text = window.document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -2494,7 +2486,10 @@ export class CanvasViewImpl implements CanvasView, Listener {
         } else if (reason === UpdateReasons.SHAPE_HIGHLIGHTED) {
             this.highlight(this.controller.highlightedElements);
         } else if (reason === UpdateReasons.OBJECTS_SELECTED) {
-            this.updateSelection(this.controller.selectedClientIDs);
+            this.updateSelection(
+                this.controller.selectedClientIDs,
+                this.controller.selectedElementClientIDs,
+            );
         } else if (reason === UpdateReasons.SELECT_REGION) {
             if (this.mode === Mode.SELECT_REGION) {
                 this.regionSelector.select(true);
@@ -3472,19 +3467,28 @@ export class CanvasViewImpl implements CanvasView, Listener {
         }
     }
 
-    private updateSelection(clientIDs: number[]): void {
+    private updateSelection(clientIDs: number[], elementClientIDs: number[] = []): void {
         // Remove old selection classes
         this.selectedClientIDs.forEach((id) => {
             const shapeView = window.document.getElementById(`cvat_canvas_shape_${id}`);
             if (shapeView) shapeView.classList.remove('cvat_canvas_shape_multiselected');
         });
+        this.selectedElementClientIDs.forEach((id) => {
+            const elementView = window.document.getElementById(`cvat_canvas_shape_${id}`);
+            if (elementView) elementView.classList.remove('cvat_canvas_keypoint_selected');
+        });
 
         this.selectedClientIDs = [...clientIDs];
+        this.selectedElementClientIDs = [...elementClientIDs];
 
         // Apply new selection classes
         this.selectedClientIDs.forEach((id) => {
             const shapeView = window.document.getElementById(`cvat_canvas_shape_${id}`);
             if (shapeView) shapeView.classList.add('cvat_canvas_shape_multiselected');
+        });
+        this.selectedElementClientIDs.forEach((id) => {
+            const elementView = window.document.getElementById(`cvat_canvas_shape_${id}`);
+            if (elementView) elementView.classList.add('cvat_canvas_keypoint_selected');
         });
     }
 
@@ -3957,6 +3961,12 @@ export class CanvasViewImpl implements CanvasView, Listener {
                     circle.addClass('cvat_canvas_hidden');
                 }
 
+                // keypoint circles are re-created on every redraw (after a save
+                // or a frame change), keep the INNO-156 selection highlight
+                if (this.selectedElementClientIDs.includes(element.clientID)) {
+                    circle.addClass('cvat_canvas_keypoint_selected');
+                }
+
                 const mouseover = (e: MouseEvent): void => {
                     const locked = this.drawnStates[state.clientID].lock;
                     if (!locked && !e.ctrlKey && this.mode === Mode.IDLE) {
@@ -4003,6 +4013,10 @@ export class CanvasViewImpl implements CanvasView, Listener {
                             detail: {
                                 state: element,
                                 shiftKey: e.shiftKey,
+                                // INNO-156: cvat-ui maps the platform toggle key
+                                // (mac ⌘ / others Ctrl) to keypoint selection
+                                ctrlKey: e.ctrlKey,
+                                metaKey: e.metaKey,
                             },
                         }),
                     );
