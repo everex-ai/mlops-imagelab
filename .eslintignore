@@ -9,5 +9,3 @@ logs/
 static/
 templates/
 */webpack.config.js
-cvat-canvas/tests/
-cvat-core/tests/

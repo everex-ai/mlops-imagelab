@@ -224,16 +224,6 @@ function buildDuplicatedAPI(prototype) {
                     return result;
                 },
 
-                async batchSave(objectStates: ObjectState[], frame: number) {
-                    const result = await PluginRegistry.apiWrapper.call(
-                        this,
-                        prototype.annotations.batchSave,
-                        objectStates,
-                        frame,
-                    );
-                    return result;
-                },
-
                 async batchUpdatePoints(updates) {
                     const result = await PluginRegistry.apiWrapper.call(
                         this,
@@ -462,10 +452,6 @@ export class Session {
             force: boolean,
             frame: number,
         ) => Promise<boolean>;
-        batchSave: (
-            objectStates: ObjectState[],
-            frame: number,
-        ) => Promise<ObjectState[]>;
         batchUpdatePoints: (
             updates: { clientID: number; points: number[]; frame: number }[],
         ) => Promise<void>;
@@ -538,7 +524,6 @@ export class Session {
             hasUnsavedChanges: Object.getPrototypeOf(this).annotations.hasUnsavedChanges.bind(this),
             exportDataset: Object.getPrototypeOf(this).annotations.exportDataset.bind(this),
             batchRemove: Object.getPrototypeOf(this).annotations.batchRemove.bind(this),
-            batchSave: Object.getPrototypeOf(this).annotations.batchSave.bind(this),
             batchUpdatePoints: Object.getPrototypeOf(this).annotations.batchUpdatePoints.bind(this),
         };
 

@@ -11,8 +11,6 @@ module.exports = {
         'webpack.config.js',
         'node_modules/**',
         'dist/**',
-        // node --test unit tests live outside tsconfig (no type-aware parsing)
-        'tests/**/*.test.ts',
     ],
     parserOptions: {
         project: './tsconfig.json',

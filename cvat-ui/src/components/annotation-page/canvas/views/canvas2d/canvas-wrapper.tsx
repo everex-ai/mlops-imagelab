@@ -19,9 +19,7 @@ import {
     ColorBy, GridColor, Workspace, ActiveControl, CombinedState,
 } from 'reducers';
 import { EventScope } from 'cvat-logger';
-import {
-    Canvas, CanvasMode, HighlightSeverity, CanvasHint,
-} from 'cvat-canvas-wrapper';
+import { Canvas, HighlightSeverity, CanvasHint } from 'cvat-canvas-wrapper';
 import {
     AnnotationConflict, ObjectState, ObjectType, ShapeType, QualityConflict, getCore,
 } from 'cvat-core-wrapper';
@@ -43,7 +41,6 @@ import {
     activateObject,
     selectObjects as selectObjectsAction,
     toggleObjectSelection as toggleObjectSelectionAction,
-    toggleElementSelection as toggleElementSelectionAction,
     updateCanvasContextMenu,
     addZLayer,
     switchZLayer,
@@ -68,18 +65,11 @@ import { ImageFilter } from 'utils/image-processing';
 import { ShortcutScope } from 'utils/enums';
 import { registerComponentShortcuts } from 'actions/shortcuts-actions';
 import { subKeyMap } from 'utils/component-subkeymap';
-import { platformInfoV2 } from 'utils/platform-checker';
 import ImageSetupsContent from './image-setups-content';
 import CanvasTipsComponent from './canvas-hints';
 
 const cvat = getCore();
 const MAX_DISTANCE_TO_OPEN_SHAPE = 50;
-const IS_MAC = platformInfoV2().toLowerCase().includes('mac');
-
-// INNO-156: the keypoint selection toggle key — ⌘ on mac, Ctrl elsewhere
-function isSelectionToggleKey(event: { metaKey?: boolean; ctrlKey?: boolean }): boolean {
-    return !!(IS_MAC ? event.metaKey : event.ctrlKey);
-}
 
 interface StateToProps {
     canvasInstance: Canvas | null;
@@ -132,7 +122,6 @@ interface StateToProps {
     highlightedConflict: QualityConflict | null;
     imageFilters: ImageFilter[];
     selectedStatesID: number[];
-    selectedElementIDs: number[];
     activeControl: ActiveControl;
     activeObjectHidden: boolean;
 }
@@ -164,8 +153,7 @@ interface DispatchToProps {
     onStartIssue(position: number[]): void;
     onUpdateEditedObject(editedState: ObjectState | null): void;
     onToggleObjectSelection(stateID: number): void;
-    onToggleElementSelection(elementID: number): void;
-    onSelectObjects(stateIDs: number[], elementIDs?: number[]): void;
+    onSelectObjects(stateIDs: number[]): void;
     onUpdateMultipleAnnotations(statesToUpdate: any[]): void;
 }
 
@@ -187,7 +175,6 @@ function mapStateToProps(state: CombinedState): StateToProps {
                 activatedElementID,
                 activatedAttributeID,
                 selectedStatesID,
-                selectedElementIDs,
                 zLayer: { cur: curZLayer, min: minZLayer, max: maxZLayer },
                 highlightedConflict,
             },
@@ -282,7 +269,6 @@ function mapStateToProps(state: CombinedState): StateToProps {
         showGroundTruth,
         highlightedConflict,
         selectedStatesID,
-        selectedElementIDs,
         imageFilters,
         activeObjectHidden,
     };
@@ -383,11 +369,8 @@ function mapDispatchToProps(dispatch: any): DispatchToProps {
         onToggleObjectSelection(stateID: number): void {
             dispatch(toggleObjectSelectionAction(stateID));
         },
-        onToggleElementSelection(elementID: number): void {
-            dispatch(toggleElementSelectionAction(elementID));
-        },
-        onSelectObjects(stateIDs: number[], elementIDs: number[] = []): void {
-            dispatch(selectObjectsAction(stateIDs, elementIDs));
+        onSelectObjects(stateIDs: number[]): void {
+            dispatch(selectObjectsAction(stateIDs));
         },
         onUpdateMultipleAnnotations(statesToUpdate: any[]): void {
             dispatch(updateMultipleAnnotationsAsync(statesToUpdate));
@@ -400,6 +383,7 @@ type Props = StateToProps & DispatchToProps;
 class CanvasWrapperComponent extends React.PureComponent<Props> {
     private debouncedUpdate = debounce(this.updateCanvas.bind(this), 250, { leading: true });
     private canvasTipsRef = React.createRef<CanvasTipsComponent>();
+    private shiftClickStart: { x: number; y: number } | null = null;
 
     public componentDidMount(): void {
         const {
@@ -632,12 +616,9 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
             }
         }
 
-        const { selectedStatesID, selectedElementIDs } = this.props;
-        if (
-            prevProps.selectedStatesID !== selectedStatesID ||
-            prevProps.selectedElementIDs !== selectedElementIDs
-        ) {
-            canvasInstance.setSelection(selectedStatesID, selectedElementIDs);
+        const { selectedStatesID } = this.props;
+        if (prevProps.selectedStatesID !== selectedStatesID) {
+            canvasInstance.setSelection(selectedStatesID);
         }
 
         this.activateOnCanvas();
@@ -647,7 +628,7 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         const { canvasInstance } = this.props as { canvasInstance: Canvas };
 
         canvasInstance.html().removeEventListener('mousedown', this.onCanvasMouseDown);
-        canvasInstance.html().removeEventListener('canvas.shiftclicked', this.onCanvasShiftClicked as EventListener);
+        canvasInstance.html().removeEventListener('mouseup', this.onCanvasMouseUp as EventListener);
         canvasInstance.html().removeEventListener('click', this.onCanvasClicked);
         canvasInstance.html().removeEventListener('canvas.editstart', this.onCanvasEditStart);
         canvasInstance.html().removeEventListener('canvas.edited', this.onCanvasEditDone);
@@ -840,27 +821,64 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
 
     private onCanvasMouseDown = (e: MouseEvent): void => {
         const {
-            workspace, activatedStateID, onActivateObject, onSelectObjects, selectedStatesID, selectedElementIDs,
+            workspace, activatedStateID, onActivateObject, onSelectObjects, selectedStatesID,
         } = this.props;
 
         if ((e.target as HTMLElement).tagName === 'svg' && e.button !== 2) {
-            // INNO-156 R8/R4: a plain click on empty canvas clears both selections,
-            // a Shift or ⌘/Ctrl click there keeps them
-            const hasSelection = selectedStatesID.length > 0 || selectedElementIDs.length > 0;
-            if (!e.shiftKey && !isSelectionToggleKey(e) && hasSelection) {
+            if (!e.shiftKey && selectedStatesID.length > 0) {
                 onSelectObjects([]);
             }
             if (activatedStateID !== null && workspace !== Workspace.ATTRIBUTES) {
                 onActivateObject(null, null);
             }
         }
+
+        // Track Shift+mousedown position for Shift+Click selection
+        if (e.shiftKey && e.button === 0) {
+            this.shiftClickStart = { x: e.clientX, y: e.clientY };
+        }
     };
 
-    // INNO-157: the canvas decides Shift+click vs box (same 5px rule) and reports
-    // the top-most object under a Shift+click in the cursor mode
-    private onCanvasShiftClicked = (event: CustomEvent<{ clientID: number }>): void => {
-        const { onToggleObjectSelection } = this.props;
-        onToggleObjectSelection(event.detail.clientID);
+    private onCanvasMouseUp = (e: MouseEvent): void => {
+        if (!this.shiftClickStart || !e.shiftKey || e.button !== 0) {
+            this.shiftClickStart = null;
+            return;
+        }
+
+        // Only handle as click if mouse didn't move much (not a drag)
+        const dist = Math.sqrt(
+            (e.clientX - this.shiftClickStart.x) ** 2 + (e.clientY - this.shiftClickStart.y) ** 2,
+        );
+        this.shiftClickStart = null;
+        if (dist > 5) return;
+
+        const { onToggleObjectSelection, annotations } = this.props;
+
+        // Use elementFromPoint to find the shape under cursor
+        const target = document.elementFromPoint(e.clientX, e.clientY);
+        if (!target) return;
+
+        const shapeEl = (target as Element).closest('[data-z-order]');
+        if (!shapeEl) return;
+
+        const idMatch = shapeEl.id?.match(/^cvat_canvas_shape_(\d+)$/);
+        if (!idMatch) return;
+
+        const clickedClientID = parseInt(idMatch[1], 10);
+
+        // Find the top-level state (for skeleton elements, use parentID)
+        const clickedState = annotations.find((s: any) => s.clientID === clickedClientID);
+        if (clickedState) {
+            onToggleObjectSelection(clickedClientID);
+        } else {
+            // It might be a skeleton element, find parent
+            for (const ann of annotations) {
+                if (ann.elements?.some((el: any) => el.clientID === clickedClientID)) {
+                    onToggleObjectSelection(ann.clientID);
+                    break;
+                }
+            }
+        }
     };
 
     private onCanvasClicked = (): void => {
@@ -903,22 +921,8 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         const { clientID, parentID } = e.detail.state;
         const { shiftKey } = e.detail;
 
-        // INNO-156: ⌘+click (mac) / Ctrl+click (others) on a keypoint toggles it,
-        // whether or not its person is active
-        if (Number.isInteger(parentID) && !shiftKey && isSelectionToggleKey(e.detail)) {
-            const { onToggleElementSelection } = this.props;
-            onToggleElementSelection(clientID);
-            return;
-        }
-
+        // Shift+Click selection is handled by onCanvasMouseUp to avoid double-toggle
         if (shiftKey) {
-            // INNO-157: Shift+click on a keypoint toggles its person (cursor mode only).
-            // Shift+click on a top-level shape is reported by canvas.shiftclicked,
-            // handling it here too would toggle it twice.
-            const { canvasInstance, onToggleObjectSelection } = this.props;
-            if (Number.isInteger(parentID) && (canvasInstance as Canvas).mode() === CanvasMode.IDLE) {
-                onToggleObjectSelection(parentID);
-            }
             return;
         }
 
@@ -952,8 +956,8 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
 
     private onCanvasMultiSelected = (event: any): void => {
         const { onSelectObjects } = this.props;
-        const { clientIDs, elementClientIDs } = event.detail;
-        onSelectObjects(clientIDs, elementClientIDs || []);
+        const { clientIDs } = event.detail;
+        onSelectObjects(clientIDs);
     };
 
     private onCanvasShapeDeactivated = (e: any): void => {
@@ -979,12 +983,6 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
 
         // When Shift is held, don't auto-activate objects (user is selecting)
         if (event.detail.shiftKey) {
-            // INNO-157 AE3: except a keypoint under the pointer (the canvas found it,
-            // possibly covered by another person) — activate exactly that person
-            const { activatedStateID: ownerID, activatedElementID: elementID } = event.detail;
-            if (Number.isInteger(ownerID) && (activatedStateID !== ownerID || activatedElementID !== elementID)) {
-                onActivateObject(ownerID, elementID);
-            }
             return;
         }
 
@@ -1251,7 +1249,7 @@ class CanvasWrapperComponent extends React.PureComponent<Props> {
         );
 
         canvasInstance.html().addEventListener('mousedown', this.onCanvasMouseDown);
-        canvasInstance.html().addEventListener('canvas.shiftclicked', this.onCanvasShiftClicked as EventListener);
+        canvasInstance.html().addEventListener('mouseup', this.onCanvasMouseUp as EventListener);
         canvasInstance.html().addEventListener('click', this.onCanvasClicked);
         canvasInstance.html().addEventListener('canvas.editstart', this.onCanvasEditStart);
         canvasInstance.html().addEventListener('canvas.edited', this.onCanvasEditDone);
