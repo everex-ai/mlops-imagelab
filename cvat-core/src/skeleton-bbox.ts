@@ -39,3 +39,23 @@ export function fallbackSkeletonBbox(
         Math.min(keypoints.ymax + margin, Math.max(height, keypoints.ymax)),
     ];
 }
+
+// INNO-158: clamp one moved point into the image (0..width, 0..height),
+// start-relative: a point that started outside may stay there but not go
+// further out. Applied to `outside` keypoints when a skeleton rotation is
+// baked in: they do not limit the angle but must not leave the image.
+export function clampMovedPoint(
+    startX: number,
+    startY: number,
+    x: number,
+    y: number,
+    imageWidth: number | undefined,
+    imageHeight: number | undefined,
+): number[] {
+    const width = Number.isFinite(imageWidth) ? imageWidth : Number.POSITIVE_INFINITY;
+    const height = Number.isFinite(imageHeight) ? imageHeight : Number.POSITIVE_INFINITY;
+    return [
+        Math.min(Math.max(x, Math.min(0, startX)), Math.max(width, startX)),
+        Math.min(Math.max(y, Math.min(0, startY)), Math.max(height, startY)),
+    ];
+}

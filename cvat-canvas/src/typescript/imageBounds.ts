@@ -187,3 +187,21 @@ export function snapNearBorder(points: number[], width: number, height: number, 
         return value;
     });
 }
+
+// Clamp one point that moved from (startX, startY) to (x, y) into the image,
+// start-relative: a point that started outside may stay there but not go
+// further out. Used for `outside` skeleton keypoints, which are excluded from
+// the group limit (they must never block a drag or rotation) but must not be
+// carried out of the image either: they get pushed along the border.
+export function clampMovedPoint(
+    startX: number,
+    startY: number,
+    x: number,
+    y: number,
+    bounds: Bounds,
+): [number, number] {
+    return [
+        clampValue(x, Math.min(bounds.xmin, startX), Math.max(bounds.xmax, startX)),
+        clampValue(y, Math.min(bounds.ymin, startY), Math.max(bounds.ymax, startY)),
+    ];
+}

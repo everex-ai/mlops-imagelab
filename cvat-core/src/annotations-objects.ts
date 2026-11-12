@@ -17,7 +17,9 @@ import {
 import AnnotationHistory from './annotations-history';
 import logger from './logger';
 import { SerializedShape, SerializedTrack, SerializedTag } from './server-response-types';
-import { fallbackSkeletonBbox, SKELETON_BBOX_FALLBACK_MARGIN, KeypointExtent } from './skeleton-bbox';
+import {
+    fallbackSkeletonBbox, SKELETON_BBOX_FALLBACK_MARGIN, KeypointExtent, clampMovedPoint,
+} from './skeleton-bbox';
 import { isSizePreservingRectMove, isRectMoveWithinAllowedRange } from './rect-move';
 import {
     checkNumberOfPoints, attrsAsAnObject, checkShapeArea, mask2Rle, rle2Mask,
@@ -2291,12 +2293,18 @@ export class SkeletonShape extends Shape {
             cy = wrappingBox.y + wrappingBox.height / 2;
         }
 
+        const frameInfo = this.framesInfo[frame];
         for (const element of this.elements) {
             const { points } = element;
             const rotatedPoints = [];
             for (let i = 0; i < points.length; i += 2) {
                 const [x, y] = [points[i], points[i + 1]];
-                rotatedPoints.push(...rotatePoint(x, y, rotation, cx, cy));
+                const rotated = rotatePoint(x, y, rotation, cx, cy);
+                // INNO-158: outside keypoints do not limit the angle (the
+                // canvas ignores them) but are clamped into the image
+                rotatedPoints.push(...(element.outside ?
+                    clampMovedPoint(x, y, rotated[0], rotated[1], frameInfo?.width, frameInfo?.height) :
+                    rotated));
             }
 
             element.points = rotatedPoints;
@@ -3304,10 +3312,15 @@ export class SkeletonTrack extends Track {
             const element = this.elements[i];
             const { points } = elementsData[i];
 
+            const frameInfo = this.framesInfo[frame];
             const rotatedPoints = [];
             for (let j = 0; j < points.length; j += 2) {
                 const [x, y] = [points[j], points[j + 1]];
-                rotatedPoints.push(...rotatePoint(x, y, rotation, cx, cy));
+                const rotated = rotatePoint(x, y, rotation, cx, cy);
+                // INNO-158: outside keypoints are clamped into the image
+                rotatedPoints.push(...(elementsData[i].outside ?
+                    clampMovedPoint(x, y, rotated[0], rotated[1], frameInfo?.width, frameInfo?.height) :
+                    rotated));
             }
 
             if (undoSkeletonShapes[i]) {

@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-    clampGroupDelta, clampEdges, unwrapAngle, clampRotationAngle, clampRect, snapNearBorder,
+    clampGroupDelta, clampEdges, unwrapAngle, clampRotationAngle, clampRect, snapNearBorder, clampMovedPoint,
 } from '../src/typescript/imageBounds.ts';
 
 const B = {
@@ -207,4 +207,28 @@ test('clampRect: y overflow and a rect drawn up-left (normalized by svg.draw)', 
 test('snapNearBorder: float noise outside the image snaps onto the border only', () => {
     assert.deepEqual(snapNearBorder([-4.5e-7, 1080.0000001, 1920.0004, -0.5], 1920, 1080), [0, 1080, 1920, -0.5]);
     assert.deepEqual(snapNearBorder([10, 20, 1925, 1100], 1920, 1080), [10, 20, 1925, 1100]);
+});
+
+test('clampMovedPoint: an outside keypoint at (0,0) is pushed along the border, never out', () => {
+    // person moves left/up: the point stays at (0, 0)
+    assert.deepEqual(clampMovedPoint(0, 0, -120, -40, B), [0, 0]);
+    // person moves right/down: the point moves normally
+    assert.deepEqual(clampMovedPoint(0, 0, 120, 40, B), [120, 40]);
+    // mixed: slides along the left border while moving down
+    assert.deepEqual(clampMovedPoint(0, 0, -50, 70, B), [0, 70]);
+    // far border
+    assert.deepEqual(clampMovedPoint(1900, 1070, 1950, 1100, B), [1920, 1080]);
+});
+
+test('clampMovedPoint: a point that started outside does not jump in, only no further out', () => {
+    assert.deepEqual(clampMovedPoint(-30, 500, -40, 500, B), [-30, 500]);
+    assert.deepEqual(clampMovedPoint(-30, 500, -20, 500, B), [-20, 500]);
+});
+
+test('group limit ignores outside keypoints; they are clamped individually', () => {
+    // person extent [400..700] (outside keypoint at (0,0) excluded) moved left by 500:
+    // the group stops at -400, the outside keypoint stays at (0, 0)
+    const { dx, dy } = clampGroupDelta([box(400, 300, 700, 900)], -500, -10, B);
+    assert.deepEqual([dx, dy], [-400, -10]);
+    assert.deepEqual(clampMovedPoint(0, 0, 0 + dx, 0 + dy, B), [0, 0]);
 });

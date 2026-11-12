@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { fallbackSkeletonBbox } from '../src/skeleton-bbox.ts';
+import { fallbackSkeletonBbox, clampMovedPoint } from '../src/skeleton-bbox.ts';
 
 const kp = (xmin: number, ymin: number, xmax: number, ymax: number) => ({
     xmin, ymin, xmax, ymax,
@@ -35,4 +35,11 @@ test('unknown image size: margin without clipping', () => {
 
 test('only one dimension known: the other is not clipped', () => {
     assert.deepEqual(fallbackSkeletonBbox(kp(1850, 990, 1905, 995), 20, 1920, undefined), [1830, 970, 1920, 1015]);
+});
+
+test('clampMovedPoint: rotated outside keypoint is clamped into the image (start-relative)', () => {
+    assert.deepEqual(clampMovedPoint(0, 0, -35.2, 12.5, 1920, 1080), [0, 12.5]);
+    assert.deepEqual(clampMovedPoint(1910, 500, 1990, 520, 1920, 1080), [1920, 520]);
+    assert.deepEqual(clampMovedPoint(-30, 500, -40, 510, 1920, 1080), [-30, 510]);
+    assert.deepEqual(clampMovedPoint(10, 10, -5, -5, undefined, undefined), [0, 0]);
 });

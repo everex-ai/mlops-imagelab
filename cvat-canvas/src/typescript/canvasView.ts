@@ -37,7 +37,7 @@ import {
 } from './shared';
 import {
     Bounds, Extent, clampGroupDelta, clampEdges, unwrapAngle, clampRotationAngle, boundsFromGeometry,
-    snapNearBorder,
+    snapNearBorder, clampMovedPoint,
 } from './imageBounds';
 import {
     CanvasModel, Geometry, UpdateReasons, FrameZoom, ActiveElement,
@@ -54,7 +54,7 @@ interface DragStartSnapshot {
     cuboidPoints?: { x: number; y: number }[];
     xtl?: number;
     ytl?: number;
-    circles?: Map<SVG.Element, { cx: number; cy: number }>;
+    circles?: Map<SVG.Element, { cx: number; cy: number; outside: boolean }>;
 }
 
 export interface CanvasView {
@@ -1219,13 +1219,13 @@ export class CanvasViewImpl implements CanvasView, Listener {
             snapshot.circles = new Map();
             for (const child of (selectedShape as SVG.G).children()) {
                 if (child.type === 'circle') {
-                    if (skipLockedKeypoints) {
-                        const childClientID = child.attr('data-client-id');
-                        const elementState = (selectedState.elements || [])
-                            .find((el: any) => el.clientID === childClientID);
-                        if (!elementState || elementState.lock) continue;
-                    }
-                    snapshot.circles.set(child, { cx: child.cx(), cy: child.cy() });
+                    const childClientID = child.attr('data-client-id');
+                    const elementState = (selectedState.elements || [])
+                        .find((el: any) => el.clientID === childClientID);
+                    if (skipLockedKeypoints && (!elementState || elementState.lock)) continue;
+                    snapshot.circles.set(child, {
+                        cx: child.cx(), cy: child.cy(), outside: !!elementState?.outside,
+                    });
                 }
             }
         } else if (['polygon', 'polyline', 'points'].includes(selectedState.shapeType)) {
@@ -1259,9 +1259,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
                 wrapRect.attr('data-xbr', newXtl + wrapRect.width());
                 wrapRect.attr('data-ybr', newYtl + wrapRect.height());
 
-                for (const [circle, center] of start.circles) {
-                    circle.center(center.cx + dx, center.cy + dy);
-                }
+                this.moveSkeletonCircles(start.circles, dx, dy);
 
                 const skeletonSVGTemplate = makeSVGFromTemplate(
                     this.controller.objects.find(
@@ -1282,6 +1280,24 @@ export class CanvasViewImpl implements CanvasView, Listener {
         } else if (selectedState.shapeType === 'cuboid' && start.cuboidPoints) {
             const movedPoints = start.cuboidPoints.map((pt) => `${pt.x + dx},${pt.y + dy}`).join(' ');
             selectedShape.attr('points', movedPoints);
+        }
+    }
+
+    // INNO-158: move skeleton keypoint circles to "start + delta". `outside`
+    // keypoints do not limit the group delta; they are clamped one by one so
+    // they slide along the border instead of leaving the image.
+    private moveSkeletonCircles(
+        circles: Map<SVG.Element, { cx: number; cy: number; outside: boolean }>,
+        dx: number,
+        dy: number,
+    ): void {
+        const bounds = this.imageBounds();
+        for (const [circle, center] of circles) {
+            if (center.outside) {
+                circle.center(...clampMovedPoint(center.cx, center.cy, center.cx + dx, center.cy + dy, bounds));
+            } else {
+                circle.center(center.cx + dx, center.cy + dy);
+            }
         }
     }
 
@@ -1519,9 +1535,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
                 onDragMove();
                 const { dx, dy } = clampedDelta;
                 if (state.shapeType === 'skeleton' && skeletonStart?.xtl !== undefined) {
-                    for (const [circle, center] of skeletonStart.circles) {
-                        circle.center(center.cx + dx, center.cy + dy);
-                    }
+                    this.moveSkeletonCircles(skeletonStart.circles, dx, dy);
 
                     const x = skeletonStart.xtl + dx;
                     const y = skeletonStart.ytl + dy;
@@ -1946,7 +1960,21 @@ export class CanvasViewImpl implements CanvasView, Listener {
                         const pivotY = y + height / 2;
                         for (const child of (shape as SVG.G).children()) {
                             if (child.type === 'circle' || child.type === 'line') {
-                                if (skeletonGestureRotation) {
+                                const isOutsideKeypoint = child.type === 'circle' &&
+                                    !!state.elements.find(
+                                        (el: any) => el.clientID === child.attr('data-client-id'),
+                                    )?.outside;
+                                if (skeletonGestureRotation && isOutsideKeypoint && gestureBounds) {
+                                    // INNO-158: an outside keypoint does not
+                                    // limit the angle but is clamped into the
+                                    // image on its own (cvat-core does the same)
+                                    const [rx, ry] = rotate2DPoints(
+                                        pivotX, pivotY, skeletonGestureRotation, [child.cx(), child.cy()],
+                                    );
+                                    const [px, py] = clampMovedPoint(child.cx(), child.cy(), rx, ry, gestureBounds);
+                                    child.untransform();
+                                    (child as any).transform({ x: px - child.cx(), y: py - child.cy() });
+                                } else if (skeletonGestureRotation) {
                                     child.rotate(skeletonGestureRotation, pivotX, pivotY);
                                 } else {
                                     child.untransform();
