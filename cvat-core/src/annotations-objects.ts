@@ -18,6 +18,7 @@ import AnnotationHistory from './annotations-history';
 import logger from './logger';
 import { SerializedShape, SerializedTrack, SerializedTag } from './server-response-types';
 import { fallbackSkeletonBbox, SKELETON_BBOX_FALLBACK_MARGIN, KeypointExtent } from './skeleton-bbox';
+import { isSizePreservingRectMove, isRectMoveWithinAllowedRange } from './rect-move';
 import {
     checkNumberOfPoints, attrsAsAnObject, checkShapeArea, mask2Rle, rle2Mask,
     computeWrappingBox, findAngleDiff, rotatePoint, validateAttributeValue, cropMask,
@@ -516,15 +517,13 @@ class Drawn extends Annotation {
         }
 
         const before = this.geometryBeforeEdit(frame);
-        if (!before || before.rotation || before.points.length !== 4 || data.points.length !== 4) {
+        const after = { points: data.points, rotation: data.rotation };
+        if (!isSizePreservingRectMove(before, after)) {
             return false;
         }
 
-        const SIZE_EPS = 1e-3;
-        const [xtl, ytl, xbr, ybr] = data.points;
-        const [prevXtl, prevYtl, prevXbr, prevYbr] = before.points;
-        return Math.abs((xbr - xtl) - (prevXbr - prevXtl)) < SIZE_EPS &&
-            Math.abs((ybr - ytl) - (prevYbr - prevYtl)) < SIZE_EPS;
+        const { width, height } = this.framesInfo[frame];
+        return isRectMoveWithinAllowedRange(before, after, width, height);
     }
 
     protected validateStateBeforeSave(data: ObjectState, updated: ObjectState['updateFlags'], frame?: number): number[] {

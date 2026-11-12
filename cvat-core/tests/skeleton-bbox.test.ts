@@ -32,3 +32,7 @@ test('a keypoint close to the border gets only the remaining margin', () => {
 test('unknown image size: margin without clipping', () => {
     assert.deepEqual(fallbackSkeletonBbox(kp(1850, 500, 1905, 900), 20, undefined, undefined), [1830, 480, 1925, 920]);
 });
+
+test('only one dimension known: the other is not clipped', () => {
+    assert.deepEqual(fallbackSkeletonBbox(kp(1850, 990, 1905, 995), 20, 1920, undefined), [1830, 970, 1920, 1015]);
+});

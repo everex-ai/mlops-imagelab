@@ -34,6 +34,20 @@ export interface Delta {
     dy: number;
 }
 
+// The current image in canvas coordinates: [offset, offset + size],
+// borders inclusive (same convention as cvat-core fitPoints).
+export function boundsFromGeometry(geometry: {
+    offset: number;
+    image: { width: number; height: number };
+}): Bounds {
+    return {
+        xmin: geometry.offset,
+        ymin: geometry.offset,
+        xmax: geometry.offset + geometry.image.width,
+        ymax: geometry.offset + geometry.image.height,
+    };
+}
+
 function clampValue(value: number, min: number, max: number): number {
     return Math.min(Math.max(value, min), max);
 }

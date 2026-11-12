@@ -26,7 +26,7 @@ import {
 } from './shared';
 import Crosshair from './crosshair';
 import consts from './consts';
-import { clampRect } from './imageBounds';
+import { clampRect, boundsFromGeometry } from './imageBounds';
 import {
     DrawData, Geometry, RectDrawingMethod, Configuration, CuboidDrawingMethod,
 } from './canvasModel';
@@ -797,18 +797,12 @@ export class DrawHandlerImpl implements DrawHandler {
         // keypoints are laid out inside the clamped rect, so the preview and
         // the created skeleton match and no keypoint lands outside the image
         const layoutSkeleton = (): void => {
-            const { offset } = this.geometry;
             const clamped = clampRect({
                 x: this.drawInstance.x(),
                 y: this.drawInstance.y(),
                 width: this.drawInstance.width(),
                 height: this.drawInstance.height(),
-            }, {
-                xmin: offset,
-                ymin: offset,
-                xmax: offset + this.geometry.image.width,
-                ymax: offset + this.geometry.image.height,
-            });
+            }, boundsFromGeometry(this.geometry));
             this.drawInstance.move(clamped.x, clamped.y).size(clamped.width, clamped.height);
 
             const {

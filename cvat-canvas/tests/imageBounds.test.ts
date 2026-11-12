@@ -135,3 +135,71 @@ test('clampRect: drawing rect stops at the border (AE1)', () => {
         x: 2000, y: 100, width: 50, height: 100,
     }, B).width, 0);
 });
+
+test('clampGroupDelta: mixed inside/outside group', () => {
+    const extents = [box(-15, 100, 300, 400), box(1500, 100, 1800, 400)];
+    assert.equal(clampGroupDelta(extents, -10, 0, B).dx, 0);
+    assert.equal(clampGroupDelta(extents, 500, 0, B).dx, 120);
+});
+
+test('unwrap + clamp: a gesture stuck at a wall never flips to the other side', () => {
+    const bounds = {
+        xmin: 0, ymin: 0, xmax: 1800, ymax: 1080,
+    };
+    const points = [1700, 300];
+    // svg.js raw angles of a continuous clockwise gesture 20 -> 160 degrees
+    let prev = 0;
+    for (const raw of [20, 60, 90, -270, -240, -200]) {
+        prev = unwrapAngle(raw, prev);
+        const clamped = clampRotationAngle(points, 1700, 500, prev, bounds);
+        assert.ok(clamped >= 0 && clamped <= 30, `raw ${raw} -> unwrapped ${prev} -> ${clamped}`);
+        if (prev >= 30) assert.equal(clamped, 30);
+    }
+    assert.equal(prev, 160);
+});
+
+test('clampRotationAngle: negative direction blocked by the left wall, second point limits', () => {
+    // point above the pivot, counter-clockwise rotation moves it left
+    const bounds = {
+        xmin: 1600, ymin: 0, xmax: 1920, ymax: 1080,
+    };
+    // 1700 - 200 sin(a) >= 1600  => a <= 30 (counter-clockwise)
+    assert.equal(clampRotationAngle([1700, 300], 1700, 500, -45, bounds), -30);
+    // a second point further from the pivot limits earlier: 1700 - 400 sin(a) >= 1600 => a <= 14
+    assert.equal(clampRotationAngle([1700, 300, 1700, 100], 1700, 500, -45, bounds), -14);
+});
+
+test('clampRotationAngle: a point exactly on the border stays allowed at 0 and blocks outwards', () => {
+    // point on the right border to the right of the pivot; clockwise moves it down (y)
+    const points = [1920, 500];
+    assert.equal(clampRotationAngle(points, 1820, 500, 0, B), 0);
+    // any rotation pulls x inwards (cos < 1), so it is allowed in both directions
+    assert.equal(clampRotationAngle(points, 1820, 500, 10, B), 10);
+    assert.equal(clampRotationAngle(points, 1820, 500, -10, B), -10);
+});
+
+test('clampRotationAngle: y walls', () => {
+    // point right of the pivot near the bottom; clockwise moves it down
+    const points = [1000, 1000];
+    // 1000 + 100 sin(a) <= 1080... pivot (900, 1000): y = 1000 + 100 sin a <= 1080 => a <= 53
+    assert.equal(clampRotationAngle(points, 900, 1000, 90, B), 53);
+});
+
+test('clampEdges: far edges starting outside, two edges at once', () => {
+    const start = box(100, -10, 1930, 1090);
+    assert.deepEqual(clampEdges(start, box(90, -20, 1950, 1100), B), box(90, -10, 1930, 1090));
+    assert.deepEqual(clampEdges(start, box(90, 0, 1900, 1000), B), box(90, 0, 1900, 1000));
+});
+
+test('clampRect: y overflow and a rect drawn up-left (normalized by svg.draw)', () => {
+    assert.deepEqual(clampRect({
+        x: 100, y: 1000, width: 50, height: 300,
+    }, B), {
+        x: 100, y: 1000, width: 50, height: 80,
+    });
+    assert.deepEqual(clampRect({
+        x: -10, y: -10, width: 5, height: 5,
+    }, B), {
+        x: 0, y: 0, width: 0, height: 0,
+    });
+});

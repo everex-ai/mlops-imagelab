@@ -36,7 +36,7 @@ import {
     clamp,
 } from './shared';
 import {
-    Bounds, Extent, clampGroupDelta, clampEdges, unwrapAngle, clampRotationAngle,
+    Bounds, Extent, clampGroupDelta, clampEdges, unwrapAngle, clampRotationAngle, boundsFromGeometry,
 } from './imageBounds';
 import {
     CanvasModel, Geometry, UpdateReasons, FrameZoom, ActiveElement,
@@ -1190,7 +1190,13 @@ export class CanvasViewImpl implements CanvasView, Listener {
     // Snapshot of a companion shape at multi-drag start. Companions are placed
     // at "start position + clamped delta" on every tick (INNO-158), so they
     // move in the same tick and by the same delta as the primary shape.
-    private captureDragStart(selectedShape: SVG.Shape, selectedState: DrawnState): DragStartSnapshot {
+    // skipLockedKeypoints: the primary skeleton drag does not move locked
+    // keypoints (companion moves do).
+    private captureDragStart(
+        selectedShape: SVG.Shape,
+        selectedState: DrawnState,
+        skipLockedKeypoints = false,
+    ): DragStartSnapshot {
         const bbox = selectedShape.bbox();
         const snapshot: DragStartSnapshot = { x: bbox.x, y: bbox.y };
         if (selectedState.shapeType === 'skeleton') {
@@ -1204,6 +1210,12 @@ export class CanvasViewImpl implements CanvasView, Listener {
             snapshot.circles = new Map();
             for (const child of (selectedShape as SVG.G).children()) {
                 if (child.type === 'circle') {
+                    if (skipLockedKeypoints) {
+                        const childClientID = child.attr('data-client-id');
+                        const elementState = (selectedState.elements || [])
+                            .find((el: any) => el.clientID === childClientID);
+                        if (!elementState || elementState.lock) continue;
+                    }
                     snapshot.circles.set(child, { cx: child.cx(), cy: child.cy() });
                 }
             }
@@ -1267,13 +1279,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
     // INNO-158: the current image in canvas coordinates (borders inclusive,
     // same convention as cvat-core fitPoints).
     private imageBounds(): Bounds {
-        const { offset, image } = this.geometry;
-        return {
-            xmin: offset,
-            ymin: offset,
-            xmax: offset + image.width,
-            ymax: offset + image.height,
-        };
+        return boundsFromGeometry(this.geometry);
     }
 
     // INNO-158: the extent (canvas coordinates) a drag of this object moves and
@@ -1308,7 +1314,11 @@ export class CanvasViewImpl implements CanvasView, Listener {
                     const childClientID = child.attr('data-client-id');
                     const elementState = (state.elements || [])
                         .find((el: any) => el.clientID === childClientID);
-                    if (!elementState || (elementState.lock && !includeLockedKeypoints)) continue;
+                    // outside keypoints carry no meaningful position (COCO
+                    // invisible keypoints are often (0, 0)); they must not
+                    // block the drag
+                    if (!elementState || elementState.outside) continue;
+                    if (elementState.lock && !includeLockedKeypoints) continue;
                     include(child.cx(), child.cy());
                 }
             }
@@ -1422,8 +1432,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
             let clampExtents: Extent[] = [];
             let clampBounds: Bounds = null;
             let clampedDelta = { dx: 0, dy: 0 };
-            let skeletonStart: { xtl: number; ytl: number; circles: Map<SVG.Element, { cx: number; cy: number }> } =
-                null;
+            let skeletonStart: DragStartSnapshot = null;
 
             if (state.shapeType === 'cuboid') {
                 // the cuboid drives its own face/edge dragging; keep the
@@ -1453,23 +1462,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
                 const primaryExtent = this.collectClampExtent(state, shape, false);
                 if (primaryExtent) clampExtents.push(primaryExtent);
 
-                skeletonStart = null;
-                if (state.shapeType === 'skeleton') {
-                    skeletonStart = {
-                        xtl: +draggableInstance.attr('data-xtl'),
-                        ytl: +draggableInstance.attr('data-ytl'),
-                        circles: new Map(),
-                    };
-                    for (const child of (shape as SVG.G).children()) {
-                        if (child.type === 'circle') {
-                            const childClientID = child.attr('data-client-id');
-                            const elementState = state.elements.find((el: any) => el.clientID === childClientID);
-                            if (elementState && !elementState.lock) {
-                                skeletonStart.circles.set(child, { cx: child.cx(), cy: child.cy() });
-                            }
-                        }
-                    }
-                }
+                skeletonStart = state.shapeType === 'skeleton' ? this.captureDragStart(shape, state, true) : null;
 
                 // Record start positions of other selected shapes for multi-drag
                 selectedStartData = new Map();
@@ -1480,8 +1473,11 @@ export class CanvasViewImpl implements CanvasView, Listener {
                             if (otherState && !otherState.pinned && !otherState.lock) {
                                 const otherShape = this.svgShapes[id];
                                 selectedStartData.set(id, this.captureDragStart(otherShape, otherState));
-                                // companions move locked keypoints too
-                                const otherExtent = this.collectClampExtent(otherState, otherShape, true);
+                                // companions move locked keypoints too. A cuboid
+                                // primary moves by the raw delta (no constraint
+                                // function), so its group is not clamped at all.
+                                const otherExtent = state.shapeType === 'cuboid' ?
+                                    null : this.collectClampExtent(otherState, otherShape, true);
                                 if (otherExtent) clampExtents.push(otherExtent);
                             }
                         }
@@ -1497,18 +1493,23 @@ export class CanvasViewImpl implements CanvasView, Listener {
                     const rawDy = p.y - handler.startPoints.point.y;
                     clampedDelta = clampGroupDelta(clampExtents, rawDx, rawDy, clampBounds);
                     if (state.shapeType === 'mask') {
-                        // integer grid, as snapToGrid: 1 did (truncation towards 0)
+                        // integer grid, as snapToGrid: 1 did; snap towards the
+                        // start position so the snapped delta never leaves the
+                        // clamp interval (companions must not overshoot a wall)
                         const { box } = handler.startPoints;
+                        const snap = (origin: number, delta: number): number => (
+                            (delta < 0 ? Math.ceil(origin + delta) : Math.floor(origin + delta)) - origin
+                        );
                         clampedDelta = {
-                            dx: Math.trunc(box.x + clampedDelta.dx) - box.x,
-                            dy: Math.trunc(box.y + clampedDelta.dy) - box.y,
+                            dx: snap(box.x, clampedDelta.dx),
+                            dy: snap(box.y, clampedDelta.dy),
                         };
                     }
                 }
 
                 onDragMove();
                 const { dx, dy } = clampedDelta;
-                if (state.shapeType === 'skeleton' && skeletonStart) {
+                if (state.shapeType === 'skeleton' && skeletonStart?.xtl !== undefined) {
                     for (const [circle, center] of skeletonStart.circles) {
                         circle.center(center.cx + dx, center.cy + dy);
                     }
@@ -1786,12 +1787,18 @@ export class CanvasViewImpl implements CanvasView, Listener {
                             xmax: +resizableInstance.attr('data-xbr'),
                             ymax: +resizableInstance.attr('data-ybr'),
                         };
-                        // cvat-core bakes the rotation into every element
-                        // (locked and outside ones too), so all of them limit it
+                        // cvat-core bakes the rotation into every element, so
+                        // locked ones limit it too; outside ones carry no
+                        // meaningful position and are ignored
                         gestureStartKeypoints = [];
                         for (const child of (shape as SVG.G).children()) {
                             if (child.type === 'circle') {
-                                gestureStartKeypoints.push(child.cx(), child.cy());
+                                const childClientID = child.attr('data-client-id');
+                                const elementState = state.elements
+                                    .find((el: any) => el.clientID === childClientID);
+                                if (elementState && !elementState.outside) {
+                                    gestureStartKeypoints.push(child.cx(), child.cy());
+                                }
                             }
                         }
                     }
