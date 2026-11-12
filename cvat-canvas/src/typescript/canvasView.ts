@@ -106,6 +106,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
     private lastPointer: { x: number; y: number } | null = null;
     // keypoint last activated by the Shift hover (avoids re-sending it)
     private shiftHoverElementID: number | null = null;
+    private boxCursorFrame: number | null = null;
     private ctrlPressed: boolean;
     private innerObjectsFlags: {
         drawHidden: Record<number, boolean>;
@@ -1331,7 +1332,6 @@ export class CanvasViewImpl implements CanvasView, Listener {
             selectedClientIDs: () => this.selectedClientIDs,
             selectedElementClientIDs: () => this.selectedElementClientIDs,
             moveShapeVisually: this.moveShapeVisually.bind(this),
-            resetViewPosition: this.resetViewPosition.bind(this),
             collectShapePoints: this.collectShapePoints.bind(this),
             collectSkeletonBbox: this.collectSkeletonBbox.bind(this),
             redrawSkeletonEdges: (clientID: number): void => {
@@ -2027,6 +2027,10 @@ export class CanvasViewImpl implements CanvasView, Listener {
     // Shift+click toggles the top-most object at the press point: the hit
     // element's top-level shape (a skeleton for its rect, edges, keypoints)
     private onShiftClick(target: Element): void {
+        // a keypoint circle (a locked one classifies as 'box') also gets its own
+        // click -> canvas.clicked, which cvat-ui turns into the person toggle;
+        // reporting it here too would toggle the person twice
+        if (target.tagName === 'circle' && target.hasAttribute('data-client-id')) return;
         let node: Element | null = target;
         while (node && node !== this.content) {
             const match = node.id?.match(/^cvat_canvas_shape_(\d+)$/);
@@ -2443,7 +2447,10 @@ export class CanvasViewImpl implements CanvasView, Listener {
                 let shiftHover: { activatedStateID: number; activatedElementID: number } | null = null;
                 if (e.shiftKey && !this.shiftGesture && !this.multiSelectBox) {
                     const keypoint = this.findKeypointAt(e.target as Element, e.clientX, e.clientY);
-                    if (keypoint && keypoint.elementID !== this.shiftHoverElementID) {
+                    // re-send while the owner is still not active: a dropped or
+                    // overridden activation must not leave the keypoint stuck
+                    const ownerActive = keypoint && this.activeElement.clientID === keypoint.parentID;
+                    if (keypoint && (keypoint.elementID !== this.shiftHoverElementID || !ownerActive)) {
                         shiftHover = {
                             activatedStateID: keypoint.parentID,
                             activatedElementID: keypoint.elementID,
@@ -2476,7 +2483,12 @@ export class CanvasViewImpl implements CanvasView, Listener {
         this.geometry = this.controller.geometry;
         if (this.shiftPressed) {
             // INNO-157: an activation or redraw can change what is under a still pointer
-            window.requestAnimationFrame(() => this.updateBoxSelectCursor());
+            if (this.boxCursorFrame === null) {
+                this.boxCursorFrame = window.requestAnimationFrame(() => {
+                    this.boxCursorFrame = null;
+                    this.updateBoxSelectCursor();
+                });
+            }
         }
         if (reason === UpdateReasons.CONFIG_UPDATED) {
             const { activeElement } = this;
@@ -2912,6 +2924,10 @@ export class CanvasViewImpl implements CanvasView, Listener {
         } else if (reason === UpdateReasons.DATA_FAILED) {
             this.onError(model.exception, 'data fetching');
         } else if (reason === UpdateReasons.DESTROY) {
+            if (this.boxCursorFrame !== null) {
+                window.cancelAnimationFrame(this.boxCursorFrame);
+                this.boxCursorFrame = null;
+            }
             this.canvas.dispatchEvent(
                 new CustomEvent('canvas.destroy', {
                     bubbles: false,

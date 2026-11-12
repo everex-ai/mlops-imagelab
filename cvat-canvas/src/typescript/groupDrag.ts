@@ -35,7 +35,6 @@ export interface GroupDragHost {
     moveShapeVisually: (
         shape: SVG.Shape, state: DrawnState, startPos: { cx: number; cy: number }, dx: number, dy: number,
     ) => void;
-    resetViewPosition: (clientID: number) => void;
     redrawSkeletonEdges: (clientID: number) => void;
     collectShapePoints: (objState: any, shape: SVG.Shape) => number[];
     collectSkeletonBbox: (group: SVG.G) => number[] | undefined;
@@ -43,9 +42,9 @@ export interface GroupDragHost {
 
 // INNO-156 KTD5: every member — the primary included — is placed at
 // "start + constrainGroupDelta(raw delta)". It is the identity here on purpose:
-// at integration INNO-158 replaces the body with its clampGroupDelta
-// (cvat-canvas/src/typescript/imageBounds.ts) to stop the whole group at the
-// image border, using the member start positions this session records.
+// at integration INNO-158 (separate branch, not merged yet) replaces the body
+// with its clampGroupDelta (imageBounds.ts on that branch) to stop the whole
+// group at the image border, using the member start positions recorded here.
 export function constrainGroupDelta(delta: Point): Point {
     return delta;
 }
@@ -165,11 +164,11 @@ export class GroupDragSession {
             const shape = host.svgShapes[topID];
             const isPrimaryTop = topID === primaryTopID;
             if (!obj || !shape || obj.hidden || obj.outside) continue;
-            // locked objects never move; a pinned object does not move as a whole
-            if (!isPrimaryTop && obj.lock) continue;
+            // locked and pinned objects never move with the group (R16)
+            if (!isPrimaryTop && (obj.lock || obj.pinned)) continue;
 
             if (obj.shapeType !== 'skeleton') {
-                if (isPrimaryTop || obj.pinned) continue;
+                if (isPrimaryTop) continue;
                 const { cx, cy } = shape.bbox();
                 members.push({ kind: 'shape', clientID: topID, start: { cx, cy } });
                 movesSomethingElse = true;
@@ -364,9 +363,6 @@ export class GroupDragSession {
     // back to where the drag started.
     public abort(): void {
         this.placeMembers(0, 0);
-        for (const member of this.members) {
-            if (member.kind === 'shape') this.host.resetViewPosition(member.clientID);
-        }
     }
 
     public get topLevelIDs(): number[] {

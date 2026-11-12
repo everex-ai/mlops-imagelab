@@ -664,6 +664,8 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                         cur: clamp(state.annotations.zLayer.cur, minZLayer, maxZLayer),
                     },
                     states: nextStates,
+                    // INNO-156: a keypoint (or its person) hidden/outside leaves the selection
+                    selectedElementIDs: filterLiveElementIDs(nextStates, state.annotations.selectedElementIDs),
                     history,
                 },
             };
@@ -819,8 +821,13 @@ export default (state = defaultState, action: AnyAction): AnnotationState => {
                 selectedStatesID, selectedElementIDs, activatedStateID, states,
             } = state.annotations;
             // On first toggle, include the currently activated object in selection
+            // (unless it is the toggled one: a hover always activates the object first,
+            // so seeding it would toggle it straight back out)
             let currentSelected = [...selectedStatesID];
-            if (currentSelected.length === 0 && selectedElementIDs.length === 0 && activatedStateID !== null) {
+            if (
+                currentSelected.length === 0 && selectedElementIDs.length === 0 &&
+                activatedStateID !== null && activatedStateID !== stateID
+            ) {
                 currentSelected = [activatedStateID];
             }
 
