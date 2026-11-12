@@ -95,6 +95,12 @@ image.cvat_canvas_shape_selection {
     filter: drop-shadow(0 0 1.5px #40a9ff) drop-shadow(0 0 1.5px #40a9ff);
 }
 
+// INNO-157: Shift held over a place a box selection would start from
+.cvat_canvas_box_select_ready #cvat_canvas_content,
+.cvat_canvas_box_select_ready #cvat_canvas_content * {
+    cursor: crosshair !important;
+}
+
 .cvat_canvas_selection_box {
     fill: white;
     fill-opacity: 0.1;
