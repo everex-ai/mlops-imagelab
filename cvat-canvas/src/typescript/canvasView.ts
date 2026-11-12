@@ -37,6 +37,7 @@ import {
 } from './shared';
 import {
     Bounds, Extent, clampGroupDelta, clampEdges, unwrapAngle, clampRotationAngle, boundsFromGeometry,
+    snapNearBorder,
 } from './imageBounds';
 import {
     CanvasModel, Geometry, UpdateReasons, FrameZoom, ActiveElement,
@@ -161,6 +162,14 @@ export class CanvasViewImpl implements CanvasView, Listener {
     private translateFromCanvas(points: number[]): number[] {
         const { offset } = this.controller.geometry;
         return translateFromCanvas(offset, points);
+    }
+
+    // INNO-158: edits clamped to the border compute "start + (border - start)",
+    // which can land a float ulp outside the image (e.g. -4.5e-7). Snap such
+    // coordinates onto the border so no out-of-image value is emitted.
+    private translateFromCanvasSnapped(points: number[]): number[] {
+        const { image } = this.controller.geometry;
+        return snapNearBorder(this.translateFromCanvas(points), image.width, image.height);
     }
 
     private translatePointsFromRotatedShape(
@@ -1366,7 +1375,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
         if (rotation) {
             points = this.translatePointsFromRotatedShape(svgShape, points);
         }
-        return this.translateFromCanvas(points);
+        return this.translateFromCanvasSnapped(points);
     }
 
     // Collect a skeleton's keypoint coordinates (image space) in element
@@ -1380,7 +1389,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
             const elementShape = svgGroup.children()
                 .find((child: SVG.Shape) => child.id() === `cvat_canvas_shape_${element.clientID}`);
             if (elementShape) {
-                points.push(...this.translateFromCanvas(readPointsFromShape(elementShape)));
+                points.push(...this.translateFromCanvasSnapped(readPointsFromShape(elementShape)));
             } else {
                 points.push(...element.points);
             }
@@ -1396,8 +1405,8 @@ export class CanvasViewImpl implements CanvasView, Listener {
         const ytl = +wrapRect.attr('data-ytl');
         const xbr = +wrapRect.attr('data-xbr');
         const ybr = +wrapRect.attr('data-ybr');
-        const origin = this.translateFromCanvas([xtl, ytl]);
-        const far = this.translateFromCanvas([xbr, ybr]);
+        const origin = this.translateFromCanvasSnapped([xtl, ytl]);
+        const far = this.translateFromCanvasSnapped([xbr, ybr]);
         return [origin[0], origin[1], far[0], far[1]];
     }
 
@@ -1643,7 +1652,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
                             points = this.translatePointsFromRotatedShape(shape, points);
                         }
 
-                        this.onEditDone(state, this.translateFromCanvas(points));
+                        this.onEditDone(state, this.translateFromCanvasSnapped(points));
                     }
 
                     this.canvas.dispatchEvent(

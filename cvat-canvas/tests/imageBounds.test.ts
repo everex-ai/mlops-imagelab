@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-    clampGroupDelta, clampEdges, unwrapAngle, clampRotationAngle, clampRect,
+    clampGroupDelta, clampEdges, unwrapAngle, clampRotationAngle, clampRect, snapNearBorder,
 } from '../src/typescript/imageBounds.ts';
 
 const B = {
@@ -202,4 +202,9 @@ test('clampRect: y overflow and a rect drawn up-left (normalized by svg.draw)', 
     }, B), {
         x: 0, y: 0, width: 0, height: 0,
     });
+});
+
+test('snapNearBorder: float noise outside the image snaps onto the border only', () => {
+    assert.deepEqual(snapNearBorder([-4.5e-7, 1080.0000001, 1920.0004, -0.5], 1920, 1080), [0, 1080, 1920, -0.5]);
+    assert.deepEqual(snapNearBorder([10, 20, 1925, 1100], 1920, 1080), [10, 20, 1925, 1100]);
 });

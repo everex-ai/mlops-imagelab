@@ -175,3 +175,15 @@ export function clampRect(
         height: Math.max(0, ymax - ymin),
     };
 }
+
+// Snap image-space coordinates (flat [x1, y1, x2, y2, ...]) that lie within
+// eps outside the image onto the border. Only float noise is affected;
+// real out-of-image values (existing data) are kept.
+export function snapNearBorder(points: number[], width: number, height: number, eps = 1e-3): number[] {
+    return points.map((value: number, idx: number): number => {
+        const max = idx % 2 === 0 ? width : height;
+        if (value < 0 && value > -eps) return 0;
+        if (value > max && value < max + eps) return max;
+        return value;
+    });
+}
