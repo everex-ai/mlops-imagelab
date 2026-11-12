@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 
 import {
     clampGroupDelta, clampEdges, unwrapAngle, clampRotationAngle, clampRect, snapNearBorder, clampMovedPoint,
+    skeletonMemberExtent, rotateDelta,
 } from '../src/typescript/imageBounds.ts';
 
 const B = {
@@ -231,4 +232,51 @@ test('group limit ignores outside keypoints; they are clamped individually', () 
     const { dx, dy } = clampGroupDelta([box(400, 300, 700, 900)], -500, -10, B);
     assert.deepEqual([dx, dy], [-400, -10]);
     assert.deepEqual(clampMovedPoint(0, 0, 0 + dx, 0 + dy, B), [0, 0]);
+});
+
+test('skeletonMemberExtent: wrapping rect plus non-outside keypoints', () => {
+    const extent = skeletonMemberExtent(
+        {
+            xtl: 100, ytl: 100, xbr: 200, ybr: 200,
+        },
+        [
+            { cx: 250, cy: 150, outside: false },
+            { cx: 0, cy: 0, outside: true },
+        ],
+    );
+    assert.deepEqual(extent, box(100, 100, 250, 200));
+});
+
+test('skeletonMemberExtent: keypoints only, outside ones never limit the group', () => {
+    assert.deepEqual(skeletonMemberExtent(null, [
+        { cx: 10, cy: 20, outside: false },
+        { cx: 30, cy: 5, outside: false },
+        { cx: -500, cy: -500, outside: true },
+    ]), box(10, 5, 30, 20));
+    assert.equal(skeletonMemberExtent(null, [{ cx: 1, cy: 1, outside: true }]), null);
+    assert.equal(skeletonMemberExtent(null, []), null);
+});
+
+test('group of member extents stops together at the first wall', () => {
+    const members = [
+        skeletonMemberExtent(null, [{ cx: 1900, cy: 500, outside: false }]),
+        skeletonMemberExtent(null, [{ cx: 1000, cy: 500, outside: false }]),
+    ].filter(Boolean);
+    assert.deepEqual(clampGroupDelta(members as any, 100, 0, B), { dx: 20, dy: 0 });
+});
+
+test('rotateDelta: identity at 0 degrees, round trip and 90-degree axes', () => {
+    assert.deepEqual(rotateDelta(3, -4, 0), { dx: 3, dy: -4 });
+    const near = (a: number, b: number) => assert.ok(Math.abs(a - b) < 1e-9, `${a} != ${b}`);
+    // local +x of an element rotated 90 deg clockwise points down on screen
+    const r = rotateDelta(100, 0, 90);
+    near(r.dx, 0);
+    near(r.dy, 100);
+    const back = rotateDelta(r.dx, r.dy, -90);
+    near(back.dx, 100);
+    near(back.dy, 0);
+    const odd = rotateDelta(7, 11, 33);
+    const odd2 = rotateDelta(odd.dx, odd.dy, -33);
+    near(odd2.dx, 7);
+    near(odd2.dy, 11);
 });

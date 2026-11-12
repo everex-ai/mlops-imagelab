@@ -8,7 +8,7 @@
 // enums, no parameter properties), so `node --test` can load it directly with
 // Node's built-in type stripping. It is the shared contract between INNO-158
 // (single/multi drag, keypoints, bbox handles, rotation, skeleton drawing) and
-// the INNO-156 keypoint group drag (`constrainGroupDelta` calls
+// the INNO-156 keypoint group drag (`GroupDragSession.constrain` calls
 // `clampGroupDelta`).
 //
 // Core rule — "allowed range relative to the start position": every moving
@@ -204,4 +204,45 @@ export function clampMovedPoint(
         clampValue(x, Math.min(bounds.xmin, startX), Math.max(bounds.xmax, startX)),
         clampValue(y, Math.min(bounds.ymin, startY), Math.max(bounds.ymax, startY)),
     ];
+}
+
+// Drag-start extent of a skeleton group member (INNO-156/158): its wrapping
+// rect when it moves as a whole, plus every moving keypoint that is not
+// `outside` (those are clamped one by one with clampMovedPoint instead).
+// Null when nothing limits the member.
+export function skeletonMemberExtent(
+    rect: { xtl: number; ytl: number; xbr: number; ybr: number } | null,
+    keypoints: { cx: number; cy: number; outside: boolean }[],
+): Extent | null {
+    const xs: number[] = [];
+    const ys: number[] = [];
+    if (rect) {
+        xs.push(rect.xtl, rect.xbr);
+        ys.push(rect.ytl, rect.ybr);
+    }
+    for (const { cx, cy, outside } of keypoints) {
+        if (outside) continue;
+        xs.push(cx);
+        ys.push(cy);
+    }
+    if (!xs.length) return null;
+    return {
+        xmin: Math.min(...xs), ymin: Math.min(...ys), xmax: Math.max(...xs), ymax: Math.max(...ys),
+    };
+}
+
+// Rotate a delta by `degrees` (SVG convention: positive is clockwise on screen,
+// y axis down). svg.draggable measures a drag in the dragged element's own
+// frame, which for a rotated shape is rotated by its `rotate` transform:
+// rotateDelta(local, +rotation) gives the canvas-axis delta, and
+// rotateDelta(canvas, -rotation) maps it back. Exact for 0 degrees.
+export function rotateDelta(dx: number, dy: number, degrees: number): Delta {
+    if (!degrees) return { dx, dy };
+    const rad = (degrees * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    return {
+        dx: dx * cos - dy * sin,
+        dy: dx * sin + dy * cos,
+    };
 }

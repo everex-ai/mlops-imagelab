@@ -38,7 +38,7 @@ import {
 } from './shared';
 import {
     Bounds, Extent, clampGroupDelta, clampEdges, unwrapAngle, clampRotationAngle, boundsFromGeometry,
-    snapNearBorder, clampMovedPoint,
+    snapNearBorder, clampMovedPoint, rotateDelta,
 } from './imageBounds';
 import {
     CanvasModel, Geometry, UpdateReasons, FrameZoom, ActiveElement,
@@ -1205,11 +1205,11 @@ export class CanvasViewImpl implements CanvasView, Listener {
         }
     }
 
-    // Snapshot of a companion shape at multi-drag start. Companions are placed
-    // at "start position + clamped delta" on every tick (INNO-158), so they
-    // move in the same tick and by the same delta as the primary shape.
+    // Snapshot of a shape at drag start. Group members (groupDrag.ts) are
+    // placed at "start position + clamped delta" on every tick (INNO-158), so
+    // they move in the same tick and by the same delta as the primary shape.
     // skipLockedKeypoints: the primary skeleton drag does not move locked
-    // keypoints (companion moves do).
+    // keypoints (group member moves do).
     private captureDragStart(
         selectedShape: SVG.Shape,
         selectedState: DrawnState,
@@ -1321,8 +1321,8 @@ export class CanvasViewImpl implements CanvasView, Listener {
     // clamped (rotated rectangles, polygons, masks, ...), which then do not
     // take part in the stop decision of a group.
     // includeLockedKeypoints: whether locked skeleton keypoints move along on
-    // the calling path (primary skeleton drag skips them, companion moves and
-    // rotation do not).
+    // the calling path (the primary skeleton drag skips them, group member
+    // moves and rotation move them too).
     private collectClampExtent(state: any, shape: SVG.Shape, includeLockedKeypoints: boolean): Extent | null {
         if (!state || !shape) return null;
 
@@ -1488,16 +1488,20 @@ export class CanvasViewImpl implements CanvasView, Listener {
             // the primary shape, its keypoints and all group members are then
             // placed at "start + clamped delta" in the same tick.
             let clampExtents: Extent[] = [];
-            let clampBounds: Bounds = null;
+            let clampBounds: Bounds | null = null;
+            // in the dragged element's own frame (what the constraint uses)
             let clampedDelta = { dx: 0, dy: 0 };
-            let skeletonStart: DragStartSnapshot = null;
+            let skeletonStart: DragStartSnapshot | null = null;
+            // rotation (degrees) of the dragged element: svg.draggable measures
+            // the drag in its rotated frame, group members move in canvas axes
+            let dragRotation = 0;
 
             if (state.shapeType === 'cuboid') {
                 // the cuboid drives its own face/edge dragging; keep the
                 // library default (not clamped, see plan scope boundaries)
                 (draggableInstance as any).draggable({});
             } else {
-                (draggableInstance as any).draggable(function constraint(x: number, y: number) {
+                (draggableInstance as any).draggable(function constraint(this: SVG.Element, x: number, y: number) {
                     const handler = this.remember('_draggable');
                     const startBox = handler?.startPoints?.box;
                     if (!startBox) return { x, y };
@@ -1534,6 +1538,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
                 clampedDelta = { dx: 0, dy: 0 };
                 clampBounds = this.imageBounds();
                 clampExtents = [];
+                dragRotation = (draggableInstance.transform() as any).rotation || 0;
                 const primaryExtent = this.collectClampExtent(state, shape, false);
                 if (primaryExtent) clampExtents.push(primaryExtent);
 
@@ -1545,40 +1550,52 @@ export class CanvasViewImpl implements CanvasView, Listener {
             }).on('dragmove', (e: CustomEvent): void => {
                 // dragmove fires before the library moves the element; compute
                 // the clamped delta here so the constraint function, the
-                // keypoints and the companions all use the same value
+                // keypoints and the group members all use the same value
                 const { handler, p } = (e.detail || {}) as any;
+                // the same delta in canvas axes (group members, keypoints)
+                let canvasDelta = rotateDelta(clampedDelta.dx, clampedDelta.dy, dragRotation);
                 if (handler?.startPoints && p) {
-                    const rawDx = p.x - handler.startPoints.point.x;
-                    const rawDy = p.y - handler.startPoints.point.y;
+                    // p is in the dragged element's own (possibly rotated) frame
+                    const raw = rotateDelta(
+                        p.x - handler.startPoints.point.x,
+                        p.y - handler.startPoints.point.y,
+                        dragRotation,
+                    );
                     if (state.shapeType === 'cuboid') {
                         // a cuboid primary moves by the raw delta (no
                         // constraint function), so its group is not clamped
-                        clampedDelta = { dx: rawDx, dy: rawDy };
+                        canvasDelta = raw;
                     } else if (groupDrag) {
                         // INNO-156/158: one clamp over the primary and every
                         // group member, so the group stops together
-                        clampedDelta = groupDrag.constrain(clampExtents, rawDx, rawDy, clampBounds);
+                        canvasDelta = groupDrag.constrain(clampExtents, raw.dx, raw.dy, clampBounds);
+                    } else if (clampBounds) {
+                        canvasDelta = clampGroupDelta(clampExtents, raw.dx, raw.dy, clampBounds);
                     } else {
-                        clampedDelta = clampGroupDelta(clampExtents, rawDx, rawDy, clampBounds);
+                        canvasDelta = raw;
                     }
                     if (state.shapeType === 'mask') {
                         // integer grid, as snapToGrid: 1 did; snap towards the
                         // start position so the snapped delta never leaves the
-                        // clamp interval (companions must not overshoot a wall)
+                        // clamp interval (group members must not overshoot a wall)
                         const { box } = handler.startPoints;
                         const snap = (origin: number, delta: number): number => (
                             (delta < 0 ? Math.ceil(origin + delta) : Math.floor(origin + delta)) - origin
                         );
-                        clampedDelta = {
-                            dx: snap(box.x, clampedDelta.dx),
-                            dy: snap(box.y, clampedDelta.dy),
+                        canvasDelta = {
+                            dx: snap(box.x, canvasDelta.dx),
+                            dy: snap(box.y, canvasDelta.dy),
                         };
                     }
+                    clampedDelta = rotateDelta(canvasDelta.dx, canvasDelta.dy, -dragRotation);
                 }
 
                 onDragMove();
-                const { dx, dy } = clampedDelta;
-                if (state.shapeType === 'skeleton' && skeletonStart?.xtl !== undefined) {
+                const { dx, dy } = canvasDelta;
+                if (
+                    state.shapeType === 'skeleton' && skeletonStart?.xtl !== undefined &&
+                    skeletonStart.ytl !== undefined && skeletonStart.circles
+                ) {
                     this.moveSkeletonCircles(skeletonStart.circles, dx, dy);
 
                     const x = skeletonStart.xtl + dx;

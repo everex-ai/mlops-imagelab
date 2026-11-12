@@ -11,7 +11,7 @@
 // member by the same delta and, on dragend, produces one edit per object so
 // cvat-ui can save them as ONE undo entry (annotations.batchSave).
 //
-// INNO-158: the delta is limited once per tick by constrainGroupDelta over the
+// INNO-158: the delta is limited once per tick by clampGroupDelta over the
 // drag-start extents of the primary and of every member, so the whole group
 // stops together (keeping its spacing) as soon as any member reaches the
 // image border. `outside` keypoints do not limit the group; each is clamped
@@ -20,7 +20,7 @@
 import * as SVG from 'svg.js';
 import { DrawnState } from './shared';
 import {
-    Bounds, Delta, Extent, clampGroupDelta, clampMovedPoint,
+    Bounds, Delta, Extent, clampGroupDelta, clampMovedPoint, skeletonMemberExtent,
 } from './imageBounds';
 
 export interface Point {
@@ -65,16 +65,6 @@ export interface GroupDragHost {
     collectSkeletonBbox: (group: SVG.G) => number[] | undefined;
 }
 
-// INNO-156 KTD5 / INNO-158: every member — the primary included — is placed at
-// "start + constrainGroupDelta(raw delta)": the raw delta clamped so that every
-// drag-start extent, moved by it, stays inside the image (or does not go
-// further out than it started).
-export function constrainGroupDelta(extents: Extent[], delta: Point, bounds: Bounds | null): Point {
-    if (!bounds) return delta;
-    const { dx, dy } = clampGroupDelta(extents, delta.x, delta.y, bounds);
-    return { x: dx, y: dy };
-}
-
 interface CircleStart {
     circle: SVG.Circle;
     cx: number;
@@ -111,29 +101,6 @@ function circleOf(group: SVG.G, elementClientID: number): SVG.Circle | null {
     return (group.children().find(
         (child: SVG.Element) => child.type === 'circle' && +child.attr('data-client-id') === elementClientID,
     ) as SVG.Circle) ?? null;
-}
-
-// Drag-start extent of a skeleton member: its wrapping rect when it moves as a
-// whole, and every moving keypoint that is not `outside`.
-function skeletonExtent(
-    rectStart: { xtl: number; ytl: number; xbr: number; ybr: number } | null,
-    circles: CircleStart[],
-): Extent | null {
-    const xs: number[] = [];
-    const ys: number[] = [];
-    if (rectStart) {
-        xs.push(rectStart.xtl, rectStart.xbr);
-        ys.push(rectStart.ytl, rectStart.ybr);
-    }
-    for (const { cx, cy, outside } of circles) {
-        if (outside) continue;
-        xs.push(cx);
-        ys.push(cy);
-    }
-    if (!xs.length) return null;
-    return {
-        xmin: Math.min(...xs), ymin: Math.min(...ys), xmax: Math.max(...xs), ymax: Math.max(...ys),
-    };
 }
 
 export class GroupDragSession {
@@ -269,7 +236,7 @@ export class GroupDragSession {
                 ybr: +rect.attr('data-ybr'),
             } : null;
 
-            const extent = skeletonExtent(rectStart, circles);
+            const extent = skeletonMemberExtent(rectStart, circles);
             if (extent) extents.push(extent);
 
             if (isPrimaryTop) primaryParentWhole = whole;
@@ -285,11 +252,13 @@ export class GroupDragSession {
         );
     }
 
-    // The delta every member (and the primary) moves by this tick: the raw
-    // delta clamped over the primary's and the members' drag-start extents.
+    // INNO-156 KTD5 / INNO-158: the delta every member (and the primary)
+    // moves by this tick: the raw delta clamped so that every drag-start
+    // extent, the primary's and the members', stays inside the image (or
+    // does not go further out than it started).
     public constrain(primaryExtents: Extent[], dx: number, dy: number, bounds: Bounds | null): Delta {
-        const delta = constrainGroupDelta([...primaryExtents, ...this.extents], { x: dx, y: dy }, bounds);
-        return { dx: delta.x, dy: delta.y };
+        if (!bounds) return { dx, dy };
+        return clampGroupDelta([...primaryExtents, ...this.extents], dx, dy, bounds);
     }
 
     // Places every member at "start + (dx, dy)"; the primary is placed by
