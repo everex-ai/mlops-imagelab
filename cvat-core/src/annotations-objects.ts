@@ -17,6 +17,7 @@ import {
 import AnnotationHistory from './annotations-history';
 import logger from './logger';
 import { SerializedShape, SerializedTrack, SerializedTag } from './server-response-types';
+import { fallbackSkeletonBbox, SKELETON_BBOX_FALLBACK_MARGIN, KeypointExtent } from './skeleton-bbox';
 import {
     checkNumberOfPoints, attrsAsAnObject, checkShapeArea, mask2Rle, rle2Mask,
     computeWrappingBox, findAngleDiff, rotatePoint, validateAttributeValue, cropMask,
@@ -502,6 +503,30 @@ class Drawn extends Annotation {
         return fittedPoints;
     }
 
+    // Geometry of the object at the frame before the edit being saved
+    // (overridden by Shape and Track); null when unknown.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    protected geometryBeforeEdit(frame: number): { points: number[]; rotation: number } | null {
+        return null;
+    }
+
+    private isRectangleMove(data: ObjectState, frame: number): boolean {
+        if (this.shapeType !== ShapeType.RECTANGLE || data.rotation) {
+            return false;
+        }
+
+        const before = this.geometryBeforeEdit(frame);
+        if (!before || before.rotation || before.points.length !== 4 || data.points.length !== 4) {
+            return false;
+        }
+
+        const SIZE_EPS = 1e-3;
+        const [xtl, ytl, xbr, ybr] = data.points;
+        const [prevXtl, prevYtl, prevXbr, prevYbr] = before.points;
+        return Math.abs((xbr - xtl) - (prevXbr - prevXtl)) < SIZE_EPS &&
+            Math.abs((ybr - ytl) - (prevYbr - prevYtl)) < SIZE_EPS;
+    }
+
     protected validateStateBeforeSave(data: ObjectState, updated: ObjectState['updateFlags'], frame?: number): number[] {
         Annotation.prototype.validateStateBeforeSave.call(this, data, updated);
 
@@ -511,7 +536,13 @@ class Drawn extends Annotation {
             checkNumberOfPoints(this.shapeType, data.points);
             // cut points
             const { width, height } = this.framesInfo[frame];
-            fittedPoints = this.fitPoints(data.points, data.rotation, width, height);
+            // INNO-158: a whole-rectangle move (unrotated, size unchanged) is
+            // kept as is. The canvas already stops the move at the image
+            // border, and a rectangle that was partly outside before must not
+            // shrink on drop. Resizes still get fitted to the image.
+            fittedPoints = this.isRectangleMove(data, frame) ?
+                [...data.points] :
+                this.fitPoints(data.points, data.rotation, width, height);
             if (this.dimension === DimensionType.DIMENSION_2D && !checkShapeArea(this.shapeType, fittedPoints)) {
                 fittedPoints = [];
             }
@@ -540,6 +571,10 @@ export class Shape extends Drawn {
         this.occluded = data.occluded || false;
         this.outside = data.outside || false;
         this.zOrder = data.z_order;
+    }
+
+    protected geometryBeforeEdit(): { points: number[]; rotation: number } | null {
+        return Array.isArray(this.points) ? { points: this.points, rotation: this.rotation } : null;
     }
 
     protected withContext(frame: number): ReturnType<Drawn['withContext']> & {
@@ -860,6 +895,11 @@ export class Track extends Drawn {
             acc[shape.frame] = convertTrackedShape(shape);
             return acc;
         }, {});
+    }
+
+    protected geometryBeforeEdit(frame: number): { points: number[]; rotation: number } | null {
+        const { points, rotation } = this.get(frame);
+        return Array.isArray(points) ? { points, rotation } : null;
     }
 
     protected withContext(frame: number): ReturnType<Drawn['withContext']> & {
@@ -2029,7 +2069,6 @@ export class SkeletonShape extends Shape {
         // present, derive a sensible starting bbox from the keypoints plus a
         // small visual margin so first-edit soft-snap does not collapse the
         // bbox onto the keypoint corner.
-        const SKELETON_BBOX_FALLBACK_MARGIN = 20;
         const incoming = Array.isArray(data.bbox) && data.bbox.length === 4 ?
             data.bbox :
             null;
@@ -2048,13 +2087,15 @@ export class SkeletonShape extends Shape {
                     if (i + 1 < pts.length) ys.push(pts[i + 1]);
                 }
             }
+            // INNO-158: the margin is clipped to the image
+            const frameInfo = this.framesInfo[data.frame];
             this.bbox = xs.length && ys.length ?
-                [
-                    Math.min(...xs) - SKELETON_BBOX_FALLBACK_MARGIN,
-                    Math.min(...ys) - SKELETON_BBOX_FALLBACK_MARGIN,
-                    Math.max(...xs) + SKELETON_BBOX_FALLBACK_MARGIN,
-                    Math.max(...ys) + SKELETON_BBOX_FALLBACK_MARGIN,
-                ] :
+                fallbackSkeletonBbox({
+                    xmin: Math.min(...xs),
+                    ymin: Math.min(...ys),
+                    xmax: Math.max(...xs),
+                    ymax: Math.max(...ys),
+                }, SKELETON_BBOX_FALLBACK_MARGIN, frameInfo?.width, frameInfo?.height) :
                 [0, 0, 0, 0];
         }
         this.readOnlyFields = ['points', 'label', 'occluded'];
@@ -3218,6 +3259,15 @@ export class SkeletonTrack extends Track {
         }
     }
 
+    // INNO-158: keypoint extent + margin, clipped to the frame's image
+    // (shared by toJSON, save soft-snap seed and get/resolveBbox)
+    private fallbackBbox(keypoints: KeypointExtent, frame: number): number[] {
+        const frameInfo = this.framesInfo[frame];
+        return fallbackSkeletonBbox(
+            keypoints, SKELETON_BBOX_FALLBACK_MARGIN, frameInfo?.width, frameInfo?.height,
+        );
+    }
+
     protected saveRotation(rotation: number, frame: number): void {
         // Skeleton track rotation bakes into the child keypoint keyframes at
         // this frame (implicit keyframe semantics): the parent rotation stays
@@ -3350,7 +3400,6 @@ export class SkeletonTrack extends Track {
         // exported keyframe wrapping its keypoints means interpolation on
         // re-import stays valid (linear interpolation preserves containment),
         // matching what the canvas displays via getPosition.
-        const SKELETON_TRACK_BBOX_FALLBACK_MARGIN = 20;
         result.shapes = result.shapes.map((shape) => {
             const storedShape = this.shapes[shape.frame];
             const stored = storedShape && Array.isArray((storedShape as any).bbox) ?
@@ -3379,12 +3428,9 @@ export class SkeletonTrack extends Track {
             if (![xtl, ytl, xbr, ybr].every(Number.isFinite)) {
                 bbox = stored || [0, 0, 0, 0];
             } else if (degenerate) {
-                bbox = [
-                    xtl - SKELETON_TRACK_BBOX_FALLBACK_MARGIN,
-                    ytl - SKELETON_TRACK_BBOX_FALLBACK_MARGIN,
-                    xbr + SKELETON_TRACK_BBOX_FALLBACK_MARGIN,
-                    ybr + SKELETON_TRACK_BBOX_FALLBACK_MARGIN,
-                ];
+                bbox = this.fallbackBbox({
+                    xmin: xtl, ymin: ytl, xmax: xbr, ymax: ybr,
+                }, shape.frame);
             } else {
                 bbox = [
                     Math.min(stored[0], xtl),
@@ -3659,7 +3705,6 @@ export class SkeletonTrack extends Track {
             // keypoint; it only expands, it never shrinks. When there is no
             // usable bbox yet (legacy data), derive one from the keypoint
             // extent plus a small visual margin (matches SkeletonShape).
-            const SKELETON_TRACK_BBOX_FALLBACK_MARGIN = 20;
             const displayedBbox = Array.isArray(parentPosition.bbox) && parentPosition.bbox.length === 4 &&
                 !(parentPosition.bbox[0] === 0 && parentPosition.bbox[1] === 0 &&
                     parentPosition.bbox[2] === 0 && parentPosition.bbox[3] === 0) ?
@@ -3684,12 +3729,9 @@ export class SkeletonTrack extends Track {
             let mergedBbox: number[] | null = null;
             if (Number.isFinite(xtl) && Number.isFinite(ytl) &&
                 Number.isFinite(xbr) && Number.isFinite(ybr)) {
-                mergedBbox = seedBbox ? [xtl, ytl, xbr, ybr] : [
-                    xtl - SKELETON_TRACK_BBOX_FALLBACK_MARGIN,
-                    ytl - SKELETON_TRACK_BBOX_FALLBACK_MARGIN,
-                    xbr + SKELETON_TRACK_BBOX_FALLBACK_MARGIN,
-                    ybr + SKELETON_TRACK_BBOX_FALLBACK_MARGIN,
-                ];
+                mergedBbox = seedBbox ? [xtl, ytl, xbr, ybr] : this.fallbackBbox({
+                    xmin: xtl, ymin: ytl, xmax: xbr, ymax: ybr,
+                }, frame);
             }
 
             const bboxChanged = mergedBbox !== null &&
@@ -3773,7 +3815,6 @@ export class SkeletonTrack extends Track {
         // (e.g. a first keyframe left at [0,0,0,0] while a later keyframe got
         // a real bbox). Mirrors the SkeletonShape constructor / addSkeleton
         // fallback (keypoint min/max + margin).
-        const SKELETON_TRACK_BBOX_FALLBACK_MARGIN = 20;
         const resolveBbox = (shape: any, frame: number): number[] => {
             const b = shape && shape.bbox;
             const valid = Array.isArray(b) && b.length === 4 &&
@@ -3795,12 +3836,9 @@ export class SkeletonTrack extends Track {
                 }
             }
             if ([xtl, ytl, xbr, ybr].every(Number.isFinite)) {
-                return [
-                    xtl - SKELETON_TRACK_BBOX_FALLBACK_MARGIN,
-                    ytl - SKELETON_TRACK_BBOX_FALLBACK_MARGIN,
-                    xbr + SKELETON_TRACK_BBOX_FALLBACK_MARGIN,
-                    ybr + SKELETON_TRACK_BBOX_FALLBACK_MARGIN,
-                ];
+                return this.fallbackBbox({
+                    xmin: xtl, ymin: ytl, xmax: xbr, ymax: ybr,
+                }, frame);
             }
             return [0, 0, 0, 0];
         };
