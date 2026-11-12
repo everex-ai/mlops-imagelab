@@ -797,6 +797,8 @@ export class DrawHandlerImpl implements DrawHandler {
         // keypoints are laid out inside the clamped rect, so the preview and
         // the created skeleton match and no keypoint lands outside the image
         const layoutSkeleton = (): void => {
+            const { pointsGroup } = this;
+            if (!pointsGroup) return;
             const clamped = clampRect({
                 x: this.drawInstance.x(),
                 y: this.drawInstance.y(),
@@ -808,13 +810,13 @@ export class DrawHandlerImpl implements DrawHandler {
             const {
                 x, y, width, height,
             } = clamped;
-            this.pointsGroup.style({
+            pointsGroup.style({
                 transform: `translate(${x}px, ${y}px)`,
             });
 
             /* eslint-disable-next-line no-unsanitized/property */
-            this.pointsGroup.node.innerHTML = this.drawData.skeletonSVG;
-            Array.from(this.pointsGroup.node.children).forEach((child: Element) => {
+            pointsGroup.node.innerHTML = (this.drawData as DrawData).skeletonSVG as string;
+            Array.from(pointsGroup.node.children).forEach((child: Element) => {
                 const dataType = child.getAttribute('data-type');
                 if (child.tagName === 'circle' && dataType && dataType.includes('element')) {
                     child.setAttribute('r', `${this.controlPointsSize / this.geometry.scale}`);
@@ -829,7 +831,7 @@ export class DrawHandlerImpl implements DrawHandler {
                 }
             });
 
-            Array.from(this.pointsGroup.node.children).forEach((child: Element) => {
+            Array.from(pointsGroup.node.children).forEach((child: Element) => {
                 const dataType = child.getAttribute('data-type');
                 if (child.tagName === 'line' && dataType && dataType.includes('edge')) {
                     child.setAttribute('stroke-width', 'inherit');
@@ -837,8 +839,8 @@ export class DrawHandlerImpl implements DrawHandler {
                     const dataNodeFrom = child.getAttribute('data-node-from');
                     const dataNodeTo = child.getAttribute('data-node-to');
                     if (dataNodeFrom && dataNodeTo) {
-                        const from = this.pointsGroup.node.querySelector(`[data-node-id="${dataNodeFrom}"]`);
-                        const to = this.pointsGroup.node.querySelector(`[data-node-id="${dataNodeTo}"]`);
+                        const from = pointsGroup.node.querySelector(`[data-node-id="${dataNodeFrom}"]`);
+                        const to = pointsGroup.node.querySelector(`[data-node-id="${dataNodeTo}"]`);
 
                         if (from && to) {
                             const x1 = from.getAttribute('cx');

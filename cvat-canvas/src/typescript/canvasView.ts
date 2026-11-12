@@ -1258,7 +1258,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
             const wrapRect = (selectedShape as any).children().find(
                 (child: SVG.Element) => child.type === 'rect',
             );
-            if (wrapRect && start.xtl !== undefined) {
+            if (wrapRect && start.xtl !== undefined && start.ytl !== undefined && start.circles) {
                 const newXtl = start.xtl + dx;
                 const newYtl = start.ytl + dy;
 
@@ -1788,8 +1788,8 @@ export class CanvasViewImpl implements CanvasView, Listener {
             let skeletonGestureRotation = 0;
             // INNO-158: image-bounds clamp state of the ongoing skeleton
             // resize/rotation gesture, captured on resizestart
-            let gestureBounds: Bounds = null;
-            let gestureStartBox: Extent = null;
+            let gestureBounds: Bounds | null = null;
+            let gestureStartBox: Extent | null = null;
             let gestureStartKeypoints: number[] = [];
             let gestureUnwrappedRotation = 0;
 
@@ -1848,7 +1848,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
                         // axis-aligned rectangle; keypoints and edges get a
                         // transient visual rotation around the bbox center
                         // below instead.
-                        const { rotation } = resizableInstance.transform();
+                        const rotation = resizableInstance.transform().rotation as number;
                         if (rotation) {
                             resizableInstance.rotate(0);
                         }

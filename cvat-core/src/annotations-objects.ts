@@ -519,8 +519,9 @@ class Drawn extends Annotation {
         }
 
         const before = this.geometryBeforeEdit(frame);
-        const after = { points: data.points, rotation: data.rotation };
-        if (!isSizePreservingRectMove(before, after)) {
+        // data.points is validated by the caller; rotation is 0 here
+        const after = { points: data.points as number[], rotation: data.rotation as number };
+        if (!before || !isSizePreservingRectMove(before, after)) {
             return false;
         }
 
@@ -541,9 +542,10 @@ class Drawn extends Annotation {
             // kept as is. The canvas already stops the move at the image
             // border, and a rectangle that was partly outside before must not
             // shrink on drop. Resizes still get fitted to the image.
-            fittedPoints = this.isRectangleMove(data, frame) ?
-                [...data.points] :
-                this.fitPoints(data.points, data.rotation, width, height);
+            const points = data.points as number[];
+            fittedPoints = this.isRectangleMove(data, frame as number) ?
+                [...points] :
+                this.fitPoints(points, data.rotation as number, width, height);
             if (this.dimension === DimensionType.DIMENSION_2D && !checkShapeArea(this.shapeType, fittedPoints)) {
                 fittedPoints = [];
             }

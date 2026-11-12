@@ -30,8 +30,8 @@ export function fallbackSkeletonBbox(
     imageWidth: number | undefined,
     imageHeight: number | undefined,
 ): number[] {
-    const width = Number.isFinite(imageWidth) ? imageWidth : Number.POSITIVE_INFINITY;
-    const height = Number.isFinite(imageHeight) ? imageHeight : Number.POSITIVE_INFINITY;
+    const width = typeof imageWidth === 'number' && Number.isFinite(imageWidth) ? imageWidth : Number.POSITIVE_INFINITY;
+    const height = typeof imageHeight === 'number' && Number.isFinite(imageHeight) ? imageHeight : Number.POSITIVE_INFINITY;
     return [
         Math.max(keypoints.xmin - margin, Math.min(0, keypoints.xmin)),
         Math.max(keypoints.ymin - margin, Math.min(0, keypoints.ymin)),
@@ -52,8 +52,8 @@ export function clampMovedPoint(
     imageWidth: number | undefined,
     imageHeight: number | undefined,
 ): number[] {
-    const width = Number.isFinite(imageWidth) ? imageWidth : Number.POSITIVE_INFINITY;
-    const height = Number.isFinite(imageHeight) ? imageHeight : Number.POSITIVE_INFINITY;
+    const width = typeof imageWidth === 'number' && Number.isFinite(imageWidth) ? imageWidth : Number.POSITIVE_INFINITY;
+    const height = typeof imageHeight === 'number' && Number.isFinite(imageHeight) ? imageHeight : Number.POSITIVE_INFINITY;
     return [
         Math.min(Math.max(x, Math.min(0, startX)), Math.max(width, startX)),
         Math.min(Math.max(y, Math.min(0, startY)), Math.max(height, startY)),
