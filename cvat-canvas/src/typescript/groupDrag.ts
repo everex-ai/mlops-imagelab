@@ -10,9 +10,18 @@
 // primary is moved by svg.draggable as usual; the session moves every other
 // member by the same delta and, on dragend, produces one edit per object so
 // cvat-ui can save them as ONE undo entry (annotations.batchSave).
+//
+// INNO-158: the delta is limited once per tick by constrainGroupDelta over the
+// drag-start extents of the primary and of every member, so the whole group
+// stops together (keeping its spacing) as soon as any member reaches the
+// image border. `outside` keypoints do not limit the group; each is clamped
+// on its own (clampMovedPoint) instead.
 
 import * as SVG from 'svg.js';
 import { DrawnState } from './shared';
+import {
+    Bounds, Delta, Extent, clampGroupDelta, clampMovedPoint,
+} from './imageBounds';
 
 export interface Point {
     x: number;
@@ -48,24 +57,30 @@ export interface GroupDragHost {
         shape: SVG.Shape, state: DrawnState, start: DragStartSnapshot, dx: number, dy: number,
     ) => void;
     captureDragStart: (shape: SVG.Shape, state: DrawnState) => DragStartSnapshot;
+    // the drag-start extent of a non-skeleton member, null when that shape
+    // type is not clamped (rotated rectangles, polygons, masks, ...)
+    collectClampExtent: (state: any, shape: SVG.Shape, includeLockedKeypoints: boolean) => Extent | null;
     redrawSkeletonEdges: (clientID: number) => void;
     collectShapePoints: (objState: any, shape: SVG.Shape) => number[];
     collectSkeletonBbox: (group: SVG.G) => number[] | undefined;
 }
 
-// INNO-156 KTD5: every member — the primary included — is placed at
-// "start + constrainGroupDelta(raw delta)". It is the identity here on purpose:
-// at integration INNO-158 (separate branch, not merged yet) replaces the body
-// with its clampGroupDelta (imageBounds.ts on that branch) to stop the whole
-// group at the image border, using the member start positions recorded here.
-export function constrainGroupDelta(delta: Point): Point {
-    return delta;
+// INNO-156 KTD5 / INNO-158: every member — the primary included — is placed at
+// "start + constrainGroupDelta(raw delta)": the raw delta clamped so that every
+// drag-start extent, moved by it, stays inside the image (or does not go
+// further out than it started).
+export function constrainGroupDelta(extents: Extent[], delta: Point, bounds: Bounds | null): Point {
+    if (!bounds) return delta;
+    const { dx, dy } = clampGroupDelta(extents, delta.x, delta.y, bounds);
+    return { x: dx, y: dy };
 }
 
 interface CircleStart {
     circle: SVG.Circle;
     cx: number;
     cy: number;
+    // outside keypoints are clamped one by one, not part of the group limit
+    outside: boolean;
 }
 
 interface SkeletonMember {
@@ -98,34 +113,57 @@ function circleOf(group: SVG.G, elementClientID: number): SVG.Circle | null {
     ) as SVG.Circle) ?? null;
 }
 
+// Drag-start extent of a skeleton member: its wrapping rect when it moves as a
+// whole, and every moving keypoint that is not `outside`.
+function skeletonExtent(
+    rectStart: { xtl: number; ytl: number; xbr: number; ybr: number } | null,
+    circles: CircleStart[],
+): Extent | null {
+    const xs: number[] = [];
+    const ys: number[] = [];
+    if (rectStart) {
+        xs.push(rectStart.xtl, rectStart.xbr);
+        ys.push(rectStart.ytl, rectStart.ybr);
+    }
+    for (const { cx, cy, outside } of circles) {
+        if (outside) continue;
+        xs.push(cx);
+        ys.push(cy);
+    }
+    if (!xs.length) return null;
+    return {
+        xmin: Math.min(...xs), ymin: Math.min(...ys), xmax: Math.max(...xs), ymax: Math.max(...ys),
+    };
+}
+
 export class GroupDragSession {
     private host: GroupDragHost;
     private primaryState: any;
-    private primaryShape: SVG.Shape;
     private primaryIsElement: boolean;
     // top-level clientID of the primary (the skeleton for a keypoint)
     private primaryTopID: number;
     // whether the primary keypoint's skeleton translates as a whole
     private primaryParentWhole: boolean;
-    private primaryStart: Point;
     private members: Member[];
+    // drag-start extents of every member (the primary's own extent is passed
+    // in by canvasView, which also clamps single drags with it)
+    private extents: Extent[];
 
     private constructor(
         host: GroupDragHost,
         primaryState: any,
-        primaryShape: SVG.Shape,
         primaryTopID: number,
         primaryParentWhole: boolean,
         members: Member[],
+        extents: Extent[],
     ) {
         this.host = host;
         this.primaryState = primaryState;
-        this.primaryShape = primaryShape;
         this.primaryIsElement = Number.isInteger(primaryState.parentID);
         this.primaryTopID = primaryTopID;
         this.primaryParentWhole = primaryParentWhole;
         this.members = members;
-        this.primaryStart = this.primaryPosition();
+        this.extents = extents;
     }
 
     // Returns a session when the drag should move a group, null for the
@@ -133,7 +171,6 @@ export class GroupDragSession {
     public static begin(
         host: GroupDragHost,
         primaryState: any,
-        primaryShape: SVG.Shape,
         shiftKey: boolean,
     ): GroupDragSession | null {
         // Shift+drag on a selected keypoint moves only that keypoint
@@ -169,6 +206,7 @@ export class GroupDragSession {
         if (!topIDs.includes(primaryTopID)) topIDs.push(primaryTopID);
 
         const members: Member[] = [];
+        const extents: Extent[] = [];
         let primaryParentWhole = false;
         let movesSomethingElse = false;
 
@@ -185,6 +223,8 @@ export class GroupDragSession {
                 const drawnState = host.drawnStates[topID];
                 if (!drawnState) continue;
                 members.push({ kind: 'shape', clientID: topID, start: host.captureDragStart(shape, drawnState) });
+                const extent = host.collectClampExtent(obj, shape, true);
+                if (extent) extents.push(extent);
                 movesSomethingElse = true;
                 continue;
             }
@@ -214,7 +254,11 @@ export class GroupDragSession {
             for (const element of moving) {
                 if (isElement && element.clientID === primaryState.clientID) continue;
                 const circle = circleOf(group, element.clientID);
-                if (circle) circles.push({ circle, cx: circle.cx(), cy: circle.cy() });
+                if (circle) {
+                    circles.push({
+                        circle, cx: circle.cx(), cy: circle.cy(), outside: !!element.outside,
+                    });
+                }
             }
 
             const rect = whole ? findWrappingRect(group) : null;
@@ -225,6 +269,9 @@ export class GroupDragSession {
                 ybr: +rect.attr('data-ybr'),
             } : null;
 
+            const extent = skeletonExtent(rectStart, circles);
+            if (extent) extents.push(extent);
+
             if (isPrimaryTop) primaryParentWhole = whole;
             if (circles.length || rect) movesSomethingElse = true;
             members.push({
@@ -233,74 +280,25 @@ export class GroupDragSession {
         }
 
         if (!movesSomethingElse) return null;
-        return new GroupDragSession(host, primaryState, primaryShape, primaryTopID, primaryParentWhole, members);
+        return new GroupDragSession(
+            host, primaryState, primaryTopID, primaryParentWhole, members, extents,
+        );
     }
 
-    private primaryPosition(): Point {
-        if (this.primaryIsElement) {
-            const circle = this.primaryShape as SVG.Circle;
-            return { x: circle.cx(), y: circle.cy() };
-        }
-        if (this.primaryState.shapeType === 'skeleton') {
-            const rect = findWrappingRect(this.primaryShape as SVG.G);
-            if (rect) return { x: +rect.attr('data-xtl'), y: +rect.attr('data-ytl') };
-        }
-        const { cx, cy } = this.primaryShape.bbox();
-        return { x: cx, y: cy };
+    // The delta every member (and the primary) moves by this tick: the raw
+    // delta clamped over the primary's and the members' drag-start extents.
+    public constrain(primaryExtents: Extent[], dx: number, dy: number, bounds: Bounds | null): Delta {
+        const delta = constrainGroupDelta([...primaryExtents, ...this.extents], { x: dx, y: dy }, bounds);
+        return { dx: delta.x, dy: delta.y };
     }
 
-    public move(): void {
-        const current = this.primaryPosition();
-        const raw = { x: current.x - this.primaryStart.x, y: current.y - this.primaryStart.y };
-        const delta = constrainGroupDelta(raw);
-        this.placePrimary(delta.x - raw.x, delta.y - raw.y);
-        this.placeMembers(delta.x, delta.y);
+    // Places every member at "start + (dx, dy)"; the primary is placed by
+    // svg.draggable (canvasView's constraint function) with the same delta.
+    public move(dx: number, dy: number, bounds: Bounds | null): void {
+        this.placeMembers(dx, dy, bounds);
     }
 
-    // Shifts the primary by the correction constrainGroupDelta applied on top
-    // of where svg.draggable put it. A no-op while the function is the identity.
-    private placePrimary(cdx: number, cdy: number): void {
-        if (!cdx && !cdy) return;
-        const { host } = this;
-        if (this.primaryIsElement) {
-            const circle = this.primaryShape as SVG.Circle;
-            circle.center(circle.cx() + cdx, circle.cy() + cdy);
-            return;
-        }
-
-        if (this.primaryState.shapeType === 'skeleton') {
-            const group = this.primaryShape as SVG.G;
-            const rect = findWrappingRect(group);
-            if (rect) {
-                const xtl = +rect.attr('data-xtl') + cdx;
-                const ytl = +rect.attr('data-ytl') + cdy;
-                rect.move(xtl, ytl);
-                rect.attr({
-                    'data-xtl': xtl,
-                    'data-ytl': ytl,
-                    'data-xbr': +rect.attr('data-xbr') + cdx,
-                    'data-ybr': +rect.attr('data-ybr') + cdy,
-                });
-            }
-            for (const child of group.children()) {
-                if (child.type !== 'circle') continue;
-                const element = this.primaryState.elements
-                    .find((el: any) => el.clientID === +child.attr('data-client-id'));
-                if (element?.lock) continue;
-                (child as SVG.Circle).center((child as SVG.Circle).cx() + cdx, (child as SVG.Circle).cy() + cdy);
-            }
-            host.redrawSkeletonEdges(this.primaryTopID);
-            return;
-        }
-
-        const drawnState = host.drawnStates[this.primaryState.clientID];
-        if (drawnState) {
-            const current = host.captureDragStart(this.primaryShape, drawnState);
-            host.moveShapeVisually(this.primaryShape, drawnState, current, cdx, cdy);
-        }
-    }
-
-    private placeMembers(dx: number, dy: number): void {
+    private placeMembers(dx: number, dy: number, bounds: Bounds | null): void {
         const { host } = this;
         for (const member of this.members) {
             if (member.kind === 'shape') {
@@ -310,8 +308,14 @@ export class GroupDragSession {
                 continue;
             }
 
-            for (const { circle, cx, cy } of member.circles) {
-                circle.center(cx + dx, cy + dy);
+            for (const {
+                circle, cx, cy, outside,
+            } of member.circles) {
+                if (outside && bounds) {
+                    circle.center(...clampMovedPoint(cx, cy, cx + dx, cy + dy, bounds));
+                } else {
+                    circle.center(cx + dx, cy + dy);
+                }
             }
             if (member.rect && member.rectStart) {
                 const {
@@ -376,7 +380,7 @@ export class GroupDragSession {
     // Puts every member (not the primary, svg.draggable/abort handles it)
     // back to where the drag started.
     public abort(): void {
-        this.placeMembers(0, 0);
+        this.placeMembers(0, 0, null);
     }
 
     public get topLevelIDs(): number[] {

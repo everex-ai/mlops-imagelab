@@ -1445,6 +1445,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
             selectedElementClientIDs: () => this.selectedElementClientIDs,
             moveShapeVisually: this.moveShapeVisually.bind(this),
             captureDragStart: this.captureDragStart.bind(this),
+            collectClampExtent: this.collectClampExtent.bind(this),
             collectShapePoints: this.collectShapePoints.bind(this),
             collectSkeletonBbox: this.collectSkeletonBbox.bind(this),
             redrawSkeletonEdges: (clientID: number): void => {
@@ -1539,7 +1540,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
                 skeletonStart = state.shapeType === 'skeleton' ? this.captureDragStart(shape, state, true) : null;
 
                 groupDrag = GroupDragSession.begin(
-                    this.groupDragHost, state, shape, !!(e.detail as any)?.event?.shiftKey,
+                    this.groupDragHost, state, !!(e.detail as any)?.event?.shiftKey,
                 );
             }).on('dragmove', (e: CustomEvent): void => {
                 // dragmove fires before the library moves the element; compute
@@ -1549,7 +1550,17 @@ export class CanvasViewImpl implements CanvasView, Listener {
                 if (handler?.startPoints && p) {
                     const rawDx = p.x - handler.startPoints.point.x;
                     const rawDy = p.y - handler.startPoints.point.y;
-                    clampedDelta = clampGroupDelta(clampExtents, rawDx, rawDy, clampBounds);
+                    if (state.shapeType === 'cuboid') {
+                        // a cuboid primary moves by the raw delta (no
+                        // constraint function), so its group is not clamped
+                        clampedDelta = { dx: rawDx, dy: rawDy };
+                    } else if (groupDrag) {
+                        // INNO-156/158: one clamp over the primary and every
+                        // group member, so the group stops together
+                        clampedDelta = groupDrag.constrain(clampExtents, rawDx, rawDy, clampBounds);
+                    } else {
+                        clampedDelta = clampGroupDelta(clampExtents, rawDx, rawDy, clampBounds);
+                    }
                     if (state.shapeType === 'mask') {
                         // integer grid, as snapToGrid: 1 did; snap towards the
                         // start position so the snapped delta never leaves the
@@ -1581,7 +1592,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
                     setupSkeletonEdges(shape as SVG.G, skeletonSVGTemplate);
                 }
 
-                groupDrag?.move();
+                groupDrag?.move(dx, dy, clampBounds);
             }).on('dragend', (): void => {
                 if (aborted) {
                     this.resetViewPosition(state.clientID);
