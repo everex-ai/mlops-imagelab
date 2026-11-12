@@ -7,8 +7,7 @@
   "scripts": {
     "build": "webpack",
     "type-check": "tsc --noEmit",
-    "type-check:watch": "yarn run type-check --watch",
-    "test:unit": "node --test 'tests/*.test.ts'"
+    "type-check:watch": "yarn run type-check --watch"
   },
   "author": "CVAT.ai",
   "license": "MIT",

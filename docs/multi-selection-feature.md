@@ -7,11 +7,6 @@ CVAT 캔버스에 **다중 선택(Multi-Selection)** 기능을 추가하여, 여
 ### 지원 대상
 - 모든 셰이프 타입: Skeleton, Rectangle, Polygon, Polyline, Ellipse, Points, Mask
 
-> **INNO-156 / INNO-157 갱신 (2026-11).** 아래 원래 설명 중 바뀐 점:
-> - Shift+드래그 박스는 skeleton에 대해 **키포인트만** 고른다(원 중심이 박스 안, 보이는 키포인트만). 다른 도형은 지금처럼 객체 전체. 키포인트 선택은 Redux `selectedElementIDs`, 캔버스 `setSelection(clientIDs, elementClientIDs)`로 다닌다. `⌘+클릭`(mac) / `Ctrl+클릭`(그 외)으로 키포인트 하나를 넣고 뺀다.
-> - 선택된 키포인트·객체를 끌면 `cvat-canvas/src/typescript/groupDrag.ts`의 세션이 모두 같은 거리로 옮기고, `annotations.batchSave`로 저장해 Undo 한 번에 되돌아간다. 복사·삭제는 선택된 객체 + 선택된 키포인트의 주인을 대상으로 하며, Delete는 선택에 없는 활성 객체를 더하지 않는다.
-> - Shift+드래그 박스는 객체 안(skeleton bbox 안, 도형 몸통·외곽선, 연결선)에서도 시작한다. 보이는 잠기지 않은 키포인트 위는 그 키포인트 이동, 핸들·꼭짓점은 기존 동작. Shift 제스처의 클릭/박스 판정은 캔버스가 화면 5px 기준 한 곳에서 하고, 박스 없이 끝난 제스처는 `canvas.shiftclicked`(맨 위 객체)로 알린다. UI의 `onCanvasMouseUp`/`elementFromPoint` 경로는 없어졌다. Shift를 누르면 박스가 시작될 위치에서 커서가 십자로 바뀐다.
-
 ---
 
 ## 사용자 인터페이스

@@ -527,16 +527,6 @@ export function implementJob(Job: typeof JobClass): typeof JobClass {
         },
     });
 
-    Object.defineProperty(Job.prototype.annotations.batchSave, 'implementation', {
-        value: function batchSaveImplementation(
-            this: JobClass,
-            objectStates: Parameters<typeof JobClass.prototype.annotations.batchSave>[0],
-            frame: number,
-        ): ReturnType<typeof JobClass.prototype.annotations.batchSave> {
-            return Promise.resolve(getCollection(this).batchSave(objectStates, frame));
-        },
-    });
-
     Object.defineProperty(Job.prototype.annotations.batchUpdatePoints, 'implementation', {
         value: function batchUpdatePointsImplementation(
             this: JobClass,

@@ -12,8 +12,6 @@ module.exports = {
         'node_modules/**',
         'dist/**',
         'tests/**/*.cjs',
-        // node --test unit tests live outside tsconfig (no type-aware parsing)
-        'tests/**/*.test.ts',
     ],
     parserOptions: {
         project: './tsconfig.json',

@@ -43,10 +43,7 @@ Standard JS events are used.
 ```js
     - canvas.setup
     - canvas.activated => {state: ObjectState}
-    - canvas.clicked => {state: ObjectState, shiftKey: boolean, ctrlKey?: boolean, metaKey?: boolean}
-    - canvas.shiftclicked => {clientID: number}
-    - canvas.multiselected => {clientIDs: number[], elementClientIDs: number[]}
-    - canvas.multiedited => {edits: {state: ObjectState, points: number[], bbox?: number[]}[]}
+    - canvas.clicked => {state: ObjectState}
     - canvas.moved => {states: ObjectState[], x: number, y: number}
     - canvas.find => {states: ObjectState[], x: number, y: number}
     - canvas.drawn => {state: DrawnData}
