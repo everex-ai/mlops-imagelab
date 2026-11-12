@@ -26,6 +26,7 @@ import { ZoomHandler, ZoomHandlerImpl } from './zoomHandler';
 import { InteractionHandler, InteractionHandlerImpl } from './interactionHandler';
 import { AutoborderHandler, AutoborderHandlerImpl } from './autoborderHandler';
 import consts from './consts';
+import { DragStartSnapshot, GroupDragHost, GroupDragSession } from './groupDrag';
 import {
     translateToSVG, translateFromSVG, translateToCanvas, translateFromCanvas,
     pointsToNumberArray, parsePoints, displayShapeSize, scalarProduct,
@@ -35,6 +36,10 @@ import {
     composeShapeDimensions, getRoundedRotation,
     clamp,
 } from './shared';
+import {
+    Bounds, Extent, clampGroupDelta, clampEdges, unwrapAngle, clampRotationAngle, boundsFromGeometry,
+    snapNearBorder, clampMovedPoint, rotateDelta,
+} from './imageBounds';
 import {
     CanvasModel, Geometry, UpdateReasons, FrameZoom, ActiveElement,
     DrawData, MergeData, SplitData, Mode, Size, Configuration,
@@ -90,8 +95,30 @@ export class CanvasViewImpl implements CanvasView, Listener {
     private draggableShape: SVG.Shape | null;
     private resizableShape: SVG.Shape | null;
     private selectedClientIDs: number[];
+    // INNO-156: skeleton keypoints selected individually (element clientIDs)
+    private selectedElementClientIDs: number[] = [];
+    private groupDragHost: GroupDragHost;
     private multiSelectBox: SVG.Rect | null = null;
     private multiSelectStart: { x: number; y: number } | null = null;
+    // INNO-157: a Shift press waiting to become a box or a Shift+click
+    private shiftGesture: {
+        startClient: { x: number; y: number };
+        startSVG: { x: number; y: number };
+        target: Element;
+    } | null = null;
+    private shiftPressed = false;
+    private lastPointer: { x: number; y: number } | null = null;
+    // keypoint last activated by the Shift hover (avoids re-sending it)
+    private shiftHoverElementID: number | null = null;
+    // INNO-157: a Shift press on a keypoint whose person was not active yet
+    // (no Shift mousemove happened before the press). The owner is activated
+    // and the press is replayed on the keypoint once it becomes draggable.
+    private pendingKeypointPress: {
+        elementID: number;
+        clientX: number;
+        clientY: number;
+    } | null = null;
+    private boxCursorFrame: number | null = null;
     private ctrlPressed: boolean;
     private innerObjectsFlags: {
         drawHidden: Record<number, boolean>;
@@ -101,6 +128,11 @@ export class CanvasViewImpl implements CanvasView, Listener {
 
     private set mode(value: Mode) {
         this.controller.mode = value;
+        if (value !== Mode.IDLE && (this.shiftGesture || this.multiSelectBox)) {
+            // INNO-157: leaving the cursor mode cancels a pending box / Shift+click
+            this.cancelMultiSelect();
+            this.updateBoxSelectCursor();
+        }
     }
 
     private get mode(): Mode {
@@ -147,6 +179,14 @@ export class CanvasViewImpl implements CanvasView, Listener {
     private translateFromCanvas(points: number[]): number[] {
         const { offset } = this.controller.geometry;
         return translateFromCanvas(offset, points);
+    }
+
+    // INNO-158: edits clamped to the border compute "start + (border - start)",
+    // which can land a float ulp outside the image (e.g. -4.5e-7). Snap such
+    // coordinates onto the border so no out-of-image value is emitted.
+    private translateFromCanvasSnapped(points: number[]): number[] {
+        const { image } = this.controller.geometry;
+        return snapNearBorder(this.translateFromCanvas(points), image.width, image.height);
     }
 
     private translatePointsFromRotatedShape(
@@ -1173,32 +1213,62 @@ export class CanvasViewImpl implements CanvasView, Listener {
         }
     }
 
+    // Snapshot of a shape at drag start. Group members (groupDrag.ts) are
+    // placed at "start position + clamped delta" on every tick (INNO-158), so
+    // they move in the same tick and by the same delta as the primary shape.
+    // skipLockedKeypoints: the primary skeleton drag does not move locked
+    // keypoints (group member moves do).
+    private captureDragStart(
+        selectedShape: SVG.Shape,
+        selectedState: DrawnState,
+        skipLockedKeypoints = false,
+    ): DragStartSnapshot {
+        const bbox = selectedShape.bbox();
+        const snapshot: DragStartSnapshot = { x: bbox.x, y: bbox.y };
+        if (selectedState.shapeType === 'skeleton') {
+            const wrapRect = (selectedShape as any).children().find(
+                (child: SVG.Element) => child.type === 'rect',
+            );
+            if (wrapRect) {
+                snapshot.xtl = +wrapRect.attr('data-xtl');
+                snapshot.ytl = +wrapRect.attr('data-ytl');
+            }
+            snapshot.circles = new Map();
+            for (const child of (selectedShape as SVG.G).children()) {
+                if (child.type === 'circle') {
+                    const childClientID = child.attr('data-client-id');
+                    const elementState = (selectedState.elements || [])
+                        .find((el: any) => el.clientID === childClientID);
+                    if (skipLockedKeypoints && (!elementState || elementState.lock)) continue;
+                    snapshot.circles.set(child, {
+                        cx: child.cx(), cy: child.cy(), outside: !!elementState?.outside,
+                    });
+                }
+            }
+        } else if (['polygon', 'polyline', 'points'].includes(selectedState.shapeType)) {
+            const plotPoints = (selectedShape as SVG.PolyLine).array().value as unknown as number[][];
+            snapshot.points = plotPoints.map((pt: number[]) => [pt[0], pt[1]]);
+        } else if (selectedState.shapeType === 'cuboid') {
+            snapshot.cuboidPoints = parsePoints(selectedShape.attr('points'));
+        }
+        return snapshot;
+    }
+
     private moveShapeVisually(
         selectedShape: SVG.Shape,
         selectedState: DrawnState,
-        startPos: { cx: number; cy: number },
+        start: DragStartSnapshot,
         dx: number,
         dy: number,
     ): void {
-        const targetCx = startPos.cx + dx;
-        const targetCy = startPos.cy + dy;
-
         if (selectedState.shapeType === 'skeleton') {
             // For skeletons, move the wrapping rect and reposition children
             const wrapRect = (selectedShape as any).children().find(
                 (child: SVG.Element) => child.type === 'rect',
             );
-            if (wrapRect) {
-                const bbox = selectedShape.bbox();
-                const currentCx = bbox.cx;
-                const currentCy = bbox.cy;
-                const childDx = targetCx - currentCx;
-                const childDy = targetCy - currentCy;
-
-                const prevXtl = +wrapRect.attr('data-xtl');
-                const prevYtl = +wrapRect.attr('data-ytl');
-                const newXtl = prevXtl + childDx;
-                const newYtl = prevYtl + childDy;
+            if (wrapRect && start.xtl !== undefined && start.ytl !== undefined && start.circles) {
+                const newXtl = start.xtl + dx;
+                const newYtl = start.ytl + dy;
 
                 wrapRect.move(newXtl, newYtl);
                 wrapRect.attr('data-xtl', newXtl);
@@ -1206,11 +1276,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
                 wrapRect.attr('data-xbr', newXtl + wrapRect.width());
                 wrapRect.attr('data-ybr', newYtl + wrapRect.height());
 
-                for (const child of (selectedShape as SVG.G).children()) {
-                    if (child.type === 'circle') {
-                        child.center(child.cx() + childDx, child.cy() + childDy);
-                    }
-                }
+                this.moveSkeletonCircles(start.circles, dx, dy);
 
                 const skeletonSVGTemplate = makeSVGFromTemplate(
                     this.controller.objects.find(
@@ -1222,30 +1288,104 @@ export class CanvasViewImpl implements CanvasView, Listener {
                 }
             }
         } else if (selectedState.shapeType === 'mask') {
-            const bbox = selectedShape.bbox();
-            const newX = bbox.x + (targetCx - bbox.cx);
-            const newY = bbox.y + (targetCy - bbox.cy);
-            selectedShape.move(Math.trunc(newX), Math.trunc(newY));
+            selectedShape.move(Math.trunc(start.x + dx), Math.trunc(start.y + dy));
         } else if (['rectangle', 'ellipse'].includes(selectedState.shapeType)) {
-            const bbox = selectedShape.bbox();
-            const newX = bbox.x + (targetCx - bbox.cx);
-            const newY = bbox.y + (targetCy - bbox.cy);
-            selectedShape.move(newX, newY);
-        } else if (['polygon', 'polyline', 'points'].includes(selectedState.shapeType)) {
-            const bbox = selectedShape.bbox();
-            const shapeDx = targetCx - bbox.cx;
-            const shapeDy = targetCy - bbox.cy;
-            const plotPoints = (selectedShape as SVG.PolyLine).array().value as unknown as number[][];
-            const movedPoints = plotPoints.map((pt: number[]) => [pt[0] + shapeDx, pt[1] + shapeDy]);
+            selectedShape.move(start.x + dx, start.y + dy);
+        } else if (['polygon', 'polyline', 'points'].includes(selectedState.shapeType) && start.points) {
+            const movedPoints = start.points.map((pt: number[]) => [pt[0] + dx, pt[1] + dy]);
             (selectedShape as SVG.PolyLine).plot(movedPoints as any);
-        } else if (selectedState.shapeType === 'cuboid') {
-            const currentPoints = parsePoints(selectedShape.attr('points'));
-            const bbox = selectedShape.bbox();
-            const shapeDx = targetCx - bbox.cx;
-            const shapeDy = targetCy - bbox.cy;
-            const movedPoints = currentPoints.map((pt) => `${pt.x + shapeDx},${pt.y + shapeDy}`).join(' ');
+        } else if (selectedState.shapeType === 'cuboid' && start.cuboidPoints) {
+            const movedPoints = start.cuboidPoints.map((pt) => `${pt.x + dx},${pt.y + dy}`).join(' ');
             selectedShape.attr('points', movedPoints);
         }
+    }
+
+    // INNO-158: move skeleton keypoint circles to "start + delta". `outside`
+    // keypoints do not limit the group delta; they are clamped one by one so
+    // they slide along the border instead of leaving the image.
+    private moveSkeletonCircles(
+        circles: Map<SVG.Element, { cx: number; cy: number; outside: boolean }>,
+        dx: number,
+        dy: number,
+    ): void {
+        const bounds = this.imageBounds();
+        for (const [circle, center] of circles) {
+            if (center.outside) {
+                circle.center(...clampMovedPoint(center.cx, center.cy, center.cx + dx, center.cy + dy, bounds));
+            } else {
+                circle.center(center.cx + dx, center.cy + dy);
+            }
+        }
+    }
+
+    // INNO-158: the current image in canvas coordinates (borders inclusive,
+    // same convention as cvat-core fitPoints).
+    private imageBounds(): Bounds {
+        return boundsFromGeometry(this.geometry);
+    }
+
+    // INNO-158: the extent (canvas coordinates) a drag of this object moves and
+    // that has to stay inside the image, or null for shapes that are not
+    // clamped (rotated rectangles, polygons, masks, ...), which then do not
+    // take part in the stop decision of a group.
+    // includeLockedKeypoints: whether locked skeleton keypoints move along on
+    // the calling path (the primary skeleton drag skips them, group member
+    // moves and rotation move them too).
+    private collectClampExtent(state: any, shape: SVG.Shape, includeLockedKeypoints: boolean): Extent | null {
+        if (!state || !shape) return null;
+
+        if (state.shapeType === 'skeleton') {
+            const extent: Extent = {
+                xmin: Number.POSITIVE_INFINITY,
+                ymin: Number.POSITIVE_INFINITY,
+                xmax: Number.NEGATIVE_INFINITY,
+                ymax: Number.NEGATIVE_INFINITY,
+            };
+            const include = (x: number, y: number): void => {
+                extent.xmin = Math.min(extent.xmin, x);
+                extent.ymin = Math.min(extent.ymin, y);
+                extent.xmax = Math.max(extent.xmax, x);
+                extent.ymax = Math.max(extent.ymax, y);
+            };
+
+            for (const child of (shape as SVG.G).children()) {
+                if (child.type === 'rect') {
+                    include(+child.attr('data-xtl'), +child.attr('data-ytl'));
+                    include(+child.attr('data-xbr'), +child.attr('data-ybr'));
+                } else if (child.type === 'circle') {
+                    const childClientID = child.attr('data-client-id');
+                    const elementState = (state.elements || [])
+                        .find((el: any) => el.clientID === childClientID);
+                    // outside keypoints carry no meaningful position (COCO
+                    // invisible keypoints are often (0, 0)); they must not
+                    // block the drag
+                    if (!elementState || elementState.outside) continue;
+                    if (elementState.lock && !includeLockedKeypoints) continue;
+                    include(child.cx(), child.cy());
+                }
+            }
+
+            return Number.isFinite(extent.xmin) && Number.isFinite(extent.ymin) ? extent : null;
+        }
+
+        if (state.shapeType === 'rectangle' && !state.rotation) {
+            const x = shape.x();
+            const y = shape.y();
+            return {
+                xmin: x, ymin: y, xmax: x + shape.width(), ymax: y + shape.height(),
+            };
+        }
+
+        if (Number.isInteger(state.parentID) && shape.type === 'circle') {
+            // a single skeleton keypoint: zero-size extent at its center
+            const cx = (shape as SVG.Circle).cx();
+            const cy = (shape as SVG.Circle).cy();
+            return {
+                xmin: cx, ymin: cy, xmax: cx, ymax: cy,
+            };
+        }
+
+        return null;
     }
 
     private collectShapePoints(objState: any, svgShape: SVG.Shape): number[] {
@@ -1268,7 +1408,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
         if (rotation) {
             points = this.translatePointsFromRotatedShape(svgShape, points);
         }
-        return this.translateFromCanvas(points);
+        return this.translateFromCanvasSnapped(points);
     }
 
     // Collect a skeleton's keypoint coordinates (image space) in element
@@ -1282,7 +1422,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
             const elementShape = svgGroup.children()
                 .find((child: SVG.Shape) => child.id() === `cvat_canvas_shape_${element.clientID}`);
             if (elementShape) {
-                points.push(...this.translateFromCanvas(readPointsFromShape(elementShape)));
+                points.push(...this.translateFromCanvasSnapped(readPointsFromShape(elementShape)));
             } else {
                 points.push(...element.points);
             }
@@ -1298,9 +1438,37 @@ export class CanvasViewImpl implements CanvasView, Listener {
         const ytl = +wrapRect.attr('data-ytl');
         const xbr = +wrapRect.attr('data-xbr');
         const ybr = +wrapRect.attr('data-ybr');
-        const origin = this.translateFromCanvas([xtl, ytl]);
-        const far = this.translateFromCanvas([xbr, ybr]);
+        const origin = this.translateFromCanvasSnapped([xtl, ytl]);
+        const far = this.translateFromCanvasSnapped([xbr, ybr]);
         return [origin[0], origin[1], far[0], far[1]];
+    }
+
+    private createGroupDragHost(): GroupDragHost {
+        const templates: Map<string, SVG.G> = new Map();
+        return {
+            svgShapes: this.svgShapes,
+            drawnStates: this.drawnStates,
+            objects: () => this.controller.objects,
+            selectedClientIDs: () => this.selectedClientIDs,
+            selectedElementClientIDs: () => this.selectedElementClientIDs,
+            moveShapeVisually: this.moveShapeVisually.bind(this),
+            captureDragStart: this.captureDragStart.bind(this),
+            collectClampExtent: this.collectClampExtent.bind(this),
+            collectShapePoints: this.collectShapePoints.bind(this),
+            collectSkeletonBbox: this.collectSkeletonBbox.bind(this),
+            redrawSkeletonEdges: (clientID: number): void => {
+                const shape = this.svgShapes[clientID];
+                const obj = this.controller.objects.find((_obj: any) => _obj.clientID === clientID);
+                const svg = obj?.label?.structure?.svg;
+                if (!shape || !svg) return;
+                let template = templates.get(svg);
+                if (!template) {
+                    template = makeSVGFromTemplate(svg);
+                    templates.set(svg, template);
+                }
+                setupSkeletonEdges(shape as SVG.G, template);
+            },
+        };
     }
 
     private draggable(
@@ -1321,83 +1489,140 @@ export class CanvasViewImpl implements CanvasView, Listener {
             let aborted = false;
             let skeletonSVGTemplate: SVG.G = null;
             shape.addClass('cvat_canvas_shape_draggable');
-            (draggableInstance as any).draggable({
-                ...(state.shapeType === 'mask' ? { snapToGrid: 1 } : {}),
-            });
+
+            // INNO-158: image-bounds clamp. Every tick the raw delta (cursor -
+            // grab point, as svg.draggable computes it) is clamped once with
+            // clampGroupDelta over the start extents of everything that moves;
+            // the primary shape, its keypoints and all group members are then
+            // placed at "start + clamped delta" in the same tick.
+            let clampExtents: Extent[] = [];
+            let clampBounds: Bounds | null = null;
+            // in the dragged element's own frame (what the constraint uses)
+            let clampedDelta = { dx: 0, dy: 0 };
+            let skeletonStart: DragStartSnapshot | null = null;
+            // rotation (degrees) of the dragged element: svg.draggable measures
+            // the drag in its rotated frame, group members move in canvas axes
+            let dragRotation = 0;
+
+            if (state.shapeType === 'cuboid') {
+                // the cuboid drives its own face/edge dragging; keep the
+                // library default (not clamped, see plan scope boundaries)
+                (draggableInstance as any).draggable({});
+            } else {
+                (draggableInstance as any).draggable(function constraint(this: SVG.Element, x: number, y: number) {
+                    const handler = this.remember('_draggable');
+                    const startBox = handler?.startPoints?.box;
+                    if (!startBox) return { x, y };
+                    return {
+                        x: startBox.x + clampedDelta.dx,
+                        y: startBox.y + clampedDelta.dy,
+                    };
+                });
+            }
+
+            // INNO-157: Shift+drag on an object body starts a box selection
+            // instead of moving the object — cancelling svg.draggable here lets
+            // the press reach onCanvasMouseDown. Keypoints keep their Shift+drag.
+            draggableInstance.off('beforedrag');
+            if (!Number.isInteger(state.parentID)) {
+                draggableInstance.on('beforedrag', (e: CustomEvent): void => {
+                    const event = (e.detail as any)?.event as MouseEvent | undefined;
+                    if (this.mode === Mode.IDLE && event?.shiftKey && event.button === 0) {
+                        e.preventDefault();
+                    }
+                });
+            }
 
             let startCenter = null;
-            // Multi-drag: store starting centers of selected shapes
-            let selectedStartData: Map<number, { cx: number; cy: number }> = new Map();
+            // INNO-156: group drag of the selected objects and keypoints (groupDrag.ts)
+            let groupDrag: GroupDragSession | null = null;
 
-            draggableInstance.on('dragstart', (): void => {
+            draggableInstance.on('dragstart', (e: CustomEvent): void => {
                 onDragStart();
                 this.draggableShape = shape;
                 const { cx, cy } = shape.bbox();
                 startCenter = { x: cx, y: cy };
                 start = Date.now();
+                clampedDelta = { dx: 0, dy: 0 };
+                clampBounds = this.imageBounds();
+                clampExtents = [];
+                dragRotation = (draggableInstance.transform() as any).rotation || 0;
+                const primaryExtent = this.collectClampExtent(state, shape, false);
+                if (primaryExtent) clampExtents.push(primaryExtent);
 
-                // Record start positions of other selected shapes for multi-drag
-                selectedStartData = new Map();
-                if (this.selectedClientIDs.includes(state.clientID) && this.selectedClientIDs.length > 1) {
-                    for (const id of this.selectedClientIDs) {
-                        if (id !== state.clientID && this.svgShapes[id]) {
-                            const otherState = this.drawnStates[id];
-                            if (otherState && !otherState.pinned && !otherState.lock) {
-                                const otherBbox = this.svgShapes[id].bbox();
-                                selectedStartData.set(id, { cx: otherBbox.cx, cy: otherBbox.cy });
-                            }
-                        }
-                    }
-                }
+                skeletonStart = state.shapeType === 'skeleton' ? this.captureDragStart(shape, state, true) : null;
+
+                groupDrag = GroupDragSession.begin(
+                    this.groupDragHost, state, !!(e.detail as any)?.event?.shiftKey,
+                );
             }).on('dragmove', (e: CustomEvent): void => {
-                onDragMove();
-                if (state.shapeType === 'skeleton' && e.target) {
-                    const { instance } = e.target as any;
-                    const [x, y] = [instance.x(), instance.y()];
-                    const prevXtl = +draggableInstance.attr('data-xtl');
-                    const prevYtl = +draggableInstance.attr('data-ytl');
-
-                    for (const child of (shape as SVG.G).children()) {
-                        if (child.type === 'circle') {
-                            const childClientID = child.attr('data-client-id');
-                            if (state.elements.find((el: any) => el.clientID === childClientID).lock || false) {
-                                continue;
-                            }
-                            child.center(child.cx() - prevXtl + x, child.cy() - prevYtl + y);
-                        }
+                // dragmove fires before the library moves the element; compute
+                // the clamped delta here so the constraint function, the
+                // keypoints and the group members all use the same value
+                const { handler, p } = (e.detail || {}) as any;
+                // the same delta in canvas axes (group members, keypoints)
+                let canvasDelta = rotateDelta(clampedDelta.dx, clampedDelta.dy, dragRotation);
+                if (handler?.startPoints && p) {
+                    // p is in the dragged element's own (possibly rotated) frame
+                    const raw = rotateDelta(
+                        p.x - handler.startPoints.point.x,
+                        p.y - handler.startPoints.point.y,
+                        dragRotation,
+                    );
+                    if (state.shapeType === 'cuboid') {
+                        // a cuboid primary moves by the raw delta (no
+                        // constraint function), so its group is not clamped
+                        canvasDelta = raw;
+                    } else if (groupDrag) {
+                        // INNO-156/158: one clamp over the primary and every
+                        // group member, so the group stops together
+                        canvasDelta = groupDrag.constrain(clampExtents, raw.dx, raw.dy, clampBounds);
+                    } else if (clampBounds) {
+                        canvasDelta = clampGroupDelta(clampExtents, raw.dx, raw.dy, clampBounds);
+                    } else {
+                        canvasDelta = raw;
                     }
+                    if (state.shapeType === 'mask') {
+                        // integer grid, as snapToGrid: 1 did; snap towards the
+                        // start position so the snapped delta never leaves the
+                        // clamp interval (group members must not overshoot a wall)
+                        const { box } = handler.startPoints;
+                        const snap = (origin: number, delta: number): number => (
+                            (delta < 0 ? Math.ceil(origin + delta) : Math.floor(origin + delta)) - origin
+                        );
+                        canvasDelta = {
+                            dx: snap(box.x, canvasDelta.dx),
+                            dy: snap(box.y, canvasDelta.dy),
+                        };
+                    }
+                    clampedDelta = rotateDelta(canvasDelta.dx, canvasDelta.dy, -dragRotation);
+                }
 
+                onDragMove();
+                const { dx, dy } = canvasDelta;
+                if (
+                    state.shapeType === 'skeleton' && skeletonStart?.xtl !== undefined &&
+                    skeletonStart.ytl !== undefined && skeletonStart.circles
+                ) {
+                    this.moveSkeletonCircles(skeletonStart.circles, dx, dy);
+
+                    const x = skeletonStart.xtl + dx;
+                    const y = skeletonStart.ytl + dy;
                     draggableInstance.attr('data-xtl', x);
                     draggableInstance.attr('data-ytl', y);
-                    draggableInstance.attr('data-xbr', x + instance.width());
-                    draggableInstance.attr('data-ybr', y + instance.height());
+                    draggableInstance.attr('data-xbr', x + draggableInstance.width());
+                    draggableInstance.attr('data-ybr', y + draggableInstance.height());
 
                     skeletonSVGTemplate = skeletonSVGTemplate ?? makeSVGFromTemplate(state.label.structure.svg);
                     setupSkeletonEdges(shape as SVG.G, skeletonSVGTemplate);
                 }
 
-                // Multi-drag: move other selected shapes by the same delta
-                if (selectedStartData.size > 0 && startCenter) {
-                    const currentBbox = shape.bbox();
-                    const dx = currentBbox.cx - startCenter.x;
-                    const dy = currentBbox.cy - startCenter.y;
-
-                    for (const [id, startPos] of selectedStartData) {
-                        const selectedShape = this.svgShapes[id];
-                        const selectedState = this.drawnStates[id];
-                        if (selectedShape && selectedState) {
-                            this.moveShapeVisually(selectedShape, selectedState, startPos, dx, dy);
-                        }
-                    }
-                }
+                groupDrag?.move(dx, dy, clampBounds);
             }).on('dragend', (): void => {
                 if (aborted) {
                     this.resetViewPosition(state.clientID);
-                    // Also reset selected shapes positions on abort
-                    for (const [id] of selectedStartData) {
-                        this.resetViewPosition(id);
-                    }
-                    selectedStartData.clear();
+                    groupDrag?.abort();
+                    groupDrag = null;
                     return;
                 }
 
@@ -1409,39 +1634,8 @@ export class CanvasViewImpl implements CanvasView, Listener {
                 const dy2 = (startCenter.y - cy) ** 2;
                 const hasMoved = Math.sqrt(dx2 + dy2) > 0;
 
-                if (hasMoved && selectedStartData.size > 0) {
-                    // Multi-drag completion: collect points for all moved shapes.
-                    // For skeletons the wrapping bbox translated with the
-                    // keypoints, so carry it too — otherwise cvat-core seeds the
-                    // soft-snap from the OLD bbox and expands it to span both the
-                    // old and new locations instead of translating it.
-                    const edits: { state: any; points: number[]; bbox?: number[] }[] = [];
-                    const collectEdit = (editState: any, editShape: SVG.Shape): typeof edits[0] => {
-                        const edit: typeof edits[0] = {
-                            state: editState,
-                            points: this.collectShapePoints(editState, editShape),
-                        };
-                        if (editState.shapeType === 'skeleton') {
-                            const bbox = this.collectSkeletonBbox(editShape as SVG.G);
-                            if (bbox) edit.bbox = bbox;
-                        }
-                        return edit;
-                    };
-
-                    // Primary shape
-                    edits.push(collectEdit(state, shape));
-
-                    // Selected shapes
-                    const { objects } = this.controller;
-                    for (const [id] of selectedStartData) {
-                        const selectedShape = this.svgShapes[id];
-                        const selectedObjState = objects.find((obj: any) => obj.clientID === id);
-                        if (selectedShape && selectedObjState) {
-                            edits.push(collectEdit(selectedObjState, selectedShape));
-                        }
-                    }
-
-                    // Dispatch multi-edited event
+                if (hasMoved && groupDrag) {
+                    const edits = groupDrag.commit();
                     this.canvas.dispatchEvent(
                         new CustomEvent('canvas.multiedited', {
                             bubbles: false,
@@ -1450,16 +1644,11 @@ export class CanvasViewImpl implements CanvasView, Listener {
                         }),
                     );
 
-                    // Mark all shapes as updated for canvas redraw
-                    for (const edit of edits) {
-                        if (Number.isInteger(edit.state.parentID)) {
-                            if (this.drawnStates[edit.state.parentID]) {
-                                this.drawnStates[edit.state.parentID].updated = 0;
-                                this.drawnStates[edit.state.parentID].points = [];
-                            }
-                        } else if (this.drawnStates[edit.state.clientID]) {
-                            this.drawnStates[edit.state.clientID].updated = 0;
-                            this.drawnStates[edit.state.clientID].points = [];
+                    // Mark all moved objects as updated for canvas redraw
+                    for (const id of groupDrag.topLevelIDs) {
+                        if (this.drawnStates[id]) {
+                            this.drawnStates[id].updated = 0;
+                            this.drawnStates[id].points = [];
                         }
                     }
 
@@ -1473,8 +1662,6 @@ export class CanvasViewImpl implements CanvasView, Listener {
                             },
                         }),
                     );
-
-                    selectedStartData.clear();
                 } else if (hasMoved) {
                     // Single-drag (original logic)
                     if (state.shapeType === 'mask') {
@@ -1500,7 +1687,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
                             points = this.translatePointsFromRotatedShape(shape, points);
                         }
 
-                        this.onEditDone(state, this.translateFromCanvas(points));
+                        this.onEditDone(state, this.translateFromCanvasSnapped(points));
                     }
 
                     this.canvas.dispatchEvent(
@@ -1513,19 +1700,14 @@ export class CanvasViewImpl implements CanvasView, Listener {
                             },
                         }),
                     );
-                    selectedStartData.clear();
-                } else {
-                    selectedStartData.clear();
                 }
+                groupDrag = null;
             }).on('dragabort', (): void => {
                 onDragEnd();
                 this.draggableShape = null;
                 aborted = true;
-                // Reset selected shapes positions on abort
-                for (const [id] of selectedStartData) {
-                    this.resetViewPosition(id);
-                }
-                selectedStartData.clear();
+                groupDrag?.abort();
+                groupDrag = null;
                 // disable internal drag events of SVG.js
                 // call chain is (mouseup -> SVG.handler.end -> SVG.handler.drag -> dragend)
                 window.dispatchEvent(new MouseEvent('mouseup'));
@@ -1537,6 +1719,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
                 draggableInstance.fire('dragabort');
             }
 
+            draggableInstance.off('beforedrag');
             draggableInstance.off('dragstart');
             draggableInstance.off('dragmove');
             draggableInstance.off('dragend');
@@ -1592,6 +1775,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
                             this.mode = Mode.IDLE;
                             showElementText();
                         });
+                        this.resumePendingKeypointPress(clientID, element as SVG.Element);
                     }
                 } else {
                     this.draggable(null, element);
@@ -1611,6 +1795,12 @@ export class CanvasViewImpl implements CanvasView, Listener {
             // transform on resizedone and must be tracked here. On mouseup
             // cvat-core bakes the angle into keypoint coordinates.
             let skeletonGestureRotation = 0;
+            // INNO-158: image-bounds clamp state of the ongoing skeleton
+            // resize/rotation gesture, captured on resizestart
+            let gestureBounds: Bounds | null = null;
+            let gestureStartBox: Extent | null = null;
+            let gestureStartKeypoints: number[] = [];
+            let gestureUnwrappedRotation = 0;
 
             // make attaching idempotent — re-activation must never stack a
             // second set of handlers on the same element
@@ -1629,6 +1819,30 @@ export class CanvasViewImpl implements CanvasView, Listener {
                     resized = false;
                     start = Date.now();
                     skeletonGestureRotation = 0;
+                    gestureUnwrappedRotation = 0;
+                    if (state.shapeType === 'skeleton') {
+                        gestureBounds = this.imageBounds();
+                        gestureStartBox = {
+                            xmin: +resizableInstance.attr('data-xtl'),
+                            ymin: +resizableInstance.attr('data-ytl'),
+                            xmax: +resizableInstance.attr('data-xbr'),
+                            ymax: +resizableInstance.attr('data-ybr'),
+                        };
+                        // cvat-core bakes the rotation into every element, so
+                        // locked ones limit it too; outside ones carry no
+                        // meaningful position and are ignored
+                        gestureStartKeypoints = [];
+                        for (const child of (shape as SVG.G).children()) {
+                            if (child.type === 'circle') {
+                                const childClientID = child.attr('data-client-id');
+                                const elementState = state.elements
+                                    .find((el: any) => el.clientID === childClientID);
+                                if (elementState && !elementState.outside) {
+                                    gestureStartKeypoints.push(child.cx(), child.cy());
+                                }
+                            }
+                        }
+                    }
                     this.resizableShape = shape;
                 })
                 .on('resizing', (e: CustomEvent): void => {
@@ -1643,8 +1857,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
                         // axis-aligned rectangle; keypoints and edges get a
                         // transient visual rotation around the bbox center
                         // below instead.
-                        const { rotation } = resizableInstance.transform();
-                        skeletonGestureRotation = rotation;
+                        const rotation = resizableInstance.transform().rotation as number;
                         if (rotation) {
                             resizableInstance.rotate(0);
                         }
@@ -1652,6 +1865,41 @@ export class CanvasViewImpl implements CanvasView, Listener {
                         let [x, y] = [instance.x(), instance.y()];
                         let width = instance.width();
                         let height = instance.height();
+                        let geometryAdjusted = false;
+
+                        if (gestureBounds && gestureStartBox) {
+                            // INNO-158: rotation stops at the last whole degree
+                            // at which every keypoint stays inside the image
+                            // (start-relative: an already-outside keypoint
+                            // only may not go further out). The raw angle is
+                            // unwrapped first, svg.js reports (-270, 90].
+                            gestureUnwrappedRotation = unwrapAngle(rotation, gestureUnwrappedRotation);
+                            skeletonGestureRotation = clampRotationAngle(
+                                gestureStartKeypoints,
+                                (gestureStartBox.xmin + gestureStartBox.xmax) / 2,
+                                (gestureStartBox.ymin + gestureStartBox.ymax) / 2,
+                                gestureUnwrappedRotation,
+                                gestureBounds,
+                            );
+
+                            // INNO-158: bbox handles stop at the image border;
+                            // the keypoint containment below still wins (R20)
+                            const clampedBox = clampEdges(gestureStartBox, {
+                                xmin: x, ymin: y, xmax: x + width, ymax: y + height,
+                            }, gestureBounds);
+                            if (
+                                clampedBox.xmin !== x || clampedBox.ymin !== y ||
+                                clampedBox.xmax !== x + width || clampedBox.ymax !== y + height
+                            ) {
+                                x = clampedBox.xmin;
+                                y = clampedBox.ymin;
+                                width = clampedBox.xmax - clampedBox.xmin;
+                                height = clampedBox.ymax - clampedBox.ymin;
+                                geometryAdjusted = true;
+                            }
+                        } else {
+                            skeletonGestureRotation = rotation;
+                        }
 
                         // Clamp: bbox must still contain every visible/occluded
                         // keypoint. outside=true keypoints are excluded because
@@ -1693,6 +1941,9 @@ export class CanvasViewImpl implements CanvasView, Listener {
                             if (y + height < kpMaxY) {
                                 height = kpMaxY - y;
                             }
+                            geometryAdjusted = true;
+                        }
+                        if (geometryAdjusted) {
                             // Apply the clamped geometry back to the SVG rect.
                             (instance as any).move(x, y);
                             (instance as any).size(width, height);
@@ -1727,7 +1978,21 @@ export class CanvasViewImpl implements CanvasView, Listener {
                         const pivotY = y + height / 2;
                         for (const child of (shape as SVG.G).children()) {
                             if (child.type === 'circle' || child.type === 'line') {
-                                if (skeletonGestureRotation) {
+                                const isOutsideKeypoint = child.type === 'circle' &&
+                                    !!state.elements.find(
+                                        (el: any) => el.clientID === child.attr('data-client-id'),
+                                    )?.outside;
+                                if (skeletonGestureRotation && isOutsideKeypoint && gestureBounds) {
+                                    // INNO-158: an outside keypoint does not
+                                    // limit the angle but is clamped into the
+                                    // image on its own (cvat-core does the same)
+                                    const [rx, ry] = rotate2DPoints(
+                                        pivotX, pivotY, skeletonGestureRotation, [child.cx(), child.cy()],
+                                    );
+                                    const [px, py] = clampMovedPoint(child.cx(), child.cy(), rx, ry, gestureBounds);
+                                    child.untransform();
+                                    (child as any).transform({ x: px - child.cx(), y: py - child.cy() });
+                                } else if (skeletonGestureRotation) {
                                     child.rotate(skeletonGestureRotation, pivotX, pivotY);
                                 } else {
                                     child.untransform();
@@ -1831,6 +2096,9 @@ export class CanvasViewImpl implements CanvasView, Listener {
         }
 
         if (code.includes('shift')) {
+            this.shiftPressed = true;
+            this.updateBoxSelectCursor();
+            this.activateKeypointUnderPointer();
             this.snapToAngleResize = consts.SNAP_TO_ANGLE_RESIZE_SHIFT;
             if (this.activeElement) {
                 const shape = this.svgShapes[this.activeElement.clientID];
@@ -1856,7 +2124,10 @@ export class CanvasViewImpl implements CanvasView, Listener {
         const code = (e.code ?? '').toLowerCase();
 
         if (code.includes('shift')) {
+            this.shiftPressed = false;
+            this.shiftHoverElementID = null;
             this.cancelMultiSelect();
+            this.updateBoxSelectCursor();
         }
 
         if (code.includes('shift') && this.activeElement) {
@@ -1893,6 +2164,188 @@ export class CanvasViewImpl implements CanvasView, Listener {
             this.multiSelectBox = null;
             this.multiSelectStart = null;
         }
+        this.endShiftGesture();
+    }
+
+    // INNO-157: what a Shift press at this point does in IDLE.
+    // 'keypoint' - a shown, unlocked keypoint is under the pointer (also one
+    //   covered by another person's wrapping rect): it moves, no box
+    // 'box' - anything else inside the canvas content (background, image,
+    //   shape bodies, skeleton bbox/edges, locked keypoints): a box starts
+    // 'other' - handles, vertices, outside the content, not IDLE
+    private classifyBoxStart(target: Element | null, clientX: number, clientY: number): 'box' | 'keypoint' | 'other' {
+        if (this.mode !== Mode.IDLE || !target) return 'other';
+        if (target !== this.content && !this.content.contains(target)) return 'other';
+        // svg.select handles: resize, rotation, polygon/polyline/points vertices
+        if (Array.from(target.classList ?? []).some((cls) => cls.startsWith('svg_select_points'))) return 'other';
+        if (this.findKeypointAt(target, clientX, clientY)) return 'keypoint';
+        return 'box';
+    }
+
+    // a shown, unlocked keypoint under (or within its drawn radius of) the
+    // pointer, the top-most one when several overlap
+    private findKeypointAt(
+        target: Element | null, clientX: number, clientY: number,
+    ): { elementID: number; parentID: number } | null {
+        const shapeIDOf = (node: Element | null): number => {
+            const match = node?.id?.match(/^cvat_canvas_shape_(\d+)$/);
+            return match ? +match[1] : NaN;
+        };
+        const isMovable = (parent: DrawnState, elementID: number): boolean => {
+            const element = (parent.elements || []).find((el) => el.clientID === elementID);
+            return !!element && !element.lock && !element.hidden && !element.outside && !parent.lock;
+        };
+
+        if (target?.tagName === 'circle' && target.hasAttribute('data-client-id')) {
+            const parentID = shapeIDOf(target.parentElement);
+            const elementID = Number(target.getAttribute('data-client-id'));
+            const parent = this.drawnStates[parentID];
+            if (parent && !target.classList.contains('cvat_canvas_hidden')) {
+                return isMovable(parent, elementID) ? { elementID, parentID } : null;
+            }
+        }
+
+        const [x, y] = translateToSVG(this.content, [clientX, clientY]);
+        // DOM order = drawing order, the last match is the top-most one
+        const skeletons = Array.from(this.content.querySelectorAll('.cvat_canvas_shape_skeleton'))
+            .filter((node) => !node.classList.contains('cvat_canvas_hidden'));
+        for (let i = skeletons.length - 1; i >= 0; i--) {
+            const parentID = shapeIDOf(skeletons[i]);
+            const parent = this.drawnStates[parentID];
+            if (!parent || parent.hidden || parent.lock) continue;
+            const circles = Array.from(skeletons[i].querySelectorAll('circle[data-client-id]')).reverse();
+            for (const circle of circles) {
+                if (circle.classList.contains('cvat_canvas_hidden')) continue;
+                const cx = Number(circle.getAttribute('cx'));
+                const cy = Number(circle.getAttribute('cy'));
+                const r = Number(circle.getAttribute('r')) + consts.BASE_STROKE_WIDTH / this.geometry.scale;
+                if ((cx - x) ** 2 + (cy - y) ** 2 <= r ** 2) {
+                    const elementID = Number(circle.getAttribute('data-client-id'));
+                    if (isMovable(parent, elementID)) return { elementID, parentID };
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private endShiftGesture(): void {
+        if (this.shiftGesture) {
+            this.shiftGesture = null;
+            window.removeEventListener('mousemove', this.onShiftGestureMove);
+            window.removeEventListener('mouseup', this.onShiftGestureUp);
+        }
+    }
+
+    private updateMultiSelectBox(clientX: number, clientY: number): void {
+        if (!this.shiftGesture) return;
+        const start = this.shiftGesture.startSVG;
+        if (!this.multiSelectBox) {
+            this.multiSelectStart = { ...start };
+            this.multiSelectBox = this.adoptedContent.rect(0, 0).attr({
+                x: start.x,
+                y: start.y,
+            }).addClass('cvat_canvas_multiselect_box');
+        }
+        const [x, y] = translateToSVG(this.content, [clientX, clientY]);
+        this.multiSelectBox.attr({
+            x: Math.min(start.x, x),
+            y: Math.min(start.y, y),
+            width: Math.abs(x - start.x),
+            height: Math.abs(y - start.y),
+        });
+    }
+
+    private shiftGestureIsBox(clientX: number, clientY: number): boolean {
+        if (this.multiSelectBox) return true;
+        if (!this.shiftGesture) return false;
+        const { startClient } = this.shiftGesture;
+        return Math.hypot(clientX - startClient.x, clientY - startClient.y) >= consts.BOX_SELECT_CLICK_TOLERANCE;
+    }
+
+    private onShiftGestureMove = (e: MouseEvent): void => {
+        if (!this.shiftGesture) return;
+        // the left button is no longer held (released outside the window)
+        const leftButtonHeld = e.buttons % 2 === 1;
+        if (!leftButtonHeld || this.mode !== Mode.IDLE) {
+            this.cancelMultiSelect();
+            return;
+        }
+        if (this.shiftGestureIsBox(e.clientX, e.clientY)) {
+            this.updateMultiSelectBox(e.clientX, e.clientY);
+        }
+    };
+
+    private onShiftGestureUp = (e: MouseEvent): void => {
+        if (!this.shiftGesture || e.button !== 0) return;
+        if (this.mode !== Mode.IDLE) {
+            this.cancelMultiSelect();
+            return;
+        }
+
+        // one gesture is either a box or a Shift+click, decided by the same
+        // screen distance whatever happened in between (INNO-157 R12)
+        if (this.shiftGestureIsBox(e.clientX, e.clientY)) {
+            this.updateMultiSelectBox(e.clientX, e.clientY);
+            this.endShiftGesture();
+            this.finishMultiSelect();
+            return;
+        }
+
+        const { target } = this.shiftGesture;
+        this.endShiftGesture();
+        const releasedInside = e.target instanceof Node && this.canvas.contains(e.target);
+        if (releasedInside) {
+            this.onShiftClick(target);
+        }
+    };
+
+    // Shift+click toggles the top-most object at the press point: the hit
+    // element's top-level shape (a skeleton for its rect, edges, keypoints)
+    private onShiftClick(target: Element): void {
+        // a keypoint circle (a locked one classifies as 'box') also gets its own
+        // click -> canvas.clicked, which cvat-ui turns into the person toggle;
+        // reporting it here too would toggle the person twice
+        if (target.tagName === 'circle' && target.hasAttribute('data-client-id')) return;
+        let node: Element | null = target;
+        while (node && node !== this.content) {
+            const match = node.id?.match(/^cvat_canvas_shape_(\d+)$/);
+            if (match && this.drawnStates[+match[1]]) {
+                this.canvas.dispatchEvent(
+                    new CustomEvent('canvas.shiftclicked', {
+                        bubbles: false,
+                        cancelable: true,
+                        detail: { clientID: +match[1] },
+                    }),
+                );
+                return;
+            }
+            node = node.parentElement;
+        }
+    }
+
+    // INNO-157: pressing Shift over a still pointer activates the keypoint
+    // under it like a Shift mousemove would (covered / inactive person)
+    private activateKeypointUnderPointer(): void {
+        if (this.mode !== Mode.IDLE || !this.lastPointer || this.shiftGesture || this.multiSelectBox) return;
+        const { x, y } = this.lastPointer;
+        const keypoint = this.findKeypointAt(window.document.elementFromPoint(x, y), x, y);
+        if (keypoint && this.activeElement.clientID !== keypoint.parentID) {
+            this.requestKeypointActivation(keypoint, x, y);
+        }
+    }
+
+    // INNO-157 R17: crosshair while Shift is held over a place a box would start from
+    private updateBoxSelectCursor(target?: Element | null): void {
+        let ready = false;
+        if (this.shiftGesture || this.multiSelectBox) {
+            ready = true;
+        } else if (this.shiftPressed && this.lastPointer) {
+            const { x, y } = this.lastPointer;
+            const element = target ?? window.document.elementFromPoint(x, y);
+            ready = this.classifyBoxStart(element, x, y) === 'box';
+        }
+        this.canvas.classList.toggle('cvat_canvas_box_select_ready', ready);
     }
 
     private finishMultiSelect(): void {
@@ -1902,15 +2355,36 @@ export class CanvasViewImpl implements CanvasView, Listener {
             this.multiSelectBox = null;
             this.multiSelectStart = null;
 
-            if (Math.sqrt(box.width ** 2 + box.height ** 2) < 5) return;
-
             const selectedIDs: number[] = [];
+            const selectedElementIDs: number[] = [];
             const { objects } = this.controller;
             for (const obj of objects) {
                 const id = obj.clientID;
                 if (obj.hidden || obj.outside) continue;
                 const shape = this.svgShapes[id];
                 if (!shape) continue;
+
+                if (obj.shapeType === 'skeleton') {
+                    // INNO-156: for skeletons the box selects keypoints, not the
+                    // person. A keypoint counts when its circle center is inside
+                    // the box and it is shown (not hidden / outside). A person
+                    // already selected as a whole adds nothing.
+                    if (this.selectedClientIDs.includes(id)) continue;
+                    for (const element of obj.elements) {
+                        if (element.hidden || element.outside) continue;
+                        const circle = this.svgShapes[element.clientID] as SVG.Circle;
+                        if (!circle || circle.hasClass('cvat_canvas_hidden')) continue;
+                        const [cx, cy] = [circle.cx(), circle.cy()];
+                        if (
+                            cx >= box.x && cx <= box.x + box.width &&
+                            cy >= box.y && cy <= box.y + box.height
+                        ) {
+                            selectedElementIDs.push(element.clientID);
+                        }
+                    }
+                    continue;
+                }
+
                 const shapeBbox = shape.bbox();
                 if (
                     shapeBbox.x < box.x + box.width &&
@@ -1925,13 +2399,20 @@ export class CanvasViewImpl implements CanvasView, Listener {
                 }
             }
 
-            const mergedIDs = [...new Set([...this.selectedClientIDs, ...selectedIDs])];
+            const newIDs = selectedIDs.filter((id) => !this.selectedClientIDs.includes(id));
+            const newElementIDs = selectedElementIDs
+                .filter((id) => !this.selectedElementClientIDs.includes(id));
+            // nothing new in the box: the selection does not change (INNO-156 R3)
+            if (!newIDs.length && !newElementIDs.length) return;
 
             this.canvas.dispatchEvent(
                 new CustomEvent('canvas.multiselected', {
                     bubbles: false,
                     cancelable: true,
-                    detail: { clientIDs: mergedIDs },
+                    detail: {
+                        clientIDs: [...this.selectedClientIDs, ...newIDs],
+                        elementClientIDs: [...this.selectedElementClientIDs, ...newElementIDs],
+                    },
                 }),
             );
         }
@@ -1939,20 +2420,47 @@ export class CanvasViewImpl implements CanvasView, Listener {
 
     private onCanvasMouseDown = (event: MouseEvent): void => {
         if ([0, 1].includes(event.button)) {
-            if (
-                event.button === 0 &&
-                event.shiftKey &&
-                this.mode === Mode.IDLE &&
-                (event.target === this.content || (event.target as Element)?.classList?.contains('cvat_canvas_image'))
-            ) {
-                const [x, y] = translateToSVG(this.content, [event.clientX, event.clientY]);
-                this.multiSelectStart = { x, y };
-                this.multiSelectBox = this.adoptedContent.rect(0, 0).attr({
-                    x: this.multiSelectStart.x,
-                    y: this.multiSelectStart.y,
-                }).addClass('cvat_canvas_multiselect_box');
-                event.preventDefault();
-                return;
+            if (event.button === 0 && event.shiftKey && this.mode === Mode.IDLE) {
+                // INNO-157: a Shift press inside the content waits for the
+                // gesture to become a box (>= 5 screen px) or a Shift+click.
+                // Object bodies let the press through (see the beforedrag
+                // guard in draggable), handles and vertices never get here.
+                const target = event.target as Element;
+                const kind = this.classifyBoxStart(target, event.clientX, event.clientY);
+                if (kind === 'box') {
+                    this.cancelMultiSelect();
+                    const [x, y] = translateToSVG(this.content, [event.clientX, event.clientY]);
+                    this.shiftGesture = {
+                        startClient: { x: event.clientX, y: event.clientY },
+                        startSVG: { x, y },
+                        target,
+                    };
+                    window.addEventListener('mousemove', this.onShiftGestureMove);
+                    window.addEventListener('mouseup', this.onShiftGestureUp);
+                    this.updateBoxSelectCursor();
+                    event.preventDefault();
+                    return;
+                }
+
+                if (kind === 'keypoint') {
+                    // a covered keypoint, or one of an inactive person, before
+                    // its person got activated by a Shift hover (the pointer
+                    // did not move with Shift held): neither a box nor a pan.
+                    // Activate the owner now and replay this press on the
+                    // keypoint as soon as it becomes draggable.
+                    const keypoint = this.findKeypointAt(target, event.clientX, event.clientY);
+                    if (keypoint && this.activeElement.clientID !== keypoint.parentID) {
+                        this.pendingKeypointPress = {
+                            elementID: keypoint.elementID,
+                            clientX: event.clientX,
+                            clientY: event.clientY,
+                        };
+                        window.addEventListener('mouseup', this.clearPendingKeypointPress, { once: true });
+                        this.requestKeypointActivation(keypoint, event.clientX, event.clientY);
+                    }
+                    event.preventDefault();
+                    return;
+                }
             }
 
             if (this.selectedClientIDs.length > 0 && event.button === 0) {
@@ -1978,27 +2486,63 @@ export class CanvasViewImpl implements CanvasView, Listener {
         }
     };
 
-    private onCanvasMouseMove = (e: MouseEvent): void => {
-        if (this.multiSelectBox && this.multiSelectStart) {
-            const [x, y] = translateToSVG(this.content, [e.clientX, e.clientY]);
-            const curX = x;
-            const curY = y;
-            const boxX = Math.min(this.multiSelectStart.x, curX);
-            const boxY = Math.min(this.multiSelectStart.y, curY);
-            const boxW = Math.abs(curX - this.multiSelectStart.x);
-            const boxH = Math.abs(curY - this.multiSelectStart.y);
-            this.multiSelectBox.attr({
-                x: boxX, y: boxY, width: boxW, height: boxH,
-            });
-        }
+    private clearPendingKeypointPress = (): void => {
+        this.pendingKeypointPress = null;
     };
 
-    private onCanvasMouseUpHandler = (): void => {
-        this.finishMultiSelect();
+    // asks cvat-ui to activate the keypoint's person (and the keypoint), the
+    // same request a Shift mousemove over it sends
+    private requestKeypointActivation(
+        keypoint: { elementID: number; parentID: number }, clientX: number, clientY: number,
+    ): void {
+        const { offset } = this.controller.geometry;
+        const [x, y] = translateToSVG(this.content, [clientX, clientY]);
+        this.shiftHoverElementID = keypoint.elementID;
+        this.canvas.dispatchEvent(new CustomEvent('canvas.moved', {
+            bubbles: false,
+            cancelable: true,
+            detail: {
+                x: x - offset,
+                y: y - offset,
+                states: this.controller.objects,
+                shiftKey: true,
+                activatedStateID: keypoint.parentID,
+                activatedElementID: keypoint.elementID,
+            },
+        }));
+    }
+
+    // replays a pending Shift press (see onCanvasMouseDown) on the keypoint
+    // that has just become draggable, while the button is still held
+    private resumePendingKeypointPress(elementID: number, element: SVG.Element): void {
+        const pending = this.pendingKeypointPress;
+        if (!pending || pending.elementID !== elementID) return;
+        this.pendingKeypointPress = null;
+        window.removeEventListener('mouseup', this.clearPendingKeypointPress);
+        setTimeout(() => {
+            if (this.mode !== Mode.IDLE || !element.node.isConnected) return;
+            element.node.dispatchEvent(new MouseEvent('mousedown', {
+                bubbles: true,
+                cancelable: true,
+                clientX: pending.clientX,
+                clientY: pending.clientY,
+                button: 0,
+                buttons: 1,
+                shiftKey: true,
+            }));
+        });
+    }
+
+    private onCanvasMouseMove = (e: MouseEvent): void => {
+        this.lastPointer = { x: e.clientX, y: e.clientY };
+        this.shiftPressed = e.shiftKey;
+        this.updateBoxSelectCursor(e.target as Element);
     };
 
     private onWindowBlur = (): void => {
+        this.shiftPressed = false;
         this.cancelMultiSelect();
+        this.updateBoxSelectCursor();
     };
 
     public constructor(model: CanvasModel & Master, controller: CanvasController) {
@@ -2030,6 +2574,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
         this.draggableShape = null;
         this.resizableShape = null;
         this.selectedClientIDs = [];
+        this.groupDragHost = this.createGroupDragHost();
 
         // Create HTML elements
         this.text = window.document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -2194,7 +2739,6 @@ export class CanvasViewImpl implements CanvasView, Listener {
 
         this.canvas.addEventListener('mousedown', this.onCanvasMouseDown);
         this.canvas.addEventListener('mousemove', this.onCanvasMouseMove);
-        this.canvas.addEventListener('mouseup', this.onCanvasMouseUpHandler);
 
         window.document.addEventListener('mouseup', this.onMouseUp);
         window.addEventListener('blur', this.onWindowBlur);
@@ -2243,6 +2787,25 @@ export class CanvasViewImpl implements CanvasView, Listener {
             if (!this.isImageLoading) {
                 const { offset } = this.controller.geometry;
                 const [x, y] = translateToSVG(this.content, [e.clientX, e.clientY]);
+
+                // INNO-157 AE3: with Shift held (no box in progress) a keypoint
+                // under the pointer activates its person even when another
+                // person's wrapping rect covers it, so the next press moves it
+                let shiftHover: { activatedStateID: number; activatedElementID: number } | null = null;
+                if (e.shiftKey && !this.shiftGesture && !this.multiSelectBox) {
+                    const keypoint = this.findKeypointAt(e.target as Element, e.clientX, e.clientY);
+                    // re-send while the owner is still not active: a dropped or
+                    // overridden activation must not leave the keypoint stuck
+                    const ownerActive = keypoint && this.activeElement.clientID === keypoint.parentID;
+                    if (keypoint && (keypoint.elementID !== this.shiftHoverElementID || !ownerActive)) {
+                        shiftHover = {
+                            activatedStateID: keypoint.parentID,
+                            activatedElementID: keypoint.elementID,
+                        };
+                    }
+                    this.shiftHoverElementID = keypoint?.elementID ?? null;
+                }
+
                 const event: CustomEvent = new CustomEvent('canvas.moved', {
                     bubbles: false,
                     cancelable: true,
@@ -2251,6 +2814,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
                         y: y - offset,
                         states: this.controller.objects,
                         shiftKey: e.shiftKey,
+                        ...(shiftHover ?? {}),
                     },
                 });
 
@@ -2264,6 +2828,15 @@ export class CanvasViewImpl implements CanvasView, Listener {
 
     public notify(model: CanvasModel & Master, reason: UpdateReasons): void {
         this.geometry = this.controller.geometry;
+        if (this.shiftPressed) {
+            // INNO-157: an activation or redraw can change what is under a still pointer
+            if (this.boxCursorFrame === null) {
+                this.boxCursorFrame = window.requestAnimationFrame(() => {
+                    this.boxCursorFrame = null;
+                    this.updateBoxSelectCursor();
+                });
+            }
+        }
         if (reason === UpdateReasons.CONFIG_UPDATED) {
             const { activeElement } = this;
             this.deactivate();
@@ -2494,7 +3067,10 @@ export class CanvasViewImpl implements CanvasView, Listener {
         } else if (reason === UpdateReasons.SHAPE_HIGHLIGHTED) {
             this.highlight(this.controller.highlightedElements);
         } else if (reason === UpdateReasons.OBJECTS_SELECTED) {
-            this.updateSelection(this.controller.selectedClientIDs);
+            this.updateSelection(
+                this.controller.selectedClientIDs,
+                this.controller.selectedElementClientIDs,
+            );
         } else if (reason === UpdateReasons.SELECT_REGION) {
             if (this.mode === Mode.SELECT_REGION) {
                 this.regionSelector.select(true);
@@ -2695,6 +3271,10 @@ export class CanvasViewImpl implements CanvasView, Listener {
         } else if (reason === UpdateReasons.DATA_FAILED) {
             this.onError(model.exception, 'data fetching');
         } else if (reason === UpdateReasons.DESTROY) {
+            if (this.boxCursorFrame !== null) {
+                window.cancelAnimationFrame(this.boxCursorFrame);
+                this.boxCursorFrame = null;
+            }
             this.canvas.dispatchEvent(
                 new CustomEvent('canvas.destroy', {
                     bubbles: false,
@@ -2707,7 +3287,7 @@ export class CanvasViewImpl implements CanvasView, Listener {
             window.document.removeEventListener('mouseup', this.onMouseUp);
             this.canvas.removeEventListener('mousedown', this.onCanvasMouseDown);
             this.canvas.removeEventListener('mousemove', this.onCanvasMouseMove);
-            this.canvas.removeEventListener('mouseup', this.onCanvasMouseUpHandler);
+            this.canvas.classList.remove('cvat_canvas_box_select_ready');
             window.removeEventListener('blur', this.onWindowBlur);
             this.cancelMultiSelect();
             this.interactionHandler.destroy();
@@ -3472,19 +4052,28 @@ export class CanvasViewImpl implements CanvasView, Listener {
         }
     }
 
-    private updateSelection(clientIDs: number[]): void {
+    private updateSelection(clientIDs: number[], elementClientIDs: number[] = []): void {
         // Remove old selection classes
         this.selectedClientIDs.forEach((id) => {
             const shapeView = window.document.getElementById(`cvat_canvas_shape_${id}`);
             if (shapeView) shapeView.classList.remove('cvat_canvas_shape_multiselected');
         });
+        this.selectedElementClientIDs.forEach((id) => {
+            const elementView = window.document.getElementById(`cvat_canvas_shape_${id}`);
+            if (elementView) elementView.classList.remove('cvat_canvas_keypoint_selected');
+        });
 
         this.selectedClientIDs = [...clientIDs];
+        this.selectedElementClientIDs = [...elementClientIDs];
 
         // Apply new selection classes
         this.selectedClientIDs.forEach((id) => {
             const shapeView = window.document.getElementById(`cvat_canvas_shape_${id}`);
             if (shapeView) shapeView.classList.add('cvat_canvas_shape_multiselected');
+        });
+        this.selectedElementClientIDs.forEach((id) => {
+            const elementView = window.document.getElementById(`cvat_canvas_shape_${id}`);
+            if (elementView) elementView.classList.add('cvat_canvas_keypoint_selected');
         });
     }
 
@@ -3957,9 +4546,20 @@ export class CanvasViewImpl implements CanvasView, Listener {
                     circle.addClass('cvat_canvas_hidden');
                 }
 
+                // keypoint circles are re-created on every redraw (after a save
+                // or a frame change), keep the INNO-156 selection highlight
+                if (this.selectedElementClientIDs.includes(element.clientID)) {
+                    circle.addClass('cvat_canvas_keypoint_selected');
+                }
+
                 const mouseover = (e: MouseEvent): void => {
+                    // keypoint circles stop mousemove, refresh the Shift cursor here
+                    this.lastPointer = { x: e.clientX, y: e.clientY };
+                    this.updateBoxSelectCursor(circle.node);
                     const locked = this.drawnStates[state.clientID].lock;
-                    if (!locked && !e.ctrlKey && this.mode === Mode.IDLE) {
+                    // INNO-157 R14: a box in progress does not activate what it passes over
+                    const boxInProgress = !!this.shiftGesture || !!this.multiSelectBox;
+                    if (!locked && !e.ctrlKey && this.mode === Mode.IDLE && !boxInProgress) {
                         circle.attr({
                             'stroke-width': consts.POINTS_SELECTED_STROKE_WIDTH / this.geometry.scale,
                         });
@@ -4003,6 +4603,10 @@ export class CanvasViewImpl implements CanvasView, Listener {
                             detail: {
                                 state: element,
                                 shiftKey: e.shiftKey,
+                                // INNO-156: cvat-ui maps the platform toggle key
+                                // (mac ⌘ / others Ctrl) to keypoint selection
+                                ctrlKey: e.ctrlKey,
+                                metaKey: e.metaKey,
                             },
                         }),
                     );
