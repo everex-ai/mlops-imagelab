@@ -56,6 +56,7 @@ interface StateToProps {
     activatedStateID: number | null;
     activatedElementID: number | null;
     selectedStatesID: number[];
+    selectedElementIDs: number[];
     minZLayer: number;
     maxZLayer: number;
     keyMap: KeyMap;
@@ -199,6 +200,7 @@ function mapStateToProps(state: CombinedState): StateToProps {
                 activatedStateID,
                 activatedElementID,
                 selectedStatesID,
+                selectedElementIDs,
                 zLayer: { min: minZLayer, max: maxZLayer },
             },
             job: { instance: jobInstance },
@@ -251,6 +253,7 @@ function mapStateToProps(state: CombinedState): StateToProps {
         activatedStateID,
         activatedElementID,
         selectedStatesID,
+        selectedElementIDs,
         minZLayer,
         maxZLayer,
         keyMap,
@@ -470,10 +473,23 @@ class ObjectsListContainer extends React.PureComponent<Props, State> {
             changeFrame,
             workspace,
             selectedStatesID,
+            selectedElementIDs,
         } = this.props;
         const {
             objectStates, sortedStatesID, statesOrdering, filteredStates,
         } = this.state;
+
+        // INNO-156: copy/delete act on whole objects — the selected ones plus the
+        // owners of the selected keypoints
+        const selectedObjectStates = (): ObjectState[] => objectStates.filter(
+            (s: ObjectState) => s.clientID !== null && (
+                selectedStatesID.includes(s.clientID) ||
+                (s.elements || []).some(
+                    (element: ObjectState) => selectedElementIDs.includes(element.clientID as number),
+                )
+            ),
+        );
+        const hasSelection = selectedStatesID.length > 0 || selectedElementIDs.length > 0;
 
         const preventDefault = (event: KeyboardEvent | undefined): void => {
             if (event) {
@@ -567,12 +583,10 @@ class ObjectsListContainer extends React.PureComponent<Props, State> {
             },
             DELETE_OBJECT_STANDARD_WORKSPACE: (event: KeyboardEvent | undefined) => {
                 preventDefault(event);
-                if (selectedStatesID.length > 0 && !readonly) {
-                    const allIDs = new Set<number>([...selectedStatesID]);
-                    if (activatedStateID !== null) allIDs.add(activatedStateID);
-                    const statesToRemove = objectStates.filter(
-                        (s: ObjectState) => s.clientID !== null && allIDs.has(s.clientID),
-                    );
+                if (hasSelection && !readonly) {
+                    // only the selection is deleted, never the hovered/active object
+                    // that is not part of it (user decision 2026-11-12)
+                    const statesToRemove = selectedObjectStates();
                     if (statesToRemove.length > 0) {
                         removeObjects(statesToRemove, event ? event.shiftKey : false);
                     }
@@ -618,12 +632,8 @@ class ObjectsListContainer extends React.PureComponent<Props, State> {
             },
             COPY_SHAPE: () => {
                 if (readonly) return;
-                if (selectedStatesID.length > 0) {
-                    const statesToCopy = objectStates.filter(
-                        (s: ObjectState) => (
-                            s.clientID !== null && selectedStatesID.includes(s.clientID)
-                        ),
-                    );
+                if (hasSelection) {
+                    const statesToCopy = selectedObjectStates();
                     if (statesToCopy.length > 0) {
                         copyShapes(statesToCopy);
                     }

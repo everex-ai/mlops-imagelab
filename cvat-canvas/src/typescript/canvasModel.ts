@@ -262,6 +262,7 @@ export interface CanvasModel {
     readonly configuration: Configuration;
     readonly selected: any;
     readonly selectedClientIDs: number[];
+    readonly selectedElementClientIDs: number[];
     geometry: Geometry;
     mode: Mode;
     exception: Error | null;
@@ -286,7 +287,7 @@ export interface CanvasModel {
     split(splitData: SplitData): void;
     merge(mergeData: MergeData): void;
     select(objectState: any): void;
-    setSelection(clientIDs: number[]): void;
+    setSelection(clientIDs: number[], elementClientIDs?: number[]): void;
     interact(interactionData: InteractionData): void;
 
     fitCanvas(width: number, height: number): void;
@@ -383,6 +384,8 @@ export class CanvasModelImpl extends MasterImpl implements CanvasModel {
         splitData: SplitData;
         selected: any;
         selectedClientIDs: number[];
+        // INNO-156: keypoints (skeleton element clientIDs) selected on their own
+        selectedElementClientIDs: number[];
         mode: Mode;
         exception: Error | null;
     };
@@ -453,6 +456,7 @@ export class CanvasModelImpl extends MasterImpl implements CanvasModel {
             zLayer: null,
             selected: null,
             selectedClientIDs: [],
+            selectedElementClientIDs: [],
             mode: Mode.IDLE,
             exception: null,
             ...defaultData,
@@ -945,8 +949,9 @@ export class CanvasModelImpl extends MasterImpl implements CanvasModel {
         this.data.selected = null;
     }
 
-    public setSelection(clientIDs: number[]): void {
+    public setSelection(clientIDs: number[], elementClientIDs: number[] = []): void {
         this.data.selectedClientIDs = [...clientIDs];
+        this.data.selectedElementClientIDs = [...elementClientIDs];
         this.notify(UpdateReasons.OBJECTS_SELECTED);
     }
 
@@ -1168,6 +1173,10 @@ export class CanvasModelImpl extends MasterImpl implements CanvasModel {
 
     public get selectedClientIDs(): number[] {
         return [...this.data.selectedClientIDs];
+    }
+
+    public get selectedElementClientIDs(): number[] {
+        return [...this.data.selectedElementClientIDs];
     }
 
     public set mode(value: Mode) {

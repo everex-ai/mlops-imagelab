@@ -19,10 +19,47 @@ export default class AnnotationHistory {
     private frozen: boolean;
     private _undo: ActionItem[];
     private _redo: ActionItem[];
+    // INNO-156: while a batch is open, do() buffers items here instead of pushing
+    // them, so several object saves (a group drag) become one undo/redo entry.
+    // Independent from `frozen`, which skeleton save() toggles internally.
+    private batchBuffer: ActionItem[] | null;
 
     constructor() {
         this.frozen = false;
+        this.batchBuffer = null;
         this.clear();
+    }
+
+    public startBatch(): void {
+        this.batchBuffer = [];
+    }
+
+    public commitBatch(): void {
+        const buffer = this.batchBuffer;
+        this.batchBuffer = null;
+        if (!buffer || !buffer.length) return;
+
+        if (buffer.length === 1) {
+            this.push(buffer[0]);
+            return;
+        }
+
+        const clientIDs = Array.from(new Set(buffer.flatMap((item) => item.clientIDs)));
+        this.push({
+            action: buffer[0].action,
+            frame: buffer[0].frame,
+            clientIDs,
+            undo: async () => {
+                for (let i = buffer.length - 1; i >= 0; i--) {
+                    await buffer[i].undo();
+                }
+            },
+            redo: async () => {
+                for (const item of buffer) {
+                    await item.redo();
+                }
+            },
+        });
     }
 
     public freeze(frozen: boolean): void {
@@ -46,6 +83,15 @@ export default class AnnotationHistory {
             frame,
         };
 
+        if (this.batchBuffer) {
+            this.batchBuffer.push(actionItem);
+            return;
+        }
+
+        this.push(actionItem);
+    }
+
+    private push(actionItem: ActionItem): void {
         this._undo = this._undo.slice(-MAX_HISTORY_LENGTH + 1);
         this._undo.push(actionItem);
         this._redo = [];

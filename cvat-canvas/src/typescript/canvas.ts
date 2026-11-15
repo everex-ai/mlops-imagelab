@@ -41,7 +41,7 @@ interface Canvas {
     split(splitData: SplitData): void;
     merge(mergeData: MergeData): void;
     select(objectState: any): void;
-    setSelection(clientIDs: number[]): void;
+    setSelection(clientIDs: number[], elementClientIDs?: number[]): void;
 
     fitCanvas(): void;
     bitmap(enable: boolean): void;
@@ -169,8 +169,8 @@ class CanvasImpl implements Canvas {
         this.model.select(objectState);
     }
 
-    public setSelection(clientIDs: number[]): void {
-        this.model.setSelection(clientIDs);
+    public setSelection(clientIDs: number[], elementClientIDs: number[] = []): void {
+        this.model.setSelection(clientIDs, elementClientIDs);
     }
 
     public mode(): Mode {
