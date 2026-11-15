@@ -813,6 +813,8 @@ export interface AnnotationState {
         activatedElementID: number | null;
         activatedAttributeID: number | null;
         selectedStatesID: number[];
+        // INNO-156: skeleton keypoints selected on their own (element clientIDs)
+        selectedElementIDs: number[];
         highlightedConflict: QualityConflict | null;
         collapsed: Record<number, boolean>;
         collapsedAll: boolean;

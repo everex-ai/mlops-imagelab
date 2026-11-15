@@ -22,6 +22,8 @@ const SNAP_TO_ANGLE_RESIZE_DEFAULT = 0.1;
 const SNAP_TO_ANGLE_RESIZE_SHIFT = 15;
 const MINIMUM_TEXT_FONT_SIZE = 8;
 const SKELETON_RECT_MARGIN = 20;
+// INNO-157: screen distance that turns a Shift press into a box instead of a click
+const BOX_SELECT_CLICK_TOLERANCE = 5;
 
 const DEFAULT_SHAPE_TEXT_SIZE = 12;
 const DEFAULT_SHAPE_TEXT_CONTENT = 'id,label,attributes,source,descriptions';
@@ -49,6 +51,7 @@ export default {
     MIN_REGION_SELECTION_SIZE,
     SNAP_TO_ANGLE_RESIZE_DEFAULT,
     SNAP_TO_ANGLE_RESIZE_SHIFT,
+    BOX_SELECT_CLICK_TOLERANCE,
     DEFAULT_SHAPE_TEXT_SIZE,
     DEFAULT_SHAPE_TEXT_CONTENT,
     DEFAULT_SHAPE_TEXT_POSITION,

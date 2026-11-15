@@ -138,6 +138,7 @@ export enum AnnotationActionTypes {
     REMOVE_OBJECTS_FAILED = 'REMOVE_OBJECTS_FAILED',
     SELECT_OBJECTS = 'SELECT_OBJECTS',
     TOGGLE_OBJECT_SELECTION = 'TOGGLE_OBJECT_SELECTION',
+    TOGGLE_ELEMENT_SELECTION = 'TOGGLE_ELEMENT_SELECTION',
     PROPAGATE_OBJECT_SUCCESS = 'PROPAGATE_OBJECT_SUCCESS',
     PROPAGATE_OBJECT_FAILED = 'PROPAGATE_OBJECT_FAILED',
     SWITCH_PROPAGATE_VISIBILITY = 'SWITCH_PROPAGATE_VISIBILITY',
@@ -606,10 +607,18 @@ export function removeObject(objectState: any, force: boolean): AnyAction {
     };
 }
 
-export function selectObjects(stateIDs: number[]): AnyAction {
+export function selectObjects(stateIDs: number[], elementIDs: number[] = []): AnyAction {
     return {
         type: AnnotationActionTypes.SELECT_OBJECTS,
-        payload: { stateIDs },
+        payload: { stateIDs, elementIDs },
+    };
+}
+
+// INNO-156: ⌘/Ctrl+click adds or removes a single skeleton keypoint
+export function toggleElementSelection(elementID: number): AnyAction {
+    return {
+        type: AnnotationActionTypes.TOGGLE_ELEMENT_SELECTION,
+        payload: { elementID },
     };
 }
 
@@ -1352,8 +1361,9 @@ export function updateAnnotationsAsync(statesToUpdate: any[]): ThunkAction {
 export function updateMultipleAnnotationsAsync(statesToUpdate: any[]): ThunkAction {
     return async (dispatch: ThunkDispatch): Promise<void> => {
         try {
-            const promises = statesToUpdate.map((objectState: any): Promise<any> => objectState.save());
-            await Promise.all(promises);
+            // INNO-156: one batch save = one undo/redo entry for the whole group move
+            const { jobInstance, frame } = receiveAnnotationsParameters();
+            await jobInstance.annotations.batchSave(statesToUpdate, frame);
 
             dispatch(fetchAnnotationsAsync());
         } catch (error) {

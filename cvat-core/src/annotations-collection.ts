@@ -1225,6 +1225,28 @@ export default class Collection {
         return true;
     }
 
+    // INNO-156: saves several objects (a group drag) through their regular
+    // save() — validation and the skeleton bbox soft-snap included — and
+    // records all resulting history items as ONE undo/redo entry.
+    public batchSave(objectStates: ObjectState[], frame: number): ObjectState[] {
+        const objects = objectStates.map((state) => {
+            const obj = this.objects[state.clientID as number];
+            if (!obj) {
+                throw new ArgumentError(`Object with clientID ${state.clientID} not found`);
+            }
+            return obj;
+        });
+
+        this.history.startBatch();
+        try {
+            return objects.map((obj, idx) => obj.save(frame, objectStates[idx]));
+        } finally {
+            // even if one save throws, the changes already applied stay
+            // undoable as one entry and the history never stays in batch mode
+            this.history.commitBatch();
+        }
+    }
+
     public batchUpdatePoints(updates: { clientID: number; points: number[]; frame: number }[]): void {
         const objects = updates.map((u) => {
             const obj = this.objects[u.clientID];

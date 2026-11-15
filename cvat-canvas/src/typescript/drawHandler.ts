@@ -26,6 +26,7 @@ import {
 } from './shared';
 import Crosshair from './crosshair';
 import consts from './consts';
+import { clampRect, boundsFromGeometry } from './imageBounds';
 import {
     DrawData, Geometry, RectDrawingMethod, Configuration, CuboidDrawingMethod,
 } from './canvasModel';
@@ -792,8 +793,85 @@ export class DrawHandlerImpl implements DrawHandler {
             maxY = Math.max(cy, maxY);
         });
 
+        // INNO-158: the drawn rect stops at the image border and the template
+        // keypoints are laid out inside the clamped rect, so the preview and
+        // the created skeleton match and no keypoint lands outside the image
+        const layoutSkeleton = (): void => {
+            const { pointsGroup } = this;
+            if (!pointsGroup) return;
+            const clamped = clampRect({
+                x: this.drawInstance.x(),
+                y: this.drawInstance.y(),
+                width: this.drawInstance.width(),
+                height: this.drawInstance.height(),
+            }, boundsFromGeometry(this.geometry));
+            this.drawInstance.move(clamped.x, clamped.y).size(clamped.width, clamped.height);
+
+            const {
+                x, y, width, height,
+            } = clamped;
+            pointsGroup.style({
+                transform: `translate(${x}px, ${y}px)`,
+            });
+
+            /* eslint-disable-next-line no-unsanitized/property */
+            pointsGroup.node.innerHTML = (this.drawData as DrawData).skeletonSVG as string;
+            Array.from(pointsGroup.node.children).forEach((child: Element) => {
+                const dataType = child.getAttribute('data-type');
+                if (child.tagName === 'circle' && dataType && dataType.includes('element')) {
+                    child.setAttribute('r', `${this.controlPointsSize / this.geometry.scale}`);
+                    let cx = +(child.getAttribute('cx') as string);
+                    let cy = +(child.getAttribute('cy') as string);
+                    const cxOffset = (cx - minX) / (maxX - minX);
+                    const cyOffset = (cy - minY) / (maxY - minY);
+                    cx = Number.isNaN(cxOffset) ? 0.5 * width : cxOffset * width;
+                    cy = Number.isNaN(cyOffset) ? 0.5 * height : cyOffset * height;
+                    child.setAttribute('cx', `${cx}`);
+                    child.setAttribute('cy', `${cy}`);
+                }
+            });
+
+            Array.from(pointsGroup.node.children).forEach((child: Element) => {
+                const dataType = child.getAttribute('data-type');
+                if (child.tagName === 'line' && dataType && dataType.includes('edge')) {
+                    child.setAttribute('stroke-width', 'inherit');
+                    child.setAttribute('stroke', 'inherit');
+                    const dataNodeFrom = child.getAttribute('data-node-from');
+                    const dataNodeTo = child.getAttribute('data-node-to');
+                    if (dataNodeFrom && dataNodeTo) {
+                        const from = pointsGroup.node.querySelector(`[data-node-id="${dataNodeFrom}"]`);
+                        const to = pointsGroup.node.querySelector(`[data-node-id="${dataNodeTo}"]`);
+
+                        if (from && to) {
+                            const x1 = from.getAttribute('cx');
+                            const y1 = from.getAttribute('cy');
+                            const x2 = to.getAttribute('cx');
+                            const y2 = to.getAttribute('cy');
+
+                            if (x1 && y1 && x2 && y2) {
+                                child.setAttribute('x1', x1);
+                                child.setAttribute('y1', y1);
+                                child.setAttribute('x2', x2);
+                                child.setAttribute('y2', y2);
+                            }
+                        }
+                    }
+                    let cx = +(child.getAttribute('cx') as string);
+                    let cy = +(child.getAttribute('cy') as string);
+                    const cxOffset = cx / 100;
+                    const cyOffset = cy / 100;
+                    cx = cxOffset * width;
+                    cy = cyOffset * height;
+                    child.setAttribute('cx', `${cx}`);
+                    child.setAttribute('cy', `${cy}`);
+                }
+            });
+        };
+
         this.drawInstance
             .on('drawstop', (e: Event): void => {
+                // re-apply the clamp/layout on the final geometry
+                layoutSkeleton();
                 const points = readPointsFromShape((e.target as any as { instance: SVG.Rect }).instance);
                 const [xtl, ytl, xbr, ybr] = this.getFinalRectCoordinates(points, true);
                 const elements: any[] = [];
@@ -829,66 +907,7 @@ export class DrawHandlerImpl implements DrawHandler {
                 }
             })
             .on('drawupdate', (): void => {
-                const x = this.drawInstance.x();
-                const y = this.drawInstance.y();
-                const width = this.drawInstance.width();
-                const height = this.drawInstance.height();
-                this.pointsGroup.style({
-                    transform: `translate(${x}px, ${y}px)`,
-                });
-
-                /* eslint-disable-next-line no-unsanitized/property */
-                this.pointsGroup.node.innerHTML = this.drawData.skeletonSVG;
-                Array.from(this.pointsGroup.node.children).forEach((child: Element) => {
-                    const dataType = child.getAttribute('data-type');
-                    if (child.tagName === 'circle' && dataType && dataType.includes('element')) {
-                        child.setAttribute('r', `${this.controlPointsSize / this.geometry.scale}`);
-                        let cx = +(child.getAttribute('cx') as string);
-                        let cy = +(child.getAttribute('cy') as string);
-                        const cxOffset = (cx - minX) / (maxX - minX);
-                        const cyOffset = (cy - minY) / (maxY - minY);
-                        cx = Number.isNaN(cxOffset) ? 0.5 * width : cxOffset * width;
-                        cy = Number.isNaN(cyOffset) ? 0.5 * height : cyOffset * height;
-                        child.setAttribute('cx', `${cx}`);
-                        child.setAttribute('cy', `${cy}`);
-                    }
-                });
-
-                Array.from(this.pointsGroup.node.children).forEach((child: Element) => {
-                    const dataType = child.getAttribute('data-type');
-                    if (child.tagName === 'line' && dataType && dataType.includes('edge')) {
-                        child.setAttribute('stroke-width', 'inherit');
-                        child.setAttribute('stroke', 'inherit');
-                        const dataNodeFrom = child.getAttribute('data-node-from');
-                        const dataNodeTo = child.getAttribute('data-node-to');
-                        if (dataNodeFrom && dataNodeTo) {
-                            const from = this.pointsGroup.node.querySelector(`[data-node-id="${dataNodeFrom}"]`);
-                            const to = this.pointsGroup.node.querySelector(`[data-node-id="${dataNodeTo}"]`);
-
-                            if (from && to) {
-                                const x1 = from.getAttribute('cx');
-                                const y1 = from.getAttribute('cy');
-                                const x2 = to.getAttribute('cx');
-                                const y2 = to.getAttribute('cy');
-
-                                if (x1 && y1 && x2 && y2) {
-                                    child.setAttribute('x1', x1);
-                                    child.setAttribute('y1', y1);
-                                    child.setAttribute('x2', x2);
-                                    child.setAttribute('y2', y2);
-                                }
-                            }
-                        }
-                        let cx = +(child.getAttribute('cx') as string);
-                        let cy = +(child.getAttribute('cy') as string);
-                        const cxOffset = cx / 100;
-                        const cyOffset = cy / 100;
-                        cx = cxOffset * width;
-                        cy = cyOffset * height;
-                        child.setAttribute('cx', `${cx}`);
-                        child.setAttribute('cy', `${cy}`);
-                    }
-                });
+                layoutSkeleton();
             })
             .addClass('cvat_canvas_shape_drawing')
             .attr({
